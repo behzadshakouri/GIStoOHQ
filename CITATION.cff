@@ -1,0 +1,6 @@
+cff-version: 1.2.0
+title: OpenHydroQual-GIS
+authors:
+  - family-names: Shakouri
+    given-names: Behzad
+license: MIT
