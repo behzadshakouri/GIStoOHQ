@@ -1,4 +1,4 @@
-# OpenHydroQual-GIS
+# GIStoOHQ
 
 Generate OpenHydroQual (.ohq) watershed models from GIS-derived hydrologic datasets.
 
