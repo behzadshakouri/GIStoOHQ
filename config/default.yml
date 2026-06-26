@@ -1,0 +1,26 @@
+project:
+  name: AZ12_100
+  unit_system: metric
+  output_name: null
+
+paths:
+  outputs_dir: outputs
+  topology: topology.gpkg
+  subbasins: subwatershed_params.gpkg
+  reaches: reaches.gpkg
+  junctions: junctions.gpkg
+
+ohq:
+  template: templates/watershed.ohq
+  include_comments: true
+  default_subbasin_type: cn_catchment
+  default_reach_type: trapezoidal_channel
+  default_junction_type: mixer
+  default_outlet_type: outlet
+
+defaults:
+  manning_n: 0.035
+  base_width_m: 3.0
+  side_slope_z: 2.0
+  loss_method: scs_cn
+  transform_method: scs_lag

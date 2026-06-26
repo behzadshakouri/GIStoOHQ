@@ -1,3 +1,8 @@
 # OHQ Mapping
 
-Describe mapping from subbasins, reaches and junctions to OHQ blocks.
+| GIS/topology element | Internal object | OHQ block |
+|---|---|---|
+| `Subbasin_i` | `Subbasin` | CN catchment/runoff block |
+| `Reach_i` | `Reach` | trapezoidal channel/routing block |
+| `Junction_i` | `Junction` | mixer/junction block |
+| `Outlet` | `Outlet` | outlet/sink block |

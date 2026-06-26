@@ -1,0 +1,46 @@
+{
+  "_comment": "Config for hms_dss_to_gnuplot.py. Reads exact C-part 'FLOW' (computed outflow hydrographs) from the HMS run DSS files and groups them. 'match' patterns test against the DSS B-part (location). The same location appears in both storms; the curve label includes the storm so they are distinguishable.",
+
+  "dss_files": [
+    "Run_6hr_100yr.dss",
+    "Run_24hr_100yr.dss"
+  ],
+
+  "record_type": "FLOW",
+  "time_axis": "hours_from_start",
+
+  "groups": [
+    {
+      "name": "outlet",
+      "title": "Watershed outlet hydrograph: 6hr vs 24hr",
+      "match": ["Outlet"]
+    },
+    {
+      "name": "all_elements",
+      "title": "All element outflow hydrographs (6hr + 24hr)",
+      "match": ["*"]
+    },
+    {
+      "name": "subbasins",
+      "title": "Subbasin outflow hydrographs",
+      "match": ["Subbasin_*"]
+    },
+    {
+      "name": "junctions",
+      "title": "Junction hydrographs",
+      "match": ["Junction_*"]
+    },
+    {
+      "name": "reaches",
+      "title": "Reach hydrographs",
+      "match": ["Reach_*"]
+    },
+    {
+      "name": "outlet",
+      "title": "Outlet / sink hydrograph",
+      "match": ["Sink*", "Outlet*", "*Sink*"]
+    }
+  ],
+
+  "_groups_note": "Each group -> one .gp.dat + one PNG. Find the true outlet element name from the console location list and set the 'outlet' group accordingly (e.g. 'Sink_1')."
+}
