@@ -1,6 +1,6 @@
-# OpenHydroQual-GIS
+# GIStoOHQ
 
-OpenHydroQual-GIS converts GIS-derived watershed products into OpenHydroQual (`.ohq`) model files.
+GIStoOHQ converts GIS-derived watershed products into OpenHydroQual (`.ohq`) model files.
 
 ```text
 GIS preprocessing
