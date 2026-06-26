@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openhydroqual-gis"
+version = "0.1.0"
+description = "Generate OpenHydroQual OHQ files from GIS-derived watershed products."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+  {name = "Behzad Shakouri"}
+]
+dependencies = [
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+gis = [
+  "geopandas>=0.14",
+  "pandas>=2.0",
+  "fiona>=1.9",
+  "shapely>=2.0",
+]
+dev = [
+  "pytest>=7",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+ohqbuild = "ohqbuilder.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ohqbuilder*"]
+
+[tool.ruff]
+line-length = 100

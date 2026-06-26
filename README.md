@@ -1,12 +1,43 @@
-# GIStoOHQ
+# OpenHydroQual-GIS
 
-Generate OpenHydroQual (.ohq) watershed models from GIS-derived hydrologic datasets.
+OpenHydroQual-GIS converts GIS-derived watershed products into OpenHydroQual (`.ohq`) model files.
 
-## Workflow
-
+```text
 GIS preprocessing
-→ Hydrologic attributes
-→ Topology
-→ OpenHydroQual (.ohq)
+    ↓
+hydrologic/geometric attributes
+    ↓
+topology.gpkg as the single source of truth
+    ↓
+internal watershed model
+    ↓
+OpenHydroQual writer
+    ↓
+<SITE>.ohq
+```
 
-The topology table is the single source of truth for connectivity.
+## Main inputs
+
+```text
+<SITE>/outputs/topology.gpkg
+<SITE>/outputs/subwatershed_params.gpkg
+<SITE>/outputs/reaches.gpkg
+<SITE>/outputs/junctions.gpkg
+```
+
+## Quick start
+
+```bash
+pip install -e .
+ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+The output is written to:
+
+```text
+/path/to/NHA/WS3_GIS/AZ12-100/outputs/AZ12_100.ohq
+```
+
+## Design rule
+
+`topology.gpkg` is the authoritative source of connectivity. The OHQ writer does not infer or rewrite topology.
