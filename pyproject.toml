@@ -36,3 +36,8 @@ include = ["ohqbuilder*"]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["scripts/legacy_gis"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
