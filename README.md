@@ -32,8 +32,8 @@ pip install -e .
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
 ```
 
-Need to create those GIS input files first? See
-[`docs/input_generation.md`](docs/input_generation.md).
+Need to create those GIS input files first? Run `ohqbuild prepare-inputs` from a
+QGIS Python environment, or see [`docs/input_generation.md`](docs/input_generation.md).
 
 The output is written to:
 

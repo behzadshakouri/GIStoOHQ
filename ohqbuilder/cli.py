@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 
@@ -23,6 +24,15 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--root", required=True)
     v.add_argument("--site", required=True)
     v.add_argument("--config", default=None)
+
+    prep = sub.add_parser(
+        "prepare-inputs",
+        help="Run retained QGIS preprocessing scripts to create GIStoOHQ input files.",
+    )
+    prep.add_argument("--root", required=True)
+    prep.add_argument("--site", required=True)
+    prep.add_argument("--script-dir", default=None)
+    prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
     return p
 
 
@@ -38,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
         build_ohq_project(settings, dry_run=True)
+        return 0
+    if args.command == "prepare-inputs":
+        try:
+            run_legacy_input_workflow(args.root, args.site, args.script_dir, args.phase)
+        except LegacyInputWorkflowError as exc:
+            print(f"prepare-inputs failed: {exc}")
+            return 2
         return 0
     return 1
 

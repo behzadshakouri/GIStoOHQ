@@ -45,14 +45,15 @@ The legacy phase-1 runner expects:
 
 ### Phase 1 — create reach and junction network
 
-Open QGIS, then run the phase-1 orchestrator in the QGIS Python Console:
+Run the phase-1 orchestrator from a QGIS Python environment:
 
-```python
-ROOT = "/path/to/NHA"
-SITE_DIR = "WS3_GIS/AZ12-100"
-SCRIPT_DIR = "/path/to/GIStoOHQ/scripts/legacy_gis"
-exec(open(SCRIPT_DIR + "/run_phase1.py").read())
+```bash
+ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --phase phase1
 ```
+
+This command executes `scripts/legacy_gis/run_phase1.py` with `ROOT`, `SITE_DIR`,
+and `SCRIPT_DIR` set for the legacy scripts. If your scripts are outside the
+installed repo, pass `--script-dir /path/to/scripts/legacy_gis`.
 
 Phase 1 runs the reach/junction preprocessing scripts in order:
 
@@ -81,14 +82,17 @@ interior pour points manually and save them as:
 
 ### Phase 2 — create subbasin parameters and topology
 
-After manually placing `pour_points.shp`, run the phase-2 orchestrator in the
-QGIS Python Console:
+After manually placing `pour_points.shp`, run the phase-2 orchestrator from a
+QGIS Python environment:
 
-```python
-ROOT = "/path/to/NHA"
-SITE_DIR = "WS3_GIS/AZ12-100"
-SCRIPT_DIR = "/path/to/GIStoOHQ/scripts/legacy_gis"
-exec(open(SCRIPT_DIR + "/run_phase2.py").read())
+```bash
+ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --phase phase2
+```
+
+To run both phases in sequence, use the default `all` phase:
+
+```bash
+ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
 ```
 
 Phase 2 consumes the phase-1 reach/junction network and creates the subbasin
@@ -181,7 +185,8 @@ ohqbuild validate --root /path/to/NHA --site WS3_GIS/AZ12-100
 
 ## Current limitation
 
-The QGIS scripts are legacy preprocessing tools. They are documented here as the
-current way to produce GIStoOHQ inputs, but they are not yet exposed as a
-cross-platform command-line pipeline. The stable package boundary is the four
-GeoPackage inputs listed above.
+The `prepare-inputs` command is a thin wrapper around the retained QGIS scripts,
+so it must run in a QGIS Python environment with QGIS processing dependencies
+available. It intentionally keeps the original script logic as the source of
+truth so the generated files match the legacy workflow. The stable package
+boundary is still the four GeoPackage inputs listed above.
