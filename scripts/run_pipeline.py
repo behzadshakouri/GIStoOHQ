@@ -1,5 +1,5 @@
 def main():
-    print("OpenHydroQual-GIS pipeline placeholder")
+    print("GIStoOHQ pipeline placeholder")
 
 if __name__ == "__main__":
     main()
