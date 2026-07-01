@@ -23,3 +23,17 @@ def test_prepare_inputs_cli_returns_error_when_legacy_workflow_fails(monkeypatch
     monkeypatch.setattr("ohqbuilder.cli.run_legacy_input_workflow", fail)
 
     assert main(["prepare-inputs", "--root", "/tmp/root", "--site", "SITE_A"]) == 2
+
+
+def test_check_inputs_parser_supports_no_schema():
+    args = build_parser().parse_args([
+        "check-inputs",
+        "--root",
+        "/tmp/root",
+        "--site",
+        "SITE_A",
+        "--no-schema",
+    ])
+
+    assert args.command == "check-inputs"
+    assert args.no_schema is True

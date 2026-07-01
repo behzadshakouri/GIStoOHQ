@@ -119,6 +119,19 @@ The final files needed by GIStoOHQ should now exist:
 <ROOT>/<SITE>/outputs/junctions.gpkg
 ```
 
+Before building, verify the files and expected fields:
+
+```bash
+ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+If you only want to check that the files exist, without opening GeoPackage
+layers, use:
+
+```bash
+ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --no-schema
+```
+
 ## Required fields consumed by GIStoOHQ
 
 The package readers use a small subset of fields from those GeoPackages.
@@ -171,7 +184,7 @@ Additional columns are preserved as attributes where applicable.
 
 ## Run GIStoOHQ after generating inputs
 
-Once the four required inputs exist, build the OHQ file from a shell:
+Once `check-inputs` reports success, build the OHQ file from a shell:
 
 ```bash
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
