@@ -34,6 +34,9 @@ class InputValidationResult:
     def ok(self) -> bool:
         return not self.errors
 
+    def to_dict(self) -> dict[str, object]:
+        return {"ok": self.ok, "errors": self.errors, "warnings": self.warnings}
+
     def raise_for_errors(self) -> None:
         if self.errors:
             raise ValueError("Input validation failed:\n" + "\n".join(self.errors))

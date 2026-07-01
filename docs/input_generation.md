@@ -38,6 +38,12 @@ check instead of showing warnings:
 ohqbuild doctor --strict-gis
 ```
 
+For CI logs or automation, emit machine-readable diagnostics:
+
+```bash
+ohqbuild doctor --json
+```
+
 ### Phase 0 — prepare site inputs
 
 Before running the QGIS workflow, prepare a site directory like:
@@ -146,6 +152,12 @@ layers, use:
 
 ```bash
 ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --no-schema
+```
+
+For automation, emit the validation result as JSON:
+
+```bash
+ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --json
 ```
 
 ## Required fields consumed by GIStoOHQ

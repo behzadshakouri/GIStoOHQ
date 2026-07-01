@@ -182,3 +182,38 @@ def test_doctor_cli_returns_report_status(monkeypatch):
     status = main(["doctor", "--strict-gis"])
 
     assert status == 2
+
+
+def test_doctor_cli_can_emit_json(monkeypatch, capsys):
+    class Report:
+        ok = True
+
+        def to_dict(self):
+            return {"ok": True, "checks": []}
+
+        def lines(self):
+            return ["OK: python - 3.14"]
+
+    monkeypatch.setattr("ohqbuilder.cli.run_doctor", lambda script_dir, strict_gis: Report())
+
+    status = main(["doctor", "--json"])
+
+    assert status == 0
+    assert '"ok": true' in capsys.readouterr().out
+
+
+def test_check_inputs_cli_can_emit_json(monkeypatch, capsys):
+    class OkValidator:
+        def validate(self, settings, check_schema=True):
+            return type(
+                "Result",
+                (),
+                {"ok": True, "to_dict": lambda self: {"ok": True, "errors": [], "warnings": []}},
+            )()
+
+    monkeypatch.setattr("ohqbuilder.cli.InputValidator", OkValidator)
+
+    status = main(["check-inputs", "--root", "/tmp/root", "--site", "SITE_A", "--json"])
+
+    assert status == 0
+    assert '"errors": []' in capsys.readouterr().out

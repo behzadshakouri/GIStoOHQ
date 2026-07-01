@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .doctor import run_doctor
@@ -45,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--site", required=True)
     chk.add_argument("--config", default=None)
     chk.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+    chk.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
 
     run = sub.add_parser(
         "run",
@@ -63,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
     doctor.add_argument("--strict-gis", action="store_true")
+    doctor.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
     return p
 
 
@@ -73,13 +76,15 @@ def _print_input_result(result) -> None:
         print("ERROR:", error)
 
 
-def _validate_inputs(settings: BuilderSettings, no_schema: bool) -> int:
+def _validate_inputs(settings: BuilderSettings, no_schema: bool, json_output: bool = False) -> int:
     result = InputValidator().validate(settings, check_schema=not no_schema)
-    _print_input_result(result)
-    if not result.ok:
-        return 2
-    print("Input validation OK")
-    return 0
+    if json_output:
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        _print_input_result(result)
+        if result.ok:
+            print("Input validation OK")
+    return 0 if result.ok else 2
 
 
 def _maybe_validate_inputs(settings: BuilderSettings, skip_input_check: bool, no_schema: bool) -> int:
@@ -116,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check-inputs":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
-        return _validate_inputs(settings, args.no_schema)
+        return _validate_inputs(settings, args.no_schema, args.json)
     if args.command == "run":
         if not args.skip_prepare:
             try:
@@ -135,8 +140,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "doctor":
         report = run_doctor(args.script_dir, args.strict_gis)
-        for line in report.lines():
-            print(line)
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        else:
+            for line in report.lines():
+                print(line)
         return 0 if report.ok else 2
     return 1
 

@@ -15,6 +15,14 @@ class DoctorCheck:
     detail: str
     required: bool = False
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "ok": self.ok,
+            "detail": self.detail,
+            "required": self.required,
+        }
+
 
 @dataclass
 class DoctorReport:
@@ -30,6 +38,9 @@ class DoctorReport:
             status = "OK" if check.ok else ("ERROR" if check.required else "WARN")
             out.append(f"{status}: {check.name} - {check.detail}")
         return out
+
+    def to_dict(self) -> dict[str, object]:
+        return {"ok": self.ok, "checks": [check.to_dict() for check in self.checks]}
 
 
 def _module_available(name: str) -> bool:

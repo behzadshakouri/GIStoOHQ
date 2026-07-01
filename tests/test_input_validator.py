@@ -73,3 +73,14 @@ def test_input_validator_accepts_required_schema_fields(tmp_path):
 
     assert result.ok
     assert result.errors == []
+
+
+def test_input_validation_result_to_dict():
+    settings = _settings(__import__("pathlib").Path("/tmp"))
+    result = InputValidator().validate(settings, check_schema=False)
+
+    data = result.to_dict()
+
+    assert data["ok"] is False
+    assert data["errors"]
+    assert data["warnings"] == []

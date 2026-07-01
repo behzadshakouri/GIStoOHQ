@@ -41,3 +41,14 @@ def test_doctor_strict_gis_makes_gis_checks_required(tmp_path, monkeypatch):
     assert by_name["geopandas"].required
     assert by_name["qgis"].required
     assert not report.ok
+
+
+def test_doctor_report_to_dict():
+    report = DoctorReport([DoctorCheck("python", True, "3.14", required=True)])
+
+    assert report.to_dict() == {
+        "ok": True,
+        "checks": [
+            {"name": "python", "ok": True, "detail": "3.14", "required": True},
+        ],
+    }
