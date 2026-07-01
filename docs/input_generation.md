@@ -201,16 +201,23 @@ ohqbuild run --root /path/to/NHA --site WS3_GIS/AZ12-100 --skip-prepare
 ## Run GIStoOHQ after generating inputs
 
 If you prefer separate steps, once `check-inputs` reports success, build the OHQ
-file from a shell:
+file from a shell. `build` also performs the same input check by default before
+reading the GeoPackages:
 
 ```bash
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
 ```
 
-Validate without writing an OHQ file:
+Validate without writing an OHQ file; this also checks inputs first:
 
 ```bash
 ohqbuild validate --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+For advanced debugging only, skip the pre-build input check:
+
+```bash
+ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100 --skip-input-check
 ```
 
 ## Current limitation

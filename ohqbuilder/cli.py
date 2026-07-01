@@ -20,11 +20,15 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--project-name", default=None)
     b.add_argument("--out", default=None)
     b.add_argument("--dry-run", action="store_true")
+    b.add_argument("--skip-input-check", action="store_true")
+    b.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
 
     v = sub.add_parser("validate", help="Validate inputs and topology only.")
     v.add_argument("--root", required=True)
     v.add_argument("--site", required=True)
     v.add_argument("--config", default=None)
+    v.add_argument("--skip-input-check", action="store_true")
+    v.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
 
     prep = sub.add_parser(
         "prepare-inputs",
@@ -73,10 +77,19 @@ def _validate_inputs(settings: BuilderSettings, no_schema: bool) -> int:
     return 0
 
 
+def _maybe_validate_inputs(settings: BuilderSettings, skip_input_check: bool, no_schema: bool) -> int:
+    if skip_input_check:
+        return 0
+    return _validate_inputs(settings, no_schema)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "build":
         settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
+        input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
+        if input_status != 0:
+            return input_status
         out = Path(args.out).expanduser().resolve() if args.out else None
         result = build_ohq_project(settings, output_path=out, dry_run=args.dry_run)
         if result:
@@ -84,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "validate":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
+        input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
+        if input_status != 0:
+            return input_status
         build_ohq_project(settings, dry_run=True)
         return 0
     if args.command == "prepare-inputs":

@@ -105,3 +105,66 @@ def test_run_command_stops_when_prepare_fails(monkeypatch):
     status = main(["run", "--root", "/tmp/root", "--site", "SITE_A"])
 
     assert status == 2
+
+
+def test_build_stops_when_input_check_fails(monkeypatch):
+    calls = []
+
+    class BadValidator:
+        def validate(self, settings, check_schema=True):
+            calls.append(("validate", check_schema))
+            return type("Result", (), {"warnings": [], "errors": ["missing"], "ok": False})()
+
+    def fake_build(*args, **kwargs):
+        calls.append(("build",))
+        return "out.ohq"
+
+    monkeypatch.setattr("ohqbuilder.cli.InputValidator", BadValidator)
+    monkeypatch.setattr("ohqbuilder.cli.build_ohq_project", fake_build)
+
+    status = main(["build", "--root", "/tmp/root", "--site", "SITE_A"])
+
+    assert status == 2
+    assert calls == [("validate", True)]
+
+
+def test_build_can_skip_input_check(monkeypatch):
+    calls = []
+
+    class BadValidator:
+        def validate(self, settings, check_schema=True):
+            calls.append(("validate",))
+            return type("Result", (), {"warnings": [], "errors": ["missing"], "ok": False})()
+
+    def fake_build(settings, output_path=None, dry_run=False):
+        calls.append(("build", settings.project_name, dry_run))
+        return "out.ohq"
+
+    monkeypatch.setattr("ohqbuilder.cli.InputValidator", BadValidator)
+    monkeypatch.setattr("ohqbuilder.cli.build_ohq_project", fake_build)
+
+    status = main(["build", "--root", "/tmp/root", "--site", "SITE_A", "--skip-input-check"])
+
+    assert status == 0
+    assert calls == [("build", "SITE_A", False)]
+
+
+def test_validate_supports_no_schema_input_check(monkeypatch):
+    calls = []
+
+    class OkValidator:
+        def validate(self, settings, check_schema=True):
+            calls.append(("validate_inputs", check_schema))
+            return type("Result", (), {"warnings": [], "errors": [], "ok": True})()
+
+    def fake_build(settings, output_path=None, dry_run=False):
+        calls.append(("build", dry_run))
+        return None
+
+    monkeypatch.setattr("ohqbuilder.cli.InputValidator", OkValidator)
+    monkeypatch.setattr("ohqbuilder.cli.build_ohq_project", fake_build)
+
+    status = main(["validate", "--root", "/tmp/root", "--site", "SITE_A", "--no-schema"])
+
+    assert status == 0
+    assert calls == [("validate_inputs", False), ("build", True)]
