@@ -29,6 +29,7 @@ OpenHydroQual writer
 
 ```bash
 pip install -e .
+ohqbuild doctor
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
 ```
 

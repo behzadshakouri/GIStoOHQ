@@ -22,6 +22,22 @@ The retained scripts under `scripts/legacy_gis/` are QGIS Python Console scripts
 They are kept for reproducibility and for producing the input files that the
 packaged GIStoOHQ builder consumes.
 
+### Phase 0 — check the environment
+
+Before preparing inputs, check the installed runtime, GIS dependencies, and legacy
+script availability:
+
+```bash
+ohqbuild doctor
+```
+
+Use `--strict-gis` when you want missing `geopandas` or QGIS bindings to fail the
+check instead of showing warnings:
+
+```bash
+ohqbuild doctor --strict-gis
+```
+
 ### Phase 0 — prepare site inputs
 
 Before running the QGIS workflow, prepare a site directory like:

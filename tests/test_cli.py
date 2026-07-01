@@ -168,3 +168,17 @@ def test_validate_supports_no_schema_input_check(monkeypatch):
 
     assert status == 0
     assert calls == [("validate_inputs", False), ("build", True)]
+
+
+def test_doctor_cli_returns_report_status(monkeypatch):
+    class Report:
+        ok = False
+
+        def lines(self):
+            return ["ERROR: qgis - missing"]
+
+    monkeypatch.setattr("ohqbuilder.cli.run_doctor", lambda script_dir, strict_gis: Report())
+
+    status = main(["doctor", "--strict-gis"])
+
+    assert status == 2

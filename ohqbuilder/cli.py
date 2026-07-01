@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .doctor import run_doctor
 from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
     run.add_argument("--skip-prepare", action="store_true")
     run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+
+    doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
+    doctor.add_argument("--script-dir", default=None)
+    doctor.add_argument("--strict-gis", action="store_true")
     return p
 
 
@@ -128,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "doctor":
+        report = run_doctor(args.script_dir, args.strict_gis)
+        for line in report.lines():
+            print(line)
+        return 0 if report.ok else 2
     return 1
 
 
