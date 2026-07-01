@@ -182,9 +182,26 @@ Additional columns are preserved as attributes where applicable.
 | `junction_id` | Junction ID. |
 | `x`, `y` | Junction coordinates. |
 
+## Run the full workflow
+
+From a QGIS Python environment, run preparation, input validation, and OHQ
+generation as one command:
+
+```bash
+ohqbuild run --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+If inputs already exist and you only want to validate and build, skip the QGIS
+preparation step:
+
+```bash
+ohqbuild run --root /path/to/NHA --site WS3_GIS/AZ12-100 --skip-prepare
+```
+
 ## Run GIStoOHQ after generating inputs
 
-Once `check-inputs` reports success, build the OHQ file from a shell:
+If you prefer separate steps, once `check-inputs` reports success, build the OHQ
+file from a shell:
 
 ```bash
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100

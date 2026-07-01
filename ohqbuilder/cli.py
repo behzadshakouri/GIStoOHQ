@@ -40,7 +40,37 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--site", required=True)
     chk.add_argument("--config", default=None)
     chk.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+
+    run = sub.add_parser(
+        "run",
+        help="Prepare GIS inputs, validate them, and build the OHQ file in one workflow.",
+    )
+    run.add_argument("--root", required=True)
+    run.add_argument("--site", required=True)
+    run.add_argument("--config", default=None)
+    run.add_argument("--project-name", default=None)
+    run.add_argument("--out", default=None)
+    run.add_argument("--script-dir", default=None)
+    run.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+    run.add_argument("--skip-prepare", action="store_true")
+    run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
     return p
+
+
+def _print_input_result(result) -> None:
+    for warning in result.warnings:
+        print("WARNING:", warning)
+    for error in result.errors:
+        print("ERROR:", error)
+
+
+def _validate_inputs(settings: BuilderSettings, no_schema: bool) -> int:
+    result = InputValidator().validate(settings, check_schema=not no_schema)
+    _print_input_result(result)
+    if not result.ok:
+        return 2
+    print("Input validation OK")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,14 +95,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check-inputs":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
-        result = InputValidator().validate(settings, check_schema=not args.no_schema)
-        for warning in result.warnings:
-            print("WARNING:", warning)
-        if not result.ok:
-            for error in result.errors:
-                print("ERROR:", error)
-            return 2
-        print("Input validation OK")
+        return _validate_inputs(settings, args.no_schema)
+    if args.command == "run":
+        if not args.skip_prepare:
+            try:
+                run_legacy_input_workflow(args.root, args.site, args.script_dir, args.phase)
+            except LegacyInputWorkflowError as exc:
+                print(f"prepare-inputs failed: {exc}")
+                return 2
+        settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
+        input_status = _validate_inputs(settings, args.no_schema)
+        if input_status != 0:
+            return input_status
+        out = Path(args.out).expanduser().resolve() if args.out else None
+        result = build_ohq_project(settings, output_path=out)
+        if result:
+            print(result)
         return 0
     return 1
 
