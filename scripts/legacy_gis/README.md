@@ -10,3 +10,6 @@ The new OHQ package consumes the outputs they produce:
 - `junctions.gpkg`
 
 The central rule remains: `topology.gpkg` is the single source of truth for connectivity.
+
+See `docs/input_generation.md` for the phase-1/phase-2 QGIS workflow that creates
+these files.
