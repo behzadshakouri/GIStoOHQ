@@ -216,13 +216,13 @@ For a config-file driven application entry point, copy `config.example.json` to
 `config.json`, edit `root` and `site`, then run:
 
 ```bash
-python run.py config.json
+python3 run.py config.json
 ```
 
 Use `--dry-run` to print the planned commands without executing them:
 
 ```bash
-python run.py config.json --dry-run
+python3 run.py config.json --dry-run
 ```
 
 From a QGIS Python environment, you can also run preparation, input validation,

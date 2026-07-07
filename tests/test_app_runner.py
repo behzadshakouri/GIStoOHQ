@@ -85,3 +85,17 @@ def test_run_pipeline_dry_run_does_not_call_subprocess(tmp_path, monkeypatch):
     assert result.returncode == 0
     assert result.completed == ["doctor", "check-inputs", "build"]
     assert result.skipped == ["prepare-inputs"]
+
+
+def test_run_py_exits_before_import_on_old_python(monkeypatch):
+    import runpy
+    import sys
+
+    monkeypatch.setattr(sys, "version_info", (3, 8))
+
+    try:
+        runpy.run_path("run.py", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected SystemExit")
