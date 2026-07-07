@@ -212,8 +212,21 @@ Additional columns are preserved as attributes where applicable.
 
 ## Run the full workflow
 
-From a QGIS Python environment, run preparation, input validation, and OHQ
-generation as one command:
+For a config-file driven application entry point, copy `config.example.json` to
+`config.json`, edit `root` and `site`, then run:
+
+```bash
+python run.py config.json
+```
+
+Use `--dry-run` to print the planned commands without executing them:
+
+```bash
+python run.py config.json --dry-run
+```
+
+From a QGIS Python environment, you can also run preparation, input validation,
+and OHQ generation directly through the CLI:
 
 ```bash
 ohqbuild run --root /path/to/NHA --site WS3_GIS/AZ12-100

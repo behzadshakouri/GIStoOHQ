@@ -32,6 +32,9 @@ pip install -e .
 ohqbuild doctor
 ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
+
+# Or copy config.example.json to config.json and run the whole app pipeline:
+python run.py config.json
 ```
 
 Need to create those GIS input files first? Run the full workflow with
