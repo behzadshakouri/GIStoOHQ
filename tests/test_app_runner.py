@@ -87,11 +87,40 @@ def test_run_pipeline_dry_run_does_not_call_subprocess(tmp_path, monkeypatch):
     assert result.skipped == ["prepare-inputs"]
 
 
-def test_run_py_exits_before_import_on_old_python(monkeypatch):
+def test_run_py_reexecs_python3_on_old_python(monkeypatch):
+    import os
     import runpy
+    import shutil
+    import sys
+
+    calls = []
+
+    def fake_execv(executable, argv):
+        calls.append((executable, argv))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(sys, "version_info", (3, 8))
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/python3.11" if name == "python3.11" else None)
+    monkeypatch.setattr(os, "execv", fake_execv)
+
+    try:
+        runpy.run_path("run.py", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("expected SystemExit")
+
+    assert calls
+    assert calls[0][0] == "/usr/bin/python3.11"
+
+
+def test_run_py_exits_before_import_when_no_python3_found(monkeypatch):
+    import runpy
+    import shutil
     import sys
 
     monkeypatch.setattr(sys, "version_info", (3, 8))
+    monkeypatch.setattr(shutil, "which", lambda name: None)
 
     try:
         runpy.run_path("run.py", run_name="__main__")
