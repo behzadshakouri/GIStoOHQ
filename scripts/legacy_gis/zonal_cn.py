@@ -26,39 +26,52 @@
 #
 # Run from: QGIS -> Plugins -> Python Console.
 # =============================================================================
+
 import os
+import gc
 import processing
+
 from qgis.core import (
-    QgsProject, QgsVectorLayer, QgsRasterLayer, QgsVectorFileWriter,
+    QgsProject,
+    QgsVectorLayer,
+    QgsVectorFileWriter,
     QgsCoordinateTransformContext,
+    QgsField,
+    QgsFields,
+    QgsFeature,
 )
+
+from qgis.PyQt.QtCore import QVariant
+
 
 # --- settings (set ROOT + SITE_DIR ONCE) -----------------------------------
 try:
     ROOT
 except NameError:
     ROOT = "C:/Users/smnfa/Dropbox/NHA/"
+
 try:
     SITE_DIR
 except NameError:
     SITE_DIR = "WS3_GIS/AZ12-100"
 
-SUBWS_NAME  = "subwatersheds.gpkg"          # delineation output (read-only here)
+SUBWS_NAME = "subwatersheds.gpkg"
 SUBWS_LAYER = "subwatersheds"
-CN_REL      = "clipped/cn.tif"               # CN raster (within outputs/)
-OUT_NAME    = "subwatershed_params.gpkg"     # the growing parameters file
-OUT_LAYER   = "subwatershed_params"
+CN_REL = "clipped/cn.tif"
+OUT_NAME = "subwatershed_params.gpkg"
+OUT_LAYER = "subwatershed_params"
 
-CN_FIELD    = "CN"                           # field to write (1 decimal)
+CN_FIELD = "CN"
 CN_DECIMALS = 1
 ADD_TO_PROJECT = True
 # ---------------------------------------------------------------------------
 
+
 site_path = os.path.join(ROOT, SITE_DIR)
-OUT_DIR   = os.path.join(site_path, "outputs")
-subws     = os.path.join(OUT_DIR, SUBWS_NAME)
-cn_tif    = os.path.join(OUT_DIR, CN_REL)
-out_path  = os.path.join(OUT_DIR, OUT_NAME)
+OUT_DIR = os.path.join(site_path, "outputs")
+subws = os.path.join(OUT_DIR, SUBWS_NAME)
+cn_tif = os.path.join(OUT_DIR, CN_REL)
+out_path = os.path.join(OUT_DIR, OUT_NAME)
 
 print("Site  :", site_path)
 print("Zones :", subws, "(layer %s)" % SUBWS_LAYER)
@@ -69,83 +82,221 @@ for p in (subws, cn_tif):
     if not os.path.isfile(p):
         raise Exception("not found: " + p)
 
-# --- load subwatersheds ----------------------------------------------------
+
+# --- helpers ----------------------------------------------------------------
+def is_null_value(v):
+    if v is None:
+        return True
+
+    try:
+        if v.isNull():
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def as_float(v):
+    if is_null_value(v):
+        return None
+
+    try:
+        return float(v)
+    except Exception:
+        pass
+
+    try:
+        return float(v.value())
+    except Exception:
+        return None
+
+
+def as_int(v, default=None):
+    if is_null_value(v):
+        return default
+
+    try:
+        return int(v)
+    except Exception:
+        pass
+
+    try:
+        return int(v.value())
+    except Exception:
+        return default
+
+
+def remove_existing_gpkg(path):
+    project = QgsProject.instance()
+
+    for lyr in list(project.mapLayers().values()):
+        try:
+            if path.lower() in lyr.source().lower():
+                project.removeMapLayer(lyr.id())
+        except Exception:
+            pass
+
+    gc.collect()
+
+    if not os.path.exists(path):
+        return
+
+    deleted = False
+
+    try:
+        ok, _ = QgsVectorFileWriter.deleteSilently(path)
+        deleted = ok
+    except Exception:
+        deleted = False
+
+    if deleted:
+        return
+
+    for ext in ("", "-wal", "-shm", "-journal"):
+        p = path + ext
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except PermissionError:
+                raise Exception(
+                    "Cannot overwrite %s -- it is still open. Remove the "
+                    "layer from QGIS panel or restart QGIS and re-run." % p
+                )
+
+
+# --- load subwatersheds -----------------------------------------------------
 zones = QgsVectorLayer(subws + "|layername=" + SUBWS_LAYER, "zones_src", "ogr")
+
 if not zones.isValid():
     zones = QgsVectorLayer(subws, "zones_src", "ogr")
+
 if not zones.isValid():
     raise Exception("could not open subwatersheds: " + subws)
+
 print("Subwatersheds:", zones.featureCount())
 
-# --- zonal mean of CN over each polygon ------------------------------------
-# native:zonalstatisticsfb returns a NEW layer (does not edit the source),
-# with the statistic in a prefixed column. We request mean only.
+
+# --- zonal mean of CN over each polygon -------------------------------------
 PREFIX = "cn_"
-result = processing.run("native:zonalstatisticsfb", {
-    "INPUT": zones,
-    "INPUT_RASTER": cn_tif,
-    "RASTER_BAND": 1,
-    "COLUMN_PREFIX": PREFIX,
-    "STATISTICS": [2],          # 2 = mean
-    "OUTPUT": "memory:zonal",
-})
+
+result = processing.run(
+    "native:zonalstatisticsfb",
+    {
+        "INPUT": zones,
+        "INPUT_RASTER": cn_tif,
+        "RASTER_BAND": 1,
+        "COLUMN_PREFIX": PREFIX,
+        "STATISTICS": [2],
+        "OUTPUT": "memory:zonal",
+    },
+)
+
 zonal = result["OUTPUT"]
-mean_field = PREFIX + "mean"    # native:zonalstatisticsfb names it <prefix>mean
+mean_field = PREFIX + "mean"
 
-# --- build the output: copy id/area_km2, add CN (rounded) ------------------
-from qgis.core import QgsField, QgsFields, QgsFeature
-from qgis.PyQt.QtCore import QVariant
+if mean_field not in zonal.fields().names():
+    raise Exception(
+        "zonal statistics did not create expected field '%s'. Fields are: %s"
+        % (mean_field, ", ".join(zonal.fields().names()))
+    )
 
+
+# --- build output -----------------------------------------------------------
 fields = QgsFields()
 fields.append(QgsField("id", QVariant.Int))
 fields.append(QgsField("area_km2", QVariant.Double))
 fields.append(QgsField(CN_FIELD, QVariant.Double))
 
-if os.path.exists(out_path):
-    os.remove(out_path)
+remove_existing_gpkg(out_path)
+
 opts = QgsVectorFileWriter.SaveVectorOptions()
 opts.driverName = "GPKG"
-opts.layerName  = OUT_LAYER
+opts.layerName = OUT_LAYER
+
 writer = QgsVectorFileWriter.create(
-    out_path, fields, zones.wkbType(), zones.crs(),
-    QgsCoordinateTransformContext(), opts)
+    out_path,
+    fields,
+    zones.wkbType(),
+    zones.crs(),
+    QgsCoordinateTransformContext(),
+    opts,
+)
 
 n = 0
 missing = []
+
+zonal_field_names = zonal.fields().names()
+
 for ft in zonal.getFeatures():
-    mean = ft[mean_field]
-    fid  = ft["id"] if "id" in zonal.fields().names() else n + 1
-    area = ft["area_km2"] if "area_km2" in zonal.fields().names() else None
+    mean = as_float(ft[mean_field])
+
+    fid = as_int(ft["id"], n + 1) if "id" in zonal_field_names else n + 1
+    area = as_float(ft["area_km2"]) if "area_km2" in zonal_field_names else None
+
     of = QgsFeature(fields)
     of.setGeometry(ft.geometry())
-    of["id"] = int(fid) if fid is not None else n + 1
+    of["id"] = fid
+
     if area is not None:
-        of["area_km2"] = float(area)
+        of["area_km2"] = area
+    else:
+        of["area_km2"] = None
+
     if mean is None:
         of[CN_FIELD] = None
-        missing.append(of["id"])
+        missing.append(fid)
     else:
-        of[CN_FIELD] = round(float(mean), CN_DECIMALS)
+        of[CN_FIELD] = round(mean, CN_DECIMALS)
+
     writer.addFeature(of)
     n += 1
+
 del writer
+gc.collect()
+
 
 print("\nWrote %d subwatershed(s) -> %s" % (n, OUT_NAME))
 print("\n  id    area_km2     CN")
+
 out_lyr = QgsVectorLayer(out_path + "|layername=" + OUT_LAYER, OUT_LAYER, "ogr")
-for ft in sorted(out_lyr.getFeatures(), key=lambda f: (f["id"] is None, f["id"])):
-    a = ft["area_km2"]; cn = ft[CN_FIELD]
-    print("  %-4s  %9s  %5s" % (
-        ft["id"],
-        ("%.4f" % a) if a is not None else "-",
-        ("%.1f" % cn) if cn is not None else "NULL"))
+
+if not out_lyr.isValid():
+    out_lyr = QgsVectorLayer(out_path, OUT_LAYER, "ogr")
+
+if not out_lyr.isValid():
+    raise Exception("Output was written but could not be reopened: " + out_path)
+
+
+def sort_key(f):
+    fid = as_int(f["id"], None)
+    return (fid is None, fid if fid is not None else 10**12)
+
+
+for ft in sorted(out_lyr.getFeatures(), key=sort_key):
+    fid = as_int(ft["id"], None)
+    area = as_float(ft["area_km2"])
+    cn = as_float(ft[CN_FIELD])
+
+    print(
+        "  %-4s  %9s  %5s"
+        % (
+            str(fid) if fid is not None else "-",
+            ("%.4f" % area) if area is not None else "-",
+            ("%.1f" % cn) if cn is not None else "NULL",
+        )
+    )
+
 
 if missing:
     print("\n*** subwatershed(s) with NULL CN (no classified cells inside):", missing)
     print("    check that cn.tif covers these polygons.")
+    print("    also check unmatched NLCD/HSG pairs in buildcnraster.py output.")
+
 
 if ADD_TO_PROJECT and out_lyr.isValid():
     QgsProject.instance().addMapLayer(out_lyr)
     print("\n  added to project:", OUT_LAYER)
+
 
 print("\nDone.")
