@@ -31,8 +31,8 @@ Before preparing inputs, check the installed runtime, GIS dependencies, QGIS
 ohqbuild doctor
 ```
 
-Use `--strict-gis` when you want missing `geopandas` or QGIS bindings to fail the
-check instead of showing warnings:
+Use `--strict-gis` when you want missing QGIS bindings or the QGIS `processing`
+plugin to fail the check instead of showing warnings:
 
 ```bash
 ohqbuild doctor --strict-gis

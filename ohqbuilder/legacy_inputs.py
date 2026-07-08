@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from .qgis_env import ensure_processing_available
+
 LegacyPhase = Literal["phase1", "phase2", "all"]
 
 _PHASE_SCRIPTS = {
@@ -22,14 +24,18 @@ def default_script_dir() -> Path:
 def _require_qgis() -> None:
     try:
         import qgis.core  # noqa: F401
-        import processing  # noqa: F401
     except ImportError as exc:
         raise LegacyInputWorkflowError(
-            "Creating GIS input files requires a QGIS Python environment with the "
-            "QGIS processing plugin available. Open QGIS and run from its Python "
-            "Console, or use a QGIS application Python environment, then rerun "
-            "the prepare-inputs command."
+            "Creating GIS input files requires a QGIS Python environment. Open QGIS "
+            "and run from its Python Console, or use a QGIS application Python "
+            "environment, then rerun the prepare-inputs command."
         ) from exc
+    if not ensure_processing_available():
+        raise LegacyInputWorkflowError(
+            "Creating GIS input files requires the QGIS processing plugin. The runner "
+            "tried common QGIS plugin paths but could not import `processing`; run from "
+            "the QGIS Python Console or set PYTHONPATH to QGIS's python/plugins folder."
+        )
 
 
 def _run_phase(script_path: Path, root: Path, site: str, script_dir: Path) -> None:
