@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
+
+DEFAULT_CONFIG = "config.json"
+EXAMPLE_CONFIG = "config.example.json"
 
 REQUIRED_OUTPUTS = (
     "topology.gpkg",
@@ -14,6 +18,10 @@ REQUIRED_OUTPUTS = (
     "reaches.gpkg",
     "junctions.gpkg",
 )
+
+
+class PipelineConfigError(ValueError):
+    """Raised when the config-driven pipeline cannot load its configuration."""
 
 
 @dataclass
@@ -51,7 +59,13 @@ class PipelineConfig:
     @classmethod
     def from_file(cls, path: str | Path) -> "PipelineConfig":
         config_path = Path(path).expanduser().resolve()
-        return cls.from_mapping(json.loads(config_path.read_text(encoding="utf-8")))
+        if not config_path.is_file():
+            raise PipelineConfigError(f"Pipeline config not found: {config_path}")
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise PipelineConfigError(f"Invalid JSON in {config_path}: {exc}") from exc
+        return cls.from_mapping(data)
 
     @property
     def outputs_path(self) -> Path:
@@ -155,12 +169,30 @@ def run_pipeline(config: PipelineConfig, dry_run: bool = False) -> PipelineRunRe
     return result
 
 
+def _maybe_create_config_from_example(config_path: Path) -> bool:
+    example_path = Path(EXAMPLE_CONFIG).resolve()
+    if config_path.name != DEFAULT_CONFIG or config_path.exists() or not example_path.is_file():
+        return False
+    shutil.copyfile(example_path, config_path)
+    return True
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the full GIStoOHQ pipeline from a config file.")
-    parser.add_argument("config", nargs="?", default="config.json")
+    parser.add_argument("config", nargs="?", default=DEFAULT_CONFIG)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    config = PipelineConfig.from_file(args.config)
+    config_path = Path(args.config).expanduser().resolve()
+    if _maybe_create_config_from_example(config_path):
+        print(f"Created {config_path} from {EXAMPLE_CONFIG}.")
+        print("Edit root/site in that file, then rerun: python3 run.py config.json")
+        return 2
+    try:
+        config = PipelineConfig.from_file(config_path)
+    except PipelineConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"Tip: copy {EXAMPLE_CONFIG} to {DEFAULT_CONFIG} and edit root/site.", file=sys.stderr)
+        return 2
     return run_pipeline(config, dry_run=args.dry_run).returncode
 
 

@@ -128,3 +128,43 @@ def test_run_py_exits_before_import_when_no_python3_found(monkeypatch):
         assert exc.code == 2
     else:
         raise AssertionError("expected SystemExit")
+
+
+def test_app_runner_creates_default_config_from_example(tmp_path, monkeypatch):
+    from ohqbuilder import app_runner
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.example.json").write_text(
+        '{"root": "/tmp/root", "site": "SITE_A"}',
+        encoding="utf-8",
+    )
+
+    status = app_runner.main(["config.json"])
+
+    assert status == 2
+    assert (tmp_path / "config.json").read_text(encoding="utf-8") == '{"root": "/tmp/root", "site": "SITE_A"}'
+
+
+def test_app_runner_missing_non_default_config_returns_error(tmp_path, monkeypatch, capsys):
+    from ohqbuilder import app_runner
+
+    monkeypatch.chdir(tmp_path)
+
+    status = app_runner.main(["missing.json"])
+
+    assert status == 2
+    assert "Pipeline config not found" in capsys.readouterr().err
+
+
+def test_pipeline_config_invalid_json_is_actionable(tmp_path):
+    from ohqbuilder.app_runner import PipelineConfig, PipelineConfigError
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{", encoding="utf-8")
+
+    try:
+        PipelineConfig.from_file(bad)
+    except PipelineConfigError as exc:
+        assert "Invalid JSON" in str(exc)
+    else:
+        raise AssertionError("expected PipelineConfigError")
