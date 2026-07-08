@@ -1,0 +1,13 @@
+{
+  "root": ".",
+  "site": ".",
+  "config": null,
+  "project_name": null,
+  "out": null,
+  "script_dir": null,
+  "phase": "all",
+  "force": false,
+  "skip_prepare": false,
+  "no_schema": false,
+  "strict_gis": false
+}

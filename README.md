@@ -29,8 +29,19 @@ OpenHydroQual writer
 
 ```bash
 pip install -e .
+ohqbuild doctor
+ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
 ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
+
+# Or copy config.example.json to config.json and run the whole app pipeline:
+python3 run.py config.json
 ```
+
+Need to create those GIS input files first? Run the full workflow with
+`ohqbuild run` from a QGIS Python environment, or run the steps individually with
+`ohqbuild prepare-inputs`, `ohqbuild check-inputs`, and `ohqbuild build`. The
+`build` and `validate` commands also check inputs by default. See
+[`docs/input_generation.md`](docs/input_generation.md).
 
 The output is written to:
 
