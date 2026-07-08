@@ -94,12 +94,34 @@ This command is the best starting point when the error mentions missing
 DEM and hydrography downloads remain source products that must be
 mosaicked/reprojected/clipped or extracted into the exact legacy filenames.
 
+## DEM materialization helper
+
+After `download-data` or `fetch-phase1-inputs` has staged DEM GeoTIFFs or zip
+archives, `materialize-dem` can mosaic and reproject those rasters into the
+legacy DEM filename expected by phase 1:
+
+```bash
+ohqbuild materialize-dem \
+  --root /mnt/3rd900/Projects/GIStoOHQ \
+  --site . \
+  --source-dir /mnt/3rd900/Projects/GIStoOHQ/source_downloads \
+  --dst-crs EPSG:26912
+```
+
+If `--dst-crs` is omitted, the command infers a UTM zone from the raster center.
+This command requires `rasterio`, which is included in the `gis` optional
+dependencies. Install those with:
+
+```bash
+pip install -e .[gis]
+```
+
 ## Current integration status
 
-The built-in helpers cover TNM lookup, raw downloads, input-folder creation, and
-outlet shapefile creation. They intentionally do not yet perform DEM
-mosaicking/reprojection, NHD flowline extraction, or watershed clipping; those
-remain explicit GIS preparation steps before running:
+The built-in helpers cover TNM lookup, raw downloads, input-folder creation,
+outlet shapefile creation, and DEM mosaic/reprojection into `demlr/cliped_utm.tif`.
+They intentionally do not yet perform NHD flowline extraction or watershed
+clipping; those remain explicit GIS preparation steps before running:
 
 ```bash
 python3 run.py config.json

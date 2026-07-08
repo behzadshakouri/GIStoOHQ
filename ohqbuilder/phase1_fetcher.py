@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,14 +25,14 @@ class Phase1FetchResult:
 def write_outlet_shapefile(path: str | Path, lon: float, lat: float) -> Path:
     """Write the single-feature outlet shapefile expected by legacy phase 1."""
 
-    try:
-        import geopandas as gpd
-        from shapely.geometry import Point
-    except ImportError as exc:  # pragma: no cover - exercised through CLI environments
+    if importlib.util.find_spec("geopandas") is None or importlib.util.find_spec("shapely") is None:
         raise Phase1FetchError(
             "Writing outputs/outlet.shp requires GIS Python dependencies. "
             "Install them with `pip install -e .[gis]` or create outlet.shp manually."
-        ) from exc
+        )
+
+    import geopandas as gpd
+    from shapely.geometry import Point
 
     outlet_path = Path(path)
     outlet_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +86,8 @@ def _write_manifest(
                 "outputs/outlet.shp",
                 "```",
                 "",
-                "If `demlr/cliped_utm.tif` or `outputs/NHDFlowline_clip.gpkg` is still missing, mosaic/reproject/clip the downloaded source products into those filenames before rerunning `prepare-inputs`.",
+                "If `demlr/cliped_utm.tif` is still missing, run `ohqbuild materialize-dem` against the downloaded DEM rasters or mosaic/reproject them manually.",
+                "If `outputs/NHDFlowline_clip.gpkg` is still missing, extract and clip the downloaded hydrography source products into that filename before rerunning `prepare-inputs`.",
             ]
         )
         + "\n",

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .dem_downloader import parse_products, process_csv
+from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
 from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, write_input_manifest
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
@@ -53,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+
+    mat_dem = sub.add_parser(
+        "materialize-dem",
+        help="Mosaic/reproject downloaded DEM rasters to demlr/cliped_utm.tif.",
+    )
+    mat_dem.add_argument("--root", required=True)
+    mat_dem.add_argument("--site", required=True)
+    mat_dem.add_argument("--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips.")
+    mat_dem.add_argument("--out", default=None, help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.")
+    mat_dem.add_argument("--dst-crs", default=None, help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.")
 
     fetch = sub.add_parser(
         "fetch-phase1-inputs",
@@ -172,6 +183,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"{result.site_id} {result.product}: {result.status}; "
                 f"{result.count} item(s), downloaded {result.downloaded}"
             )
+        return 0
+    if args.command == "materialize-dem":
+        try:
+            result = materialize_dem(
+                args.root,
+                args.site,
+                source_dir=args.source_dir,
+                output_path=args.out,
+                dst_crs=args.dst_crs,
+            )
+        except DemMaterializeError as exc:
+            print(f"materialize-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM: {result.output_path}")
+        print(f"Source product count: {result.source_count}")
+        print(f"Target CRS: {result.dst_crs}")
         return 0
     if args.command == "fetch-phase1-inputs":
         try:
