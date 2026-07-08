@@ -1,6 +1,6 @@
 {
-  "root": "/path/to/NHA",
-  "site": "WS3_GIS/AZ12-100",
+  "root": ".",
+  "site": ".",
   "config": null,
   "project_name": null,
   "out": null,

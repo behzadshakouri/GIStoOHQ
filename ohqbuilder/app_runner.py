@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -42,9 +41,14 @@ class PipelineConfig:
     def from_mapping(cls, data: dict[str, Any]) -> "PipelineConfig":
         if "root" not in data or "site" not in data:
             raise ValueError("Pipeline config must include 'root' and 'site'.")
+        root_value = str(data["root"])
+        site_value = str(data["site"])
+        if root_value == "/path/to/NHA":
+            root_value = str(Path.cwd())
+            site_value = "."
         return cls(
-            root=Path(data["root"]).expanduser().resolve(),
-            site=str(data["site"]),
+            root=Path(root_value).expanduser().resolve(),
+            site=site_value,
             config=data.get("config"),
             project_name=data.get("project_name"),
             out=data.get("out"),
@@ -173,7 +177,10 @@ def _maybe_create_config_from_example(config_path: Path) -> bool:
     example_path = Path(EXAMPLE_CONFIG).resolve()
     if config_path.name != DEFAULT_CONFIG or config_path.exists() or not example_path.is_file():
         return False
-    shutil.copyfile(example_path, config_path)
+    data = json.loads(example_path.read_text(encoding="utf-8"))
+    data["root"] = str(Path.cwd())
+    data["site"] = "."
+    config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return True
 
 

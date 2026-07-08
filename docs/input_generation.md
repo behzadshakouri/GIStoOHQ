@@ -212,9 +212,10 @@ Additional columns are preserved as attributes where applicable.
 
 ## Run the full workflow
 
-For a config-file driven application entry point, copy `config.example.json` to
-`config.json`, edit `root` and `site`, then run. If `config.json` is missing,
-`run.py` creates it from `config.example.json` and stops so you can edit it:
+For a config-file driven application entry point, run the command below from the
+project/data folder. If `config.json` is missing, `run.py` creates it from
+`config.example.json` with `root` set to the current folder and stops so you can
+review it before rerunning:
 
 ```bash
 python3 run.py config.json

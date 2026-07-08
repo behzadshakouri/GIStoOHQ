@@ -142,7 +142,9 @@ def test_app_runner_creates_default_config_from_example(tmp_path, monkeypatch):
     status = app_runner.main(["config.json"])
 
     assert status == 2
-    assert (tmp_path / "config.json").read_text(encoding="utf-8") == '{"root": "/tmp/root", "site": "SITE_A"}'
+    created = __import__("json").loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert created["root"] == str(tmp_path)
+    assert created["site"] == "."
 
 
 def test_app_runner_missing_non_default_config_returns_error(tmp_path, monkeypatch, capsys):
@@ -168,3 +170,12 @@ def test_pipeline_config_invalid_json_is_actionable(tmp_path):
         assert "Invalid JSON" in str(exc)
     else:
         raise AssertionError("expected PipelineConfigError")
+
+
+def test_pipeline_config_placeholder_root_defaults_to_current_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    config = PipelineConfig.from_mapping({"root": "/path/to/NHA", "site": "WS3_GIS/AZ12-100"})
+
+    assert config.root == tmp_path.resolve()
+    assert config.site == "."
