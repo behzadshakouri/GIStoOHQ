@@ -22,6 +22,14 @@ def test_prepare_inputs_runs_selected_phase_with_seeded_namespace(tmp_path, monk
     monkeypatch.setitem(sys.modules, "qgis.core", qgis_core)
     monkeypatch.setitem(sys.modules, "processing", processing)
 
+    out_dir = tmp_path / "root" / "SITE_A" / "outputs"
+    out_dir.mkdir(parents=True)
+    (out_dir / "outlet.shp").write_text("", encoding="utf-8")
+    (out_dir / "NHDFlowline_clip.gpkg").write_text("", encoding="utf-8")
+    dem_dir = tmp_path / "root" / "SITE_A" / "demlr"
+    dem_dir.mkdir()
+    (dem_dir / "cliped_utm.tif").write_text("", encoding="utf-8")
+
     script_dir = tmp_path / "scripts"
     script_dir.mkdir()
     marker = tmp_path / "phase1_marker.txt"
@@ -36,3 +44,24 @@ def test_prepare_inputs_runs_selected_phase_with_seeded_namespace(tmp_path, monk
     assert marker.read_text(encoding="utf-8") == (
         str((tmp_path / "root").resolve()) + "\n" + "SITE_A" + "\n" + str(script_dir.resolve())
     )
+
+
+def test_prepare_inputs_reports_missing_phase1_inputs(tmp_path, monkeypatch):
+    import types
+
+    monkeypatch.setitem(sys.modules, "qgis", types.ModuleType("qgis"))
+    monkeypatch.setitem(sys.modules, "qgis.core", types.ModuleType("qgis.core"))
+    monkeypatch.setitem(sys.modules, "processing", types.ModuleType("processing"))
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "run_phase1.py").write_text("", encoding="utf-8")
+
+    try:
+        run_legacy_input_workflow(tmp_path / "root", "SITE_A", script_dir, phase="phase1")
+    except LegacyInputWorkflowError as exc:
+        message = str(exc)
+        assert "Missing required phase1 input" in message
+        assert "cliped_utm.tif" in message
+        assert "NHDFlowline_clip.gpkg" in message
+    else:
+        raise AssertionError("expected LegacyInputWorkflowError")

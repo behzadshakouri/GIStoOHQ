@@ -65,6 +65,9 @@ The legacy phase-1 runner expects:
 - `outputs/NHDFlowline_clip.gpkg` — clipped NHD flowlines used for channel
   burning and reach extraction.
 
+If DEM or flowline inputs are missing, see [`docs/data_downloaders.md`](data_downloaders.md)
+for notes on using DEMDownloader/`demcheck` upstream.
+
 ### Phase 1 — create reach and junction network
 
 Run the phase-1 orchestrator from a QGIS Python environment:

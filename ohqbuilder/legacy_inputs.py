@@ -38,6 +38,36 @@ def _require_qgis() -> None:
         )
 
 
+def _required_inputs(root: Path, site: str, phase: LegacyPhase) -> list[tuple[Path, str]]:
+    out_dir = root / site / "outputs"
+    site_dir = root / site
+    if phase == "phase1":
+        return [
+            (out_dir / "outlet.shp", "single-feature watershed outlet"),
+            (site_dir / "demlr" / "cliped_utm.tif", "real-elevation DEM"),
+            (out_dir / "NHDFlowline_clip.gpkg", "clipped NHD flowlines"),
+        ]
+    if phase == "phase2":
+        return [
+            (out_dir / "pour_points.shp", "hand-placed pour points"),
+            (out_dir / "watershed_boundary.gpkg", "phase-1 watershed boundary"),
+            (out_dir / "reaches.gpkg", "phase-1 reaches with topology"),
+            (out_dir / "junctions.gpkg", "phase-1 junctions"),
+            (out_dir / "outlet.shp", "phase-1 outlet"),
+        ]
+    return []
+
+
+def _check_required_inputs(root: Path, site: str, phase: LegacyPhase) -> None:
+    missing = [(path, why) for path, why in _required_inputs(root, site, phase) if not path.is_file()]
+    if not missing:
+        return
+    lines = [f"Missing required {phase} input(s):"]
+    lines.extend(f"  - {path} ({why})" for path, why in missing)
+    lines.append("Create or download these inputs before running prepare-inputs.")
+    raise LegacyInputWorkflowError("\n".join(lines))
+
+
 def _run_phase(script_path: Path, root: Path, site: str, script_dir: Path) -> None:
     if not script_path.is_file():
         raise LegacyInputWorkflowError(f"Legacy phase script not found: {script_path}")
@@ -76,4 +106,5 @@ def run_legacy_input_workflow(
     phases = ("phase1", "phase2") if phase == "all" else (phase,)
 
     for selected_phase in phases:
+        _check_required_inputs(root_path, site, selected_phase)
         _run_phase(script_path / _PHASE_SCRIPTS[selected_phase], root_path, site, script_path)
