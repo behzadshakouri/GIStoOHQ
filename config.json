@@ -5,7 +5,7 @@
   "project_name": null,
   "out": null,
   "script_dir": null,
-  "phase": "all",
+  "phase": "phase2",
   "force": false,
   "skip_prepare": false,
   "no_schema": false,

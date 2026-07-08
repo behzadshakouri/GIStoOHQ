@@ -20,6 +20,8 @@ pour.to_file(OUT / "pour_points.shp")
 reaches = gpd.GeoDataFrame(
     {
         "id": [1],
+        "reach_id": [1],
+        "ds_reach_id": [0],
         "name": ["Reach_1"],
         "from_node": ["J1"],
         "to_node": ["Outlet"],
