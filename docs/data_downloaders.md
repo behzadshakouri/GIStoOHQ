@@ -31,15 +31,76 @@ ID column:
 ./demcheck WS3_Site_Coordinates.csv --id-col "Project No." --products all --download ./GIS --buffer 500
 ```
 
+## Python `download-data` helper
+
+GIStoOHQ includes a Python helper inspired by DEMDownloader for users who do not
+want to build the C++ `demcheck` binary. It queries the USGS TNMAccess products
+API for each WGS84 coordinate in a CSV, chooses the first available tier in the
+same priority order as DEMDownloader, and can optionally download matching files
+into per-site folders.
+
+```bash
+ohqbuild download-data WS3_Site_Coordinates.csv download_summary.csv \
+  --id-col "Project No." \
+  --products all \
+  --download ./GIS \
+  --buffer 500
+```
+
+The helper writes a summary CSV with one row per site/product and, when
+`--download` is supplied, stores files as:
+
+```text
+GIS/<SITE_ID>/dem/
+GIS/<SITE_ID>/hydro/
+```
+
+The downloaded products are source data. You still need to mosaic, project, clip,
+and/or convert them into the exact legacy input filenames before `prepare-inputs`:
+
+```text
+<ROOT>/<SITE>/demlr/cliped_utm.tif
+<ROOT>/<SITE>/outputs/NHDFlowline_clip.gpkg
+<ROOT>/<SITE>/outputs/outlet.shp
+```
+
+For direct command-line help, run:
+
+```bash
+ohqbuild download-data --help
+```
+
+## Phase-1 bootstrap helper
+
+For the common failure where `prepare-inputs` stops because phase-1 source files
+are missing, use `fetch-phase1-inputs` from the project environment. It creates
+the site input folders, writes a single-feature WGS84 `outputs/outlet.shp`,
+downloads source DEM/hydrography products into a staging folder, and writes a
+`PHASE1_INPUTS.md` manifest explaining the remaining GIS conversion steps.
+
+```bash
+ohqbuild fetch-phase1-inputs \
+  --root /mnt/3rd900/Projects/GIStoOHQ \
+  --site . \
+  --lat 35.1234 \
+  --lon -111.1234 \
+  --products all \
+  --buffer 500
+```
+
+This command is the best starting point when the error mentions missing
+`outputs/outlet.shp`, `demlr/cliped_utm.tif`, or
+`outputs/NHDFlowline_clip.gpkg`. It can create `outputs/outlet.shp` directly; the
+DEM and hydrography downloads remain source products that must be
+mosaicked/reprojected/clipped or extracted into the exact legacy filenames.
+
 ## Current integration status
 
-DEMDownloader is not vendored into GIStoOHQ yet. For now, use it upstream to
-populate the DEM/hydrography files above, then run:
+The built-in helpers cover TNM lookup, raw downloads, input-folder creation, and
+outlet shapefile creation. They intentionally do not yet perform DEM
+mosaicking/reprojection, NHD flowline extraction, or watershed clipping; those
+remain explicit GIS preparation steps before running:
 
 ```bash
 python3 run.py config.json
 ```
-
-Future integration can add a `download-data` step before `prepare-inputs` once we
-standardize the coordinate CSV path, site ID column, output layout, and DEM
-mosaic/clip behavior.
