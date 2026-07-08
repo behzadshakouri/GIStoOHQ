@@ -65,3 +65,15 @@ def test_prepare_inputs_reports_missing_phase1_inputs(tmp_path, monkeypatch):
         assert "NHDFlowline_clip.gpkg" in message
     else:
         raise AssertionError("expected LegacyInputWorkflowError")
+
+
+def test_write_input_manifest_creates_directories_and_checklist(tmp_path):
+    from ohqbuilder.legacy_inputs import write_input_manifest
+
+    manifest = write_input_manifest(tmp_path, "SITE_A")
+
+    assert (tmp_path / "SITE_A" / "outputs").is_dir()
+    assert (tmp_path / "SITE_A" / "demlr").is_dir()
+    text = manifest.read_text(encoding="utf-8")
+    assert "demlr/cliped_utm.tif" in text
+    assert "outputs/NHDFlowline_clip.gpkg" in text

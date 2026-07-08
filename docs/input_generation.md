@@ -46,7 +46,13 @@ ohqbuild doctor --json
 
 ### Phase 0 — prepare site inputs
 
-Before running the QGIS workflow, prepare a site directory like:
+To create the expected folders and an `INPUTS.md` checklist, run:
+
+```bash
+ohqbuild init-inputs --root /mnt/3rd900/Projects/GIStoOHQ --site .
+```
+
+Before running the QGIS workflow, the site directory should contain:
 
 ```text
 <ROOT>/

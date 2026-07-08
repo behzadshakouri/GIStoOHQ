@@ -217,3 +217,10 @@ def test_check_inputs_cli_can_emit_json(monkeypatch, capsys):
 
     assert status == 0
     assert '"errors": []' in capsys.readouterr().out
+
+
+def test_init_inputs_cli_creates_manifest(tmp_path):
+    status = main(["init-inputs", "--root", str(tmp_path), "--site", "SITE_A"])
+
+    assert status == 0
+    assert (tmp_path / "SITE_A" / "INPUTS.md").is_file()

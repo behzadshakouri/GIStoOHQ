@@ -38,7 +38,7 @@ def _require_qgis() -> None:
         )
 
 
-def _required_inputs(root: Path, site: str, phase: LegacyPhase) -> list[tuple[Path, str]]:
+def required_inputs(root: Path, site: str, phase: LegacyPhase) -> list[tuple[Path, str]]:
     out_dir = root / site / "outputs"
     site_dir = root / site
     if phase == "phase1":
@@ -58,14 +58,42 @@ def _required_inputs(root: Path, site: str, phase: LegacyPhase) -> list[tuple[Pa
     return []
 
 
-def _check_required_inputs(root: Path, site: str, phase: LegacyPhase) -> None:
-    missing = [(path, why) for path, why in _required_inputs(root, site, phase) if not path.is_file()]
+def check_required_inputs(root: Path, site: str, phase: LegacyPhase) -> None:
+    missing = [(path, why) for path, why in required_inputs(root, site, phase) if not path.is_file()]
     if not missing:
         return
     lines = [f"Missing required {phase} input(s):"]
     lines.extend(f"  - {path} ({why})" for path, why in missing)
     lines.append("Create or download these inputs before running prepare-inputs.")
     raise LegacyInputWorkflowError("\n".join(lines))
+
+
+def write_input_manifest(root: str | Path, site: str) -> Path:
+    root_path = Path(root).expanduser().resolve()
+    site_path = root_path / site
+    outputs_path = site_path / "outputs"
+    demlr_path = site_path / "demlr"
+    outputs_path.mkdir(parents=True, exist_ok=True)
+    demlr_path.mkdir(parents=True, exist_ok=True)
+    manifest_path = site_path / "INPUTS.md"
+    lines = [
+        "# GIStoOHQ source inputs",
+        "",
+        "Place or generate these files before running `prepare-inputs`.",
+        "",
+        "## Phase 1",
+    ]
+    for path, why in required_inputs(root_path, site, "phase1"):
+        lines.append(f"- `{path.relative_to(site_path)}` — {why}")
+    lines.extend(["", "## Phase 2"])
+    for path, why in required_inputs(root_path, site, "phase2"):
+        lines.append(f"- `{path.relative_to(site_path)}` — {why}")
+    lines.extend([
+        "",
+        "DEM/hydrography can be prepared upstream with tools such as DEMDownloader/demcheck.",
+    ])
+    manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return manifest_path
 
 
 def _run_phase(script_path: Path, root: Path, site: str, script_dir: Path) -> None:
@@ -106,5 +134,5 @@ def run_legacy_input_workflow(
     phases = ("phase1", "phase2") if phase == "all" else (phase,)
 
     for selected_phase in phases:
-        _check_required_inputs(root_path, site, selected_phase)
+        check_required_inputs(root_path, site, selected_phase)
         _run_phase(script_path / _PHASE_SCRIPTS[selected_phase], root_path, site, script_path)

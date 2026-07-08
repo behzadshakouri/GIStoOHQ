@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .doctor import run_doctor
-from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow
+from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, write_input_manifest
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .validation.input_validator import InputValidator
@@ -40,6 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--site", required=True)
     prep.add_argument("--script-dir", default=None)
     prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+
+    init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
+    init.add_argument("--root", required=True)
+    init.add_argument("--site", required=True)
 
     chk = sub.add_parser("check-inputs", help="Verify required GIStoOHQ input files and fields.")
     chk.add_argument("--root", required=True)
@@ -118,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
+        return 0
+    if args.command == "init-inputs":
+        manifest = write_input_manifest(args.root, args.site)
+        print(f"Created input folders and checklist: {manifest}")
         return 0
     if args.command == "check-inputs":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
