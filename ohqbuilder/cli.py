@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .dem_downloader import parse_products, process_csv
 from .doctor import run_doctor
 from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, write_input_manifest
 from .pipeline import build_ohq_project
@@ -40,6 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--site", required=True)
     prep.add_argument("--script-dir", default=None)
     prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+
+    dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
+    dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
+    dl.add_argument("output_csv", nargs="?", default=None, help="Optional CSV summary to write.")
+    dl.add_argument("--products", default="dem", help="dem, hydro, all, or comma-separated subset (default: dem).")
+    dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
+    dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
+    dl.add_argument("--lat-col", default=None, help="Latitude column (auto-detected by default).")
+    dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
+    dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
+    dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -122,6 +134,28 @@ def main(argv: list[str] | None = None) -> int:
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
+        return 0
+    if args.command == "download-data":
+        try:
+            results = process_csv(
+                args.input_csv,
+                args.output_csv,
+                products=parse_products(args.products),
+                download_dir=args.download,
+                id_col=args.id_col,
+                lat_col=args.lat_col,
+                lon_col=args.lon_col,
+                buffer_m=args.buffer,
+                max_tiles=args.max_tiles,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-data failed: {exc}")
+            return 2
+        for result in results:
+            print(
+                f"{result.site_id} {result.product}: {result.status}; "
+                f"{result.count} item(s), downloaded {result.downloaded}"
+            )
         return 0
     if args.command == "init-inputs":
         manifest = write_input_manifest(args.root, args.site)

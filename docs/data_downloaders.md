@@ -31,15 +31,52 @@ ID column:
 ./demcheck WS3_Site_Coordinates.csv --id-col "Project No." --products all --download ./GIS --buffer 500
 ```
 
+## Python `download-data` helper
+
+GIStoOHQ includes a Python helper inspired by DEMDownloader for users who do not
+want to build the C++ `demcheck` binary. It queries the USGS TNMAccess products
+API for each WGS84 coordinate in a CSV, chooses the first available tier in the
+same priority order as DEMDownloader, and can optionally download matching files
+into per-site folders.
+
+```bash
+ohqbuild download-data WS3_Site_Coordinates.csv download_summary.csv \
+  --id-col "Project No." \
+  --products all \
+  --download ./GIS \
+  --buffer 500
+```
+
+The helper writes a summary CSV with one row per site/product and, when
+`--download` is supplied, stores files as:
+
+```text
+GIS/<SITE_ID>/dem/
+GIS/<SITE_ID>/hydro/
+```
+
+The downloaded products are source data. You still need to mosaic, project, clip,
+and/or convert them into the exact legacy input filenames before `prepare-inputs`:
+
+```text
+<ROOT>/<SITE>/demlr/cliped_utm.tif
+<ROOT>/<SITE>/outputs/NHDFlowline_clip.gpkg
+<ROOT>/<SITE>/outputs/outlet.shp
+```
+
+For direct command-line help, run:
+
+```bash
+ohqbuild download-data --help
+```
+
 ## Current integration status
 
-DEMDownloader is not vendored into GIStoOHQ yet. For now, use it upstream to
-populate the DEM/hydrography files above, then run:
+The built-in helper covers TNM lookup and raw downloads. It intentionally does
+not yet perform DEM mosaicking/reprojection, NHD flowline extraction, watershed
+clipping, or outlet placement; those remain explicit GIS preparation steps before
+running:
 
 ```bash
 python3 run.py config.json
 ```
-
-Future integration can add a `download-data` step before `prepare-inputs` once we
-standardize the coordinate CSV path, site ID column, output layout, and DEM
-mosaic/clip behavior.
