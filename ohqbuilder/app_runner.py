@@ -107,11 +107,12 @@ def _add_common_args(command: list[str], config: PipelineConfig) -> None:
 
 def build_steps(config: PipelineConfig) -> list[PipelineStep]:
     steps: list[PipelineStep] = []
+    skip_prepare = config.skip_prepare or (config.required_outputs_exist() and not config.force)
 
     doctor = _base_command() + ["doctor"]
     if config.script_dir:
         doctor.extend(["--script-dir", config.script_dir])
-    if config.strict_gis:
+    if config.strict_gis or not skip_prepare:
         doctor.append("--strict-gis")
     steps.append(PipelineStep("doctor", doctor))
 
@@ -119,7 +120,6 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
     if config.script_dir:
         prepare.extend(["--script-dir", config.script_dir])
     prepare.extend(["--phase", config.phase])
-    skip_prepare = config.skip_prepare or (config.required_outputs_exist() and not config.force)
     steps.append(
         PipelineStep(
             "prepare-inputs",

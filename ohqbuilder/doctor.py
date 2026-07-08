@@ -94,6 +94,14 @@ def run_doctor(script_dir: str | Path | None = None, strict_gis: bool = False) -
             required=strict_gis,
         )
     )
+    report.checks.append(
+        DoctorCheck(
+            name="qgis processing",
+            ok=_module_available("processing"),
+            detail="needed by retained QGIS scripts such as clip_only.py",
+            required=strict_gis,
+        )
+    )
 
     resolved_script_dir = Path(script_dir).expanduser().resolve() if script_dir else default_script_dir()
     report.checks.append(

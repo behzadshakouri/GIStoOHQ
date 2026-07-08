@@ -179,3 +179,12 @@ def test_pipeline_config_placeholder_root_defaults_to_current_folder(tmp_path, m
 
     assert config.root == tmp_path.resolve()
     assert config.site == "."
+
+
+def test_build_steps_makes_doctor_strict_when_prepare_will_run(tmp_path):
+    config = PipelineConfig.from_mapping({"root": str(tmp_path), "site": "SITE_A"})
+
+    steps = build_steps(config)
+
+    doctor = next(step for step in steps if step.name == "doctor")
+    assert "--strict-gis" in doctor.command

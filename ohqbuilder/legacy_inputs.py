@@ -22,11 +22,13 @@ def default_script_dir() -> Path:
 def _require_qgis() -> None:
     try:
         import qgis.core  # noqa: F401
+        import processing  # noqa: F401
     except ImportError as exc:
         raise LegacyInputWorkflowError(
-            "Creating GIS input files requires running inside a QGIS Python environment. "
-            "Open QGIS, use its Python Console, or run with QGIS's Python interpreter, "
-            "then rerun the prepare-inputs command."
+            "Creating GIS input files requires a QGIS Python environment with the "
+            "QGIS processing plugin available. Open QGIS and run from its Python "
+            "Console, or use a QGIS application Python environment, then rerun "
+            "the prepare-inputs command."
         ) from exc
 
 

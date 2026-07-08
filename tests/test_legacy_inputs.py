@@ -17,8 +17,10 @@ def test_prepare_inputs_requires_qgis_environment():
 def test_prepare_inputs_runs_selected_phase_with_seeded_namespace(tmp_path, monkeypatch):
     qgis = types.ModuleType("qgis")
     qgis_core = types.ModuleType("qgis.core")
+    processing = types.ModuleType("processing")
     monkeypatch.setitem(sys.modules, "qgis", qgis)
     monkeypatch.setitem(sys.modules, "qgis.core", qgis_core)
+    monkeypatch.setitem(sys.modules, "processing", processing)
 
     script_dir = tmp_path / "scripts"
     script_dir.mkdir()

@@ -52,3 +52,20 @@ def test_doctor_report_to_dict():
             {"name": "python", "ok": True, "detail": "3.14", "required": True},
         ],
     }
+
+
+def test_doctor_strict_gis_requires_processing(tmp_path, monkeypatch):
+    (tmp_path / "run_phase1.py").write_text("", encoding="utf-8")
+    (tmp_path / "run_phase2.py").write_text("", encoding="utf-8")
+
+    def fake_find_spec(name):
+        return None if name == "processing" else object()
+
+    monkeypatch.setattr("ohqbuilder.doctor.importlib.util.find_spec", fake_find_spec)
+
+    report = run_doctor(tmp_path, strict_gis=True)
+
+    by_name = {check.name: check for check in report.checks}
+    assert by_name["qgis processing"].required
+    assert not by_name["qgis processing"].ok
+    assert not report.ok

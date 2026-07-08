@@ -24,8 +24,8 @@ packaged GIStoOHQ builder consumes.
 
 ### Phase 0 — check the environment
 
-Before preparing inputs, check the installed runtime, GIS dependencies, and legacy
-script availability:
+Before preparing inputs, check the installed runtime, GIS dependencies, QGIS
+`processing` plugin, and legacy script availability:
 
 ```bash
 ohqbuild doctor
