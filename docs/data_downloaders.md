@@ -70,12 +70,36 @@ For direct command-line help, run:
 ohqbuild download-data --help
 ```
 
+## Phase-1 bootstrap helper
+
+For the common failure where `prepare-inputs` stops because phase-1 source files
+are missing, use `fetch-phase1-inputs` from the project environment. It creates
+the site input folders, writes a single-feature WGS84 `outputs/outlet.shp`,
+downloads source DEM/hydrography products into a staging folder, and writes a
+`PHASE1_INPUTS.md` manifest explaining the remaining GIS conversion steps.
+
+```bash
+ohqbuild fetch-phase1-inputs \
+  --root /mnt/3rd900/Projects/GIStoOHQ \
+  --site . \
+  --lat 35.1234 \
+  --lon -111.1234 \
+  --products all \
+  --buffer 500
+```
+
+This command is the best starting point when the error mentions missing
+`outputs/outlet.shp`, `demlr/cliped_utm.tif`, or
+`outputs/NHDFlowline_clip.gpkg`. It can create `outputs/outlet.shp` directly; the
+DEM and hydrography downloads remain source products that must be
+mosaicked/reprojected/clipped or extracted into the exact legacy filenames.
+
 ## Current integration status
 
-The built-in helper covers TNM lookup and raw downloads. It intentionally does
-not yet perform DEM mosaicking/reprojection, NHD flowline extraction, watershed
-clipping, or outlet placement; those remain explicit GIS preparation steps before
-running:
+The built-in helpers cover TNM lookup, raw downloads, input-folder creation, and
+outlet shapefile creation. They intentionally do not yet perform DEM
+mosaicking/reprojection, NHD flowline extraction, or watershed clipping; those
+remain explicit GIS preparation steps before running:
 
 ```bash
 python3 run.py config.json
