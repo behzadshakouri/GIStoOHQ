@@ -11,6 +11,7 @@ from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, 
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
+from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
 from .validation.input_validator import InputValidator
 
 
@@ -54,6 +55,19 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+
+    hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
+    hsg.add_argument("--root", required=True)
+    hsg.add_argument("--site", required=True)
+    hsg.add_argument("--buffer", type=float, default=5000.0)
+    hsg.add_argument("--pixel-size", type=float, default=0.0003)
+
+    texture = sub.add_parser("download-texture", help="Retrieve USDA SDA soil texture products.")
+    texture.add_argument("--root", required=True)
+    texture.add_argument("--site", required=True)
+    texture.add_argument("--buffer", type=float, default=5000.0)
+    texture.add_argument("--pixel-size", type=float, default=0.0003)
+    texture.add_argument("--top-depth", type=float, default=30.0)
 
     mat_dem = sub.add_parser(
         "materialize-dem",
@@ -183,6 +197,34 @@ def main(argv: list[str] | None = None) -> int:
                 f"{result.site_id} {result.product}: {result.status}; "
                 f"{result.count} item(s), downloaded {result.downloaded}"
             )
+        return 0
+    if args.command == "download-hsg":
+        try:
+            result = retrieve_hydrologic_soil_groups(
+                args.root, args.site, buffer=args.buffer, pixel_size=args.pixel_size
+            )
+        except SoilRetrievalError as exc:
+            print(f"download-hsg failed: {exc}")
+            return 2
+        print(f"Wrote HSG vector: {result.vector_path}")
+        for raster in result.raster_paths:
+            print(f"Wrote HSG raster: {raster}")
+        return 0
+    if args.command == "download-texture":
+        try:
+            result = retrieve_soil_texture(
+                args.root,
+                args.site,
+                buffer=args.buffer,
+                pixel_size=args.pixel_size,
+                top_depth=args.top_depth,
+            )
+        except SoilRetrievalError as exc:
+            print(f"download-texture failed: {exc}")
+            return 2
+        print(f"Wrote texture vector: {result.vector_path}")
+        for raster in result.raster_paths:
+            print(f"Wrote texture raster: {raster}")
         return 0
     if args.command == "materialize-dem":
         try:
