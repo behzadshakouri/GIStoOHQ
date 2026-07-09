@@ -4,10 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
+from .dem_downloader import parse_products, process_csv
+from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
 from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, write_input_manifest
+from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
+from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
 from .validation.input_validator import InputValidator
 
 
@@ -40,6 +44,55 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--site", required=True)
     prep.add_argument("--script-dir", default=None)
     prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+
+    dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
+    dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
+    dl.add_argument("output_csv", nargs="?", default=None, help="Optional CSV summary to write.")
+    dl.add_argument("--products", default="dem", help="dem, hydro, all, or comma-separated subset (default: dem).")
+    dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
+    dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
+    dl.add_argument("--lat-col", default=None, help="Latitude column (auto-detected by default).")
+    dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
+    dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
+    dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+
+    hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
+    hsg.add_argument("--root", required=True)
+    hsg.add_argument("--site", required=True)
+    hsg.add_argument("--buffer", type=float, default=5000.0)
+    hsg.add_argument("--pixel-size", type=float, default=0.0003)
+
+    texture = sub.add_parser("download-texture", help="Retrieve USDA SDA soil texture products.")
+    texture.add_argument("--root", required=True)
+    texture.add_argument("--site", required=True)
+    texture.add_argument("--buffer", type=float, default=5000.0)
+    texture.add_argument("--pixel-size", type=float, default=0.0003)
+    texture.add_argument("--top-depth", type=float, default=30.0)
+
+    mat_dem = sub.add_parser(
+        "materialize-dem",
+        help="Mosaic/reproject downloaded DEM rasters to demlr/cliped_utm.tif.",
+    )
+    mat_dem.add_argument("--root", required=True)
+    mat_dem.add_argument("--site", required=True)
+    mat_dem.add_argument("--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips.")
+    mat_dem.add_argument("--out", default=None, help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.")
+    mat_dem.add_argument("--dst-crs", default=None, help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.")
+
+    fetch = sub.add_parser(
+        "fetch-phase1-inputs",
+        help="Create outlet.shp and download source DEM/hydro products for phase 1.",
+    )
+    fetch.add_argument("--root", required=True)
+    fetch.add_argument("--site", required=True)
+    fetch.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    fetch.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    fetch.add_argument("--site-id", default=None, help="Folder-safe ID for source downloads; defaults to the site name.")
+    fetch.add_argument("--products", default="all", help="dem, hydro, all, or comma-separated subset (default: all).")
+    fetch.add_argument("--download-dir", default=None, help="Raw source download directory; defaults under the site folder.")
+    fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
+    fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+    fetch.add_argument("--skip-outlet", action="store_true", help="Only create folders and download source products.")
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -122,6 +175,95 @@ def main(argv: list[str] | None = None) -> int:
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
+        return 0
+    if args.command == "download-data":
+        try:
+            results = process_csv(
+                args.input_csv,
+                args.output_csv,
+                products=parse_products(args.products),
+                download_dir=args.download,
+                id_col=args.id_col,
+                lat_col=args.lat_col,
+                lon_col=args.lon_col,
+                buffer_m=args.buffer,
+                max_tiles=args.max_tiles,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-data failed: {exc}")
+            return 2
+        for result in results:
+            print(
+                f"{result.site_id} {result.product}: {result.status}; "
+                f"{result.count} item(s), downloaded {result.downloaded}"
+            )
+        return 0
+    if args.command == "download-hsg":
+        try:
+            result = retrieve_hydrologic_soil_groups(
+                args.root, args.site, buffer=args.buffer, pixel_size=args.pixel_size
+            )
+        except SoilRetrievalError as exc:
+            print(f"download-hsg failed: {exc}")
+            return 2
+        print(f"Wrote HSG vector: {result.vector_path}")
+        for raster in result.raster_paths:
+            print(f"Wrote HSG raster: {raster}")
+        return 0
+    if args.command == "download-texture":
+        try:
+            result = retrieve_soil_texture(
+                args.root,
+                args.site,
+                buffer=args.buffer,
+                pixel_size=args.pixel_size,
+                top_depth=args.top_depth,
+            )
+        except SoilRetrievalError as exc:
+            print(f"download-texture failed: {exc}")
+            return 2
+        print(f"Wrote texture vector: {result.vector_path}")
+        for raster in result.raster_paths:
+            print(f"Wrote texture raster: {raster}")
+        return 0
+    if args.command == "materialize-dem":
+        try:
+            result = materialize_dem(
+                args.root,
+                args.site,
+                source_dir=args.source_dir,
+                output_path=args.out,
+                dst_crs=args.dst_crs,
+            )
+        except DemMaterializeError as exc:
+            print(f"materialize-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM: {result.output_path}")
+        print(f"Source product count: {result.source_count}")
+        print(f"Target CRS: {result.dst_crs}")
+        return 0
+    if args.command == "fetch-phase1-inputs":
+        try:
+            result = fetch_phase1_inputs(
+                args.root,
+                args.site,
+                lon=args.lon,
+                lat=args.lat,
+                site_id=args.site_id,
+                products=args.products,
+                download_dir=args.download_dir,
+                buffer_m=args.buffer,
+                max_tiles=args.max_tiles,
+                skip_outlet=args.skip_outlet,
+            )
+        except (Phase1FetchError, ValueError) as exc:
+            print(f"fetch-phase1-inputs failed: {exc}")
+            return 2
+        if result.outlet_path:
+            print(f"Created outlet: {result.outlet_path}")
+        print(f"Downloaded source data under: {result.download_dir}")
+        print(f"Wrote summary: {result.summary_csv}")
+        print(f"Wrote manifest: {result.manifest_path}")
         return 0
     if args.command == "init-inputs":
         manifest = write_input_manifest(args.root, args.site)

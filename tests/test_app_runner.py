@@ -188,3 +188,25 @@ def test_build_steps_makes_doctor_strict_when_prepare_will_run(tmp_path):
 
     doctor = next(step for step in steps if step.name == "doctor")
     assert "--strict-gis" in doctor.command
+
+
+def test_build_steps_can_insert_soil_downloads(tmp_path):
+    config = PipelineConfig.from_mapping({
+        "root": str(tmp_path),
+        "site": "SITE_A",
+        "skip_prepare": True,
+        "download_hsg": True,
+        "download_texture": True,
+        "soil_buffer": 2500,
+        "soil_pixel_size": 0.0002,
+        "soil_top_depth": 15,
+    })
+
+    steps = build_steps(config)
+    names = [step.name for step in steps]
+
+    assert names == ["doctor", "prepare-inputs", "download-hsg", "download-texture", "check-inputs", "build"]
+    hsg = next(step for step in steps if step.name == "download-hsg")
+    texture = next(step for step in steps if step.name == "download-texture")
+    assert hsg.command[-4:] == ["--buffer", "2500.0", "--pixel-size", "0.0002"]
+    assert texture.command[-2:] == ["--top-depth", "15.0"]

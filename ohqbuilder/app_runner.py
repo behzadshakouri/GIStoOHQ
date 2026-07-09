@@ -36,6 +36,11 @@ class PipelineConfig:
     skip_prepare: bool = False
     no_schema: bool = False
     strict_gis: bool = False
+    download_hsg: bool = False
+    download_texture: bool = False
+    soil_buffer: float = 5000.0
+    soil_pixel_size: float = 0.0003
+    soil_top_depth: float = 30.0
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "PipelineConfig":
@@ -58,6 +63,11 @@ class PipelineConfig:
             skip_prepare=bool(data.get("skip_prepare", False)),
             no_schema=bool(data.get("no_schema", False)),
             strict_gis=bool(data.get("strict_gis", False)),
+            download_hsg=bool(data.get("download_hsg", False)),
+            download_texture=bool(data.get("download_texture", False)),
+            soil_buffer=float(data.get("soil_buffer", 5000.0)),
+            soil_pixel_size=float(data.get("soil_pixel_size", 0.0003)),
+            soil_top_depth=float(data.get("soil_top_depth", 30.0)),
         )
 
     @classmethod
@@ -128,6 +138,37 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
             reason="required outputs already exist" if skip_prepare and not config.skip_prepare else "configured skip_prepare",
         )
     )
+
+
+    if config.download_hsg:
+        hsg = _base_command() + [
+            "download-hsg",
+            "--root",
+            str(config.root),
+            "--site",
+            config.site,
+            "--buffer",
+            str(config.soil_buffer),
+            "--pixel-size",
+            str(config.soil_pixel_size),
+        ]
+        steps.append(PipelineStep("download-hsg", hsg))
+
+    if config.download_texture:
+        texture = _base_command() + [
+            "download-texture",
+            "--root",
+            str(config.root),
+            "--site",
+            config.site,
+            "--buffer",
+            str(config.soil_buffer),
+            "--pixel-size",
+            str(config.soil_pixel_size),
+            "--top-depth",
+            str(config.soil_top_depth),
+        ]
+        steps.append(PipelineStep("download-texture", texture))
 
     check = _base_command() + ["check-inputs"]
     _add_common_args(check, config)
