@@ -140,6 +140,18 @@ def _num(value: object) -> float | None:
         return None
 
 
+def _cokey_sort_key(cokey: str) -> tuple[int, int | str]:
+    try:
+        return (0, int(cokey))
+    except ValueError:
+        return (1, cokey)
+
+
+def _validate_positive(name: str, value: float) -> None:
+    if value <= 0:
+        raise SoilRetrievalError(f"{name} must be greater than 0; got {value}")
+
+
 def _usda_texture(sand: float, silt: float, clay: float) -> str:
     if silt + 1.5 * clay < 15:
         return "sand"
@@ -235,7 +247,10 @@ def _topsoil_by_mukey(rows: list[dict[str, Any]], top_depth: float) -> dict[str,
     best: dict[str, tuple[str, dict[str, Any]]] = {}
     for (mukey, cokey), comp in comps.items():
         current = best.get(mukey)
-        if current is None or (-comp["pct"], cokey) < (-current[1]["pct"], current[0]):
+        if current is None or (-comp["pct"], _cokey_sort_key(cokey)) < (
+            -current[1]["pct"],
+            _cokey_sort_key(current[0]),
+        ):
             best[mukey] = (cokey, comp)
     out: dict[str, dict[str, Any]] = {}
     for mukey, (_cokey, comp) in best.items():
@@ -279,6 +294,7 @@ def retrieve_soil_groups(
     buffer: float = 5000.0,
     pixel_size: float = 0.0003,
 ) -> SoilRetrievalResult:
+    _validate_positive("pixel_size", pixel_size)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
     wkt = bbox_wkt(_watershed_bounds(root_path, site, buffer))
@@ -308,6 +324,8 @@ def retrieve_soil_texture(
     pixel_size: float = 0.0003,
     top_depth: float = 30.0,
 ) -> SoilRetrievalResult:
+    _validate_positive("pixel_size", pixel_size)
+    _validate_positive("top_depth", top_depth)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
     wkt = bbox_wkt(_watershed_bounds(root_path, site, buffer))
@@ -315,7 +333,8 @@ def retrieve_soil_texture(
     mukeys = sorted({str(row["mukey"]) for row in polygon_rows if row.get("mukey") is not None})
     topsoil: dict[str, dict[str, Any]] = {}
     for index in range(0, len(mukeys), MUKEY_CHUNK):
-        topsoil.update(_topsoil_by_mukey(_query_horizons(mukeys[index : index + MUKEY_CHUNK], top_depth), top_depth))
+        chunk = mukeys[index : index + MUKEY_CHUNK]
+        topsoil.update(_topsoil_by_mukey(_query_horizons(chunk, top_depth), top_depth))
     rows: list[dict[str, Any]] = []
     for row in polygon_rows:
         mukey = str(row.get("mukey", ""))

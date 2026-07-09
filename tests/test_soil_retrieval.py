@@ -1,10 +1,14 @@
 from pathlib import Path
 
 from ohqbuilder.cli import main
+import pytest
+
 from ohqbuilder.soil_retrieval import (
+    SoilRetrievalError,
     SoilRetrievalResult,
     _resolve_hsg,
     _topsoil_by_mukey,
+    _validate_positive,
     _usda_texture,
     retrieve_hydrologic_soil_groups,
 )
@@ -101,3 +105,39 @@ def test_topsoil_by_mukey_uses_dominant_component_weighted_texture():
     assert round(topsoil["clay"], 2) == 33.33
     assert topsoil["texture"] == _usda_texture(topsoil["sand"], topsoil["silt"], topsoil["clay"])
     assert topsoil["texture_code"] == 8
+
+
+def test_topsoil_by_mukey_breaks_equal_component_pct_ties_by_numeric_cokey():
+    rows = [
+        {
+            "mukey": "1",
+            "cokey": "10",
+            "comppct_r": 50,
+            "compname": "ten",
+            "hzdept_r": 0,
+            "hzdepb_r": 30,
+            "sandtotal_r": 90,
+            "silttotal_r": 5,
+            "claytotal_r": 5,
+            "om_r": 1,
+        },
+        {
+            "mukey": "1",
+            "cokey": "2",
+            "comppct_r": 50,
+            "compname": "two",
+            "hzdept_r": 0,
+            "hzdepb_r": 30,
+            "sandtotal_r": 30,
+            "silttotal_r": 40,
+            "claytotal_r": 30,
+            "om_r": 3,
+        },
+    ]
+
+    assert _topsoil_by_mukey(rows, 30)["1"]["compname"] == "two"
+
+
+def test_validate_positive_rejects_non_positive_values():
+    with pytest.raises(SoilRetrievalError, match="pixel_size must be greater than 0"):
+        _validate_positive("pixel_size", 0)
