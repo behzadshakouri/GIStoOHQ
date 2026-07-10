@@ -278,7 +278,7 @@ def process_sites(args: argparse.Namespace) -> int:
             lat = float(row[args.lat_col])
             lon = float(row[args.lon_col])
         except (KeyError, ValueError, TypeError):
-            print(f"  {site_raw or '?':-16s} bad coordinate, skip")
+            print(f"  {site_raw or '?':<16s} bad coordinate, skip")
             failed += 1
             continue
 
@@ -287,14 +287,14 @@ def process_sites(args: argparse.Namespace) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         gpkg = out_dir / "hydrologic_soil_groups.gpkg"
         if gpkg.exists() and gpkg.stat().st_size > 0 and not args.force:
-            print(f"  {site_id:-16s} exists, skip")
+            print(f"  {site_id:<16s} exists, skip")
             skipped += 1
             continue
 
         try:
             response = sda_query(bbox_wkt(lat, lon, args.buffer_m), args.sda_url, args.timeout_s)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            print(f"  {site_id:-16s} SDA FAILED: {exc}")
+            print(f"  {site_id:<16s} SDA FAILED: {exc}")
             failed += 1
             continue
 
@@ -303,7 +303,7 @@ def process_sites(args: argparse.Namespace) -> int:
 
         n_features, dual, null_count = convert(response, out_dir, args.pixel_deg)
         if n_features == 0:
-            print(f"  {site_id:-16s} NO SOILS returned (SSURGO gap? check STATSGO)")
+            print(f"  {site_id:<16s} NO SOILS returned (SSURGO gap? check STATSGO)")
             failed += 1
         else:
             extra = []
@@ -311,7 +311,7 @@ def process_sites(args: argparse.Namespace) -> int:
                 extra.append("dual->/D: " + ",".join(f"{k} x{v}" for k, v in sorted(dual.items())))
             if null_count:
                 extra.append(f"NULL: {null_count}")
-            print(f"  {site_id:-16s} ok  {n_features} polys  {'; '.join(extra)}")
+            print(f"  {site_id:<16s} ok  {n_features} polys  {'; '.join(extra)}")
             ok += 1
 
         time.sleep(max(0.0, args.pause_s))
