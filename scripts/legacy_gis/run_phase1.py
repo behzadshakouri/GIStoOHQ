@@ -9,17 +9,11 @@
 # run_phase2.py.
 #
 # CURRENT STEPS:
-#   1. clip_only.py
-#        clip the source DEM/flowlines to the project working area
+#   1. delineate_whole_watershed.py
+#        outlet.shp + flow_dir.tif/flow_acc.tif -> watershed_boundary.gpkg
 #
-#   2. fillsink_etc.py
-#        prepare hydrologically conditioned rasters
-#
-#   3. delineate_whole_watershed.py
-#        outlet.shp -> watershed_boundary.gpkg
-#
-#   4. clip_dem_to_watershed.py
-#        -> clipped/cliped_utm_wsclip.tif
+#   2. clip_dem_to_watershed.py
+#        watershed_boundary.gpkg + DEM -> clipped/cliped_utm_wsclip.tif
 #
 #   5. extract_reaches.py
 #        -> reaches.gpkg
@@ -31,30 +25,49 @@
 #        -> junctions.gpkg
 #
 # REQUIRED INPUTS:
-#   <SITE>/outputs/outlet.shp
-#   <SITE>/demlr/cliped_utm.tif
-#   <SITE>/outputs/NHDFlowline_clip.gpkg
+#   OUTLET_PATH
+#   DEM_PATH
+#   FLOWLINE_PATH
+#   <OUT_DIR>/flow_dir.tif
+#   <OUT_DIR>/flow_acc.tif
 #
 # REQUIRED SUPPORT MODULE:
 #   <SCRIPT_DIR>/ws3io.py
 #
-# USAGE IN THE QGIS PYTHON CONSOLE:
+# MINIMAL USAGE IN THE QGIS PYTHON CONSOLE:
 #
-#   ROOT = "/mnt/2nd/Projects_H/SligoCreekGIS3"
-#   SITE_DIR = "SligoCreek_Mouth"
+#   ROOT = "/mnt/3rd900/Projects/SligoCreek_QGIS"
+#   SITE_DIR = ""
 #   SCRIPT_DIR = "/mnt/3rd900/Projects/PythonScripts"
+#   exec(open(SCRIPT_DIR + "/run_phase1.py").read())
+#
+# USAGE WITH EXPLICIT OPTIONS:
+#
+#   ROOT = "/mnt/3rd900/Projects/SligoCreek_QGIS"
+#   SITE_DIR = ""
+#   SCRIPT_DIR = "/mnt/3rd900/Projects/PythonScripts"
+#
+#   DEM_PATH = (
+#       "/mnt/3rd900/Projects/SligoCreek_QGIS/"
+#       "demlr/cliped_utm.tif"
+#   )
+#
+#   FLOWLINE_PATH = (
+#       "/mnt/3rd900/Projects/SligoCreek_QGIS/"
+#       "outputs/NHDFlowline_clip.gpkg"
+#   )
+#
+#   FORCE = True
+#   TARGET_EPSG = 26918
+#
 #   exec(open(SCRIPT_DIR + "/run_phase1.py").read())
 #
 # BEHAVIOR:
 #   - Stops on the first failed step.
 #   - Prints the failed script and full traceback.
 #   - Runs every child script in a fresh namespace.
-#   - Adds SCRIPT_DIR to Python's module search path so imports such as
-#     "from ws3io import release_and_delete" work in QGIS.
-#   - PHASE1_WORKFLOW can be set to "STANDARD" (default) or
-#     "DELINEATION_ONLY"; PHASE1_STEPS can also be supplied directly by a
-#     runner for site-specific preprocessing workflows. NLCD/HSG clipping stays
-#     in phase 2 through load_cn_inputs.py and cliptowatershed.py.
+#   - Adds SCRIPT_DIR to Python's module search path.
+#   - Passes shared paths and user options into every child script.
 # =============================================================================
 
 import os
@@ -63,135 +76,169 @@ import traceback
 
 
 # =============================================================================
-# Path resolution
+# RUNNER-OVERRIDABLE SETTINGS
 # =============================================================================
 
-try:
-    ROOT
-except NameError:
-    ROOT = "/mnt/2nd/Projects_H/SligoCreekGIS3"
+ROOT = globals().get(
+    "ROOT",
+    "/mnt/3rd900/Projects/SligoCreek_QGIS",
+)
 
-try:
-    SITE_DIR
-except NameError:
-    SITE_DIR = "SligoCreek_Mouth"
+SITE_DIR = globals().get("SITE_DIR", "")
 
-try:
-    SCRIPT_DIR
-except NameError:
+SCRIPT_DIR = globals().get("SCRIPT_DIR", None)
+
+OUT_DIR = globals().get("OUT_DIR", None)
+DEM_PATH = globals().get("DEM_PATH", None)
+FLOWLINE_PATH = globals().get("FLOWLINE_PATH", None)
+OUTLET_PATH = globals().get("OUTLET_PATH", None)
+FORCE = bool(globals().get("FORCE", True))
+TARGET_EPSG = globals().get("TARGET_EPSG", None)
+DRY_RUN = bool(globals().get("DRY_RUN", False))
+CHILD_OPTIONS = dict(globals().get("CHILD_OPTIONS", {}))
+PHASE1_STEPS = list(globals().get("PHASE1_STEPS", [
+    "delineate_whole_watershed.py",
+    "clip_dem_to_watershed.py",
+    "extract_reaches.py",
+    "derive_topology_reaches.py",
+    "materialize_junctions.py",
+]))
+
+
+# =============================================================================
+# PATH RESOLUTION
+# =============================================================================
+
+ROOT = os.path.abspath(os.path.expanduser(ROOT))
+
+if SCRIPT_DIR is None:
     if "__file__" in globals():
         SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     else:
         SCRIPT_DIR = os.getcwd()
 
-
-# Convert paths to normalized absolute paths.
-ROOT = os.path.abspath(os.path.expanduser(ROOT))
 SCRIPT_DIR = os.path.abspath(os.path.expanduser(SCRIPT_DIR))
 
-# SITE_DIR may be relative to ROOT or may itself be an absolute path.
 if os.path.isabs(SITE_DIR):
-    site_path = os.path.abspath(os.path.expanduser(SITE_DIR))
+    SITE_PATH = os.path.abspath(os.path.expanduser(SITE_DIR))
 else:
-    site_path = os.path.abspath(os.path.join(ROOT, SITE_DIR))
+    SITE_PATH = os.path.abspath(os.path.join(ROOT, SITE_DIR))
 
-OUT_DIR = os.path.join(site_path, "outputs")
+if OUT_DIR is None:
+    OUT_DIR = os.path.join(SITE_PATH, "outputs")
+else:
+    OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
+
+os.makedirs(OUT_DIR, exist_ok=True)
+
+if DEM_PATH is None:
+    DEM_PATH = os.path.join(SITE_PATH, "demlr", "cliped_utm.tif")
+else:
+    DEM_PATH = os.path.abspath(os.path.expanduser(DEM_PATH))
+
+if FLOWLINE_PATH is None:
+    FLOWLINE_PATH = os.path.join(OUT_DIR, "NHDFlowline_clip.gpkg")
+else:
+    FLOWLINE_PATH = os.path.abspath(os.path.expanduser(FLOWLINE_PATH))
+
+if OUTLET_PATH is None:
+    OUTLET_PATH = os.path.join(OUT_DIR, "outlet.shp")
+else:
+    OUTLET_PATH = os.path.abspath(os.path.expanduser(OUTLET_PATH))
+
+FLOWDIR_PATH = os.path.join(OUT_DIR, "flow_dir.tif")
+FLOWACC_PATH = os.path.join(OUT_DIR, "flow_acc.tif")
 
 
 # =============================================================================
-# Make local helper modules importable
+# VALIDATE SCRIPT DIRECTORY BEFORE USING IT
 # =============================================================================
 
-# QGIS does not automatically add the folder containing an exec()-run script
-# to sys.path. Add SCRIPT_DIR explicitly so imports such as:
-#
-#     from ws3io import release_and_delete
-#
-# work in all child scripts.
+if not os.path.isdir(SCRIPT_DIR):
+    raise Exception(
+        "SCRIPT_DIR does not exist or is not a directory:\n%s"
+        % SCRIPT_DIR
+    )
+
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 
 # =============================================================================
-# Pipeline steps
+# HELPERS
 # =============================================================================
 
-DEFAULT_PHASE1_STEPS = [
-    "clip_only.py",
-    "fillsink_etc.py",
-    "delineate_whole_watershed.py",
-    "clip_dem_to_watershed.py",
-    "extract_reaches.py",
-    "derive_topology_reaches.py",
-    "materialize_junctions.py",
-]
+def shapefile_complete(shp_path):
+    """Return True only when minimum required Shapefile parts exist."""
+    base, extension = os.path.splitext(shp_path)
 
-DELINEATION_ONLY_STEPS = [
-    "delineate_whole_watershed.py",
-    "clip_dem_to_watershed.py",
-    "extract_reaches.py",
-    "derive_topology_reaches.py",
-    "materialize_junctions.py",
-]
+    if extension.lower() != ".shp":
+        return os.path.isfile(shp_path)
 
-PHASE1_WORKFLOW = str(
-    globals().get("PHASE1_WORKFLOW", "STANDARD")
-).upper()
+    required = [
+        base + ".shp",
+        base + ".shx",
+        base + ".dbf",
+    ]
 
-if "PHASE1_STEPS" in globals():
-    PHASE1_STEPS = list(globals()["PHASE1_STEPS"])
-elif PHASE1_WORKFLOW == "STANDARD":
-    PHASE1_STEPS = list(DEFAULT_PHASE1_STEPS)
-elif PHASE1_WORKFLOW == "DELINEATION_ONLY":
-    PHASE1_STEPS = list(DELINEATION_ONLY_STEPS)
-else:
-    raise Exception(
-        "PHASE1_WORKFLOW must be STANDARD or DELINEATION_ONLY, "
-        "or supply PHASE1_STEPS explicitly."
-    )
+    return all(os.path.isfile(path) for path in required)
+
+
+def input_exists(path):
+    """Test regular files and Shapefiles safely."""
+    if path.lower().endswith(".shp"):
+        return shapefile_complete(path)
+
+    return os.path.isfile(path)
+
+
+def print_path_block(label, path):
+    print(f"  {label:<13}: {path}")
 
 
 # =============================================================================
-# Header
+# HEADER
 # =============================================================================
 
 print("=" * 78)
 print("SLIGO CREEK / GIStoOHQ -- PHASE 1")
 print("Watershed outlet -> watershed boundary -> reaches -> junctions")
 print("=" * 78)
-print("  ROOT       :", ROOT)
-print("  SITE_DIR   :", SITE_DIR)
-print("  SITE_PATH  :", site_path)
-print("  OUTPUTS    :", OUT_DIR)
-print("  SCRIPT_DIR :", SCRIPT_DIR)
-print("  sys.path[0]:", sys.path[0])
-print("  WORKFLOW   :", PHASE1_WORKFLOW)
+
+print_path_block("ROOT", ROOT)
+print_path_block("SITE_DIR", SITE_DIR)
+print_path_block("SITE_PATH", SITE_PATH)
+print_path_block("OUT_DIR", OUT_DIR)
+print_path_block("SCRIPT_DIR", SCRIPT_DIR)
+print_path_block("DEM_PATH", DEM_PATH)
+print_path_block("OUTLET_PATH", OUTLET_PATH)
+print_path_block("FLOWLINE", FLOWLINE_PATH)
+print_path_block("FLOW_DIR", FLOWDIR_PATH)
+print_path_block("FLOW_ACC", FLOWACC_PATH)
+
+print("  FORCE        :", FORCE)
+print("  TARGET_EPSG  :", TARGET_EPSG)
+print("  DRY_RUN      :", DRY_RUN)
+print("  sys.path[0]  :", sys.path[0])
 print("=" * 78)
 
 
 # =============================================================================
-# Preflight checks
+# PREFLIGHT CHECKS
 # =============================================================================
 
 required_inputs = [
-    (
-        os.path.join(OUT_DIR, "outlet.shp"),
-        "single-feature watershed outlet",
-    ),
-    (
-        os.path.join(site_path, "demlr", "cliped_utm.tif"),
-        "real-elevation DEM used by the watershed scripts",
-    ),
-    (
-        os.path.join(OUT_DIR, "NHDFlowline_clip.gpkg"),
-        "clipped NHD flowlines",
-    ),
+    (OUTLET_PATH, "single-feature watershed outlet"),
+    (DEM_PATH, "real-elevation DEM used by watershed scripts"),
+    (FLOWLINE_PATH, "clipped NHD flowlines"),
+    (FLOWDIR_PATH, "flow-direction raster from hydrology preprocessing"),
+    (FLOWACC_PATH, "flow-accumulation raster from hydrology preprocessing"),
 ]
 
 missing_inputs = [
     (path, description)
     for path, description in required_inputs
-    if not os.path.isfile(path)
+    if not input_exists(path)
 ]
 
 if missing_inputs:
@@ -201,22 +248,18 @@ if missing_inputs:
         print("\n  MISSING:", path)
         print("  PURPOSE:", description)
 
+        if path.lower().endswith(".shp"):
+            base, _ = os.path.splitext(path)
+            print("  REQUIRED COMPONENTS:")
+            print("   ", base + ".shp")
+            print("   ", base + ".shx")
+            print("   ", base + ".dbf")
+
     raise Exception(
         "Phase 1 cannot start because one or more required inputs are missing."
     )
 
-
-# Verify the script directory itself.
-if not os.path.isdir(SCRIPT_DIR):
-    raise Exception(
-        "SCRIPT_DIR does not exist or is not a directory:\n%s" % SCRIPT_DIR
-    )
-
-
-# Verify support modules imported by the child scripts.
-required_modules = [
-    "ws3io.py",
-]
+required_modules = ["ws3io.py"]
 
 missing_modules = [
     module
@@ -231,11 +274,9 @@ if missing_modules:
         print("  MISSING:", os.path.join(SCRIPT_DIR, module))
 
     raise Exception(
-        "One or more required Python support modules are missing from SCRIPT_DIR."
+        "One or more required Python support modules are missing."
     )
 
-
-# Verify all pipeline scripts.
 missing_scripts = [
     script
     for script in PHASE1_STEPS
@@ -252,8 +293,6 @@ if missing_scripts:
         "Set SCRIPT_DIR to the folder containing all Phase 1 scripts."
     )
 
-
-# Test the ws3io import before starting the pipeline.
 try:
     import ws3io
 
@@ -264,6 +303,7 @@ except Exception:
     print("\nPREFLIGHT FAILED -- ws3io.py exists but could not be imported.")
     print("SCRIPT_DIR:", SCRIPT_DIR)
     print("sys.path:")
+
     for entry in sys.path:
         print("  ", entry)
 
@@ -273,15 +313,39 @@ except Exception:
         "Could not import ws3io. Check ws3io.py and its dependencies."
     )
 
-
-os.makedirs(OUT_DIR, exist_ok=True)
-
 print("\nPreflight OK.")
 print("Running %d Phase 1 step(s)..." % len(PHASE1_STEPS))
 
+if DRY_RUN:
+    print("\nDRY_RUN=True: stopping after preflight.")
+    raise SystemExit(0)
+
 
 # =============================================================================
-# Step runner
+# SHARED CHILD NAMESPACE
+# =============================================================================
+
+SHARED_CHILD_VARIABLES = {
+    "ROOT": ROOT,
+    "SITE_DIR": SITE_DIR,
+    "SITE_PATH": SITE_PATH,
+    "OUT_DIR": OUT_DIR,
+    "SCRIPT_DIR": SCRIPT_DIR,
+    "DEM_PATH": DEM_PATH,
+    "OUTLET_PATH": OUTLET_PATH,
+    "FLOWLINE_PATH": FLOWLINE_PATH,
+    "FLOWDIR_PATH": FLOWDIR_PATH,
+    "FLOWACC_PATH": FLOWACC_PATH,
+    "FORCE": FORCE,
+    "TARGET_EPSG": TARGET_EPSG,
+    "DRY_RUN": DRY_RUN,
+}
+
+SHARED_CHILD_VARIABLES.update(CHILD_OPTIONS)
+
+
+# =============================================================================
+# STEP RUNNER
 # =============================================================================
 
 def run_step(step_number, script_name):
@@ -306,12 +370,9 @@ def run_step(step_number, script_name):
         "__name__": "__main__",
         "__file__": script_path,
         "__package__": None,
-        "ROOT": ROOT,
-        "SITE_DIR": SITE_DIR,
-        "SITE_PATH": site_path,
-        "OUT_DIR": OUT_DIR,
-        "SCRIPT_DIR": SCRIPT_DIR,
     }
+
+    child_namespace.update(SHARED_CHILD_VARIABLES)
 
     try:
         with open(script_path, "r", encoding="utf-8") as script_file:
@@ -321,17 +382,22 @@ def run_step(step_number, script_name):
         exec(compiled, child_namespace)
 
     except SystemExit as exc:
+        exit_code = exc.code
+
+        if exit_code in (None, 0):
+            print("\nCompleted with SystemExit(0):", script_name)
+            return
+
         print("\n" + "!" * 78)
         print("STEP STOPPED WITH SystemExit:", script_name)
-        print("Exit value:", exc)
+        print("Exit value:", exit_code)
         print("!" * 78)
 
         traceback.print_exc()
 
         raise Exception(
-            "Phase 1 stopped at step %d (%s) because the script called "
-            "SystemExit."
-            % (step_number, script_name)
+            "Phase 1 stopped at step %d (%s) with exit code %s."
+            % (step_number, script_name, exit_code)
         ) from exc
 
     except Exception as exc:
@@ -352,15 +418,15 @@ def run_step(step_number, script_name):
 
 
 # =============================================================================
-# Run pipeline
+# RUN PIPELINE
 # =============================================================================
 
-for index, script in enumerate(PHASE1_STEPS, start=1):
-    run_step(index, script)
+for index, script_name in enumerate(PHASE1_STEPS, start=1):
+    run_step(index, script_name)
 
 
 # =============================================================================
-# Completion message
+# COMPLETION MESSAGE
 # =============================================================================
 
 print("\n" + "=" * 78)
@@ -370,9 +436,12 @@ print("Outputs directory:")
 print(" ", OUT_DIR)
 
 print("\nExpected products:")
-print("  watershed_boundary.gpkg")
-print("  reaches.gpkg")
-print("  junctions.gpkg")
+print(" ", os.path.join(OUT_DIR, "watershed_boundary.gpkg"))
+print(" ", os.path.join(OUT_DIR, "reaches.gpkg"))
+print(" ", os.path.join(OUT_DIR, "junctions.gpkg"))
+
+print("\nExpected watershed-clipped DEM:")
+print(" ", os.path.join(OUT_DIR, "clipped", "cliped_utm_wsclip.tif"))
 
 print("\nNEXT MANUAL STEP:")
 print("  1. Load and inspect reaches.gpkg and junctions.gpkg.")
