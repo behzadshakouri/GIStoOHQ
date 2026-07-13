@@ -50,13 +50,20 @@ ADD_TO_PROJECT = True
 # ---------------------------------------------------------------------------
 
 site_path = os.path.join(ROOT, SITE_DIR)
-OUT_DIR   = os.path.join(site_path, "outputs")
-CLIP_DIR  = os.path.join(OUT_DIR, "clipped")
+OUT_DIR = globals().get("OUT_DIR", os.path.join(site_path, "outputs"))
+OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
+CLIP_DIR = os.path.join(OUT_DIR, "clipped")
 os.makedirs(CLIP_DIR, exist_ok=True)
 
-DEM_PATH      = os.path.join(site_path, DEM_REL)
-BOUNDARY_PATH = os.path.join(OUT_DIR, BOUNDARY_NAME)
-OUT_PATH      = os.path.join(CLIP_DIR, OUT_NAME)
+DEM_PATH = globals().get("DEM_PATH", os.path.join(site_path, DEM_REL))
+DEM_PATH = os.path.abspath(os.path.expanduser(DEM_PATH))
+BOUNDARY_PATH = globals().get(
+    "BOUNDARY_PATH",
+    os.path.join(OUT_DIR, BOUNDARY_NAME),
+)
+BOUNDARY_PATH = os.path.abspath(os.path.expanduser(BOUNDARY_PATH))
+OUT_PATH = globals().get("CLIPPED_DEM_PATH", os.path.join(CLIP_DIR, OUT_NAME))
+OUT_PATH = os.path.abspath(os.path.expanduser(OUT_PATH))
 
 print("Site     :", site_path)
 print("DEM      :", DEM_PATH)
