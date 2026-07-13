@@ -51,6 +51,10 @@
 #   - Runs every child script in a fresh namespace.
 #   - Adds SCRIPT_DIR to Python's module search path so imports such as
 #     "from ws3io import release_and_delete" work in QGIS.
+#   - PHASE1_WORKFLOW can be set to "STANDARD" (default) or
+#     "DELINEATION_ONLY"; PHASE1_STEPS can also be supplied directly by a
+#     runner for site-specific preprocessing workflows. NLCD/HSG clipping stays
+#     in phase 2 through load_cn_inputs.py and cliptowatershed.py.
 # =============================================================================
 
 import os
@@ -112,7 +116,7 @@ if SCRIPT_DIR not in sys.path:
 # Pipeline steps
 # =============================================================================
 
-PHASE1_STEPS = [
+DEFAULT_PHASE1_STEPS = [
     "clip_only.py",
     "fillsink_etc.py",
     "delineate_whole_watershed.py",
@@ -121,6 +125,30 @@ PHASE1_STEPS = [
     "derive_topology_reaches.py",
     "materialize_junctions.py",
 ]
+
+DELINEATION_ONLY_STEPS = [
+    "delineate_whole_watershed.py",
+    "clip_dem_to_watershed.py",
+    "extract_reaches.py",
+    "derive_topology_reaches.py",
+    "materialize_junctions.py",
+]
+
+PHASE1_WORKFLOW = str(
+    globals().get("PHASE1_WORKFLOW", "STANDARD")
+).upper()
+
+if "PHASE1_STEPS" in globals():
+    PHASE1_STEPS = list(globals()["PHASE1_STEPS"])
+elif PHASE1_WORKFLOW == "STANDARD":
+    PHASE1_STEPS = list(DEFAULT_PHASE1_STEPS)
+elif PHASE1_WORKFLOW == "DELINEATION_ONLY":
+    PHASE1_STEPS = list(DELINEATION_ONLY_STEPS)
+else:
+    raise Exception(
+        "PHASE1_WORKFLOW must be STANDARD or DELINEATION_ONLY, "
+        "or supply PHASE1_STEPS explicitly."
+    )
 
 
 # =============================================================================
@@ -137,6 +165,7 @@ print("  SITE_PATH  :", site_path)
 print("  OUTPUTS    :", OUT_DIR)
 print("  SCRIPT_DIR :", SCRIPT_DIR)
 print("  sys.path[0]:", sys.path[0])
+print("  WORKFLOW   :", PHASE1_WORKFLOW)
 print("=" * 78)
 
 

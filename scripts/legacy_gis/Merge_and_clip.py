@@ -85,6 +85,8 @@ SITE_DIR = globals().get("SITE_DIR", "")
 
 # Output directory:
 #   None -> ROOT/SITE_DIR/demlr, matching the legacy Phase 1 DEM input path.
+#   Set OUT_DIR and CLIPPED_NAME explicitly for other clipping/materialization
+#   workflows, such as land-cover extent QA products.
 OUT_DIR = globals().get("OUT_DIR", None)
 
 # Source DEM selection.
