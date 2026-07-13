@@ -7,7 +7,7 @@ from pathlib import Path
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
-from .legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow, write_input_manifest
+from .legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_legacy_input_workflow, write_input_manifest
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
@@ -44,6 +44,15 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--site", required=True)
     prep.add_argument("--script-dir", default=None)
     prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+    prep.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
+    prep.add_argument("--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts.")
+    prep.add_argument("--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts.")
+    prep.add_argument("--flowline-path", default=None, help="Flowline path passed to legacy scripts.")
+    prep.add_argument("--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts.")
+    prep.add_argument("--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts.")
+    prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
+    prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
+    prep.add_argument("--dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
 
     dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
     dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
@@ -116,6 +125,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default=None)
     run.add_argument("--script-dir", default=None)
     run.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
+    run.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
+    run.add_argument("--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts.")
+    run.add_argument("--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts.")
+    run.add_argument("--flowline-path", default=None, help="Flowline path passed to legacy scripts.")
+    run.add_argument("--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts.")
+    run.add_argument("--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts.")
+    run.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
+    run.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
+    run.add_argument("--prepare-dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
     run.add_argument("--skip-prepare", action="store_true")
     run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
 
@@ -150,6 +168,20 @@ def _maybe_validate_inputs(settings: BuilderSettings, skip_input_check: bool, no
     return _validate_inputs(settings, no_schema)
 
 
+def _legacy_options_from_args(args) -> LegacyWorkflowOptions:
+    return LegacyWorkflowOptions(
+        out_dir=getattr(args, "out_dir", None),
+        dem_path=getattr(args, "dem_path", None),
+        outlet_path=getattr(args, "outlet_path", None),
+        flowline_path=getattr(args, "flowline_path", None),
+        flowdir_path=getattr(args, "flowdir_path", None),
+        flowacc_path=getattr(args, "flowacc_path", None),
+        target_epsg=getattr(args, "target_epsg", None),
+        force=not getattr(args, "no_force", False),
+        dry_run=getattr(args, "dry_run", False),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "build":
@@ -171,7 +203,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "prepare-inputs":
         try:
-            run_legacy_input_workflow(args.root, args.site, args.script_dir, args.phase)
+            run_legacy_input_workflow(
+                args.root,
+                args.site,
+                args.script_dir,
+                args.phase,
+                _legacy_options_from_args(args),
+            )
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
@@ -275,7 +313,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         if not args.skip_prepare:
             try:
-                run_legacy_input_workflow(args.root, args.site, args.script_dir, args.phase)
+                legacy_options = _legacy_options_from_args(args)
+                legacy_options = LegacyWorkflowOptions(
+                    **{**legacy_options.__dict__, "dry_run": args.prepare_dry_run}
+                )
+                run_legacy_input_workflow(
+                    args.root,
+                    args.site,
+                    args.script_dir,
+                    args.phase,
+                    legacy_options,
+                )
             except LegacyInputWorkflowError as exc:
                 print(f"prepare-inputs failed: {exc}")
                 return 2

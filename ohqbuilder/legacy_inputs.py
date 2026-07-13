@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +16,26 @@ _PHASE_SCRIPTS = {
 }
 
 
+@dataclass(frozen=True)
+class LegacyWorkflowOptions:
+    """Optional settings forwarded to the retained QGIS phase runners."""
+
+    out_dir: str | Path | None = None
+    dem_path: str | Path | None = None
+    outlet_path: str | Path | None = None
+    flowline_path: str | Path | None = None
+    flowdir_path: str | Path | None = None
+    flowacc_path: str | Path | None = None
+    pour_points_path: str | Path | None = None
+    watershed_path: str | Path | None = None
+    reaches_path: str | Path | None = None
+    junctions_path: str | Path | None = None
+    target_epsg: int | str | None = None
+    force: bool = True
+    dry_run: bool = False
+    child_options: dict[str, object] | None = None
+
+
 class LegacyInputWorkflowError(RuntimeError):
     """Raised when the legacy QGIS input-generation workflow cannot run."""
 
@@ -21,15 +44,22 @@ def default_script_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "scripts" / "legacy_gis"
 
 
-def _require_qgis() -> None:
+def _module_available(name: str) -> bool:
+    if name in sys.modules:
+        return True
     try:
-        import qgis.core  # noqa: F401
-    except ImportError as exc:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _require_qgis() -> None:
+    if not _module_available("qgis.core"):
         raise LegacyInputWorkflowError(
             "Creating GIS input files requires a QGIS Python environment. Open QGIS "
             "and run from its Python Console, or use a QGIS application Python "
             "environment, then rerun the prepare-inputs command."
-        ) from exc
+        )
     if not ensure_processing_available():
         raise LegacyInputWorkflowError(
             "Creating GIS input files requires the QGIS processing plugin. The runner "
@@ -38,44 +68,101 @@ def _require_qgis() -> None:
         )
 
 
-def required_inputs(root: Path, site: str, phase: LegacyPhase) -> list[tuple[Path, str]]:
-    out_dir = root / site / "outputs"
-    site_dir = root / site
+def _resolve_optional(value: str | Path | None) -> Path | None:
+    return Path(value).expanduser().resolve() if value is not None else None
+
+
+def _default_site_path(root: Path, site: str) -> Path:
+    site_path = Path(site).expanduser()
+    if site_path.is_absolute():
+        return site_path.resolve()
+    return (root / site).resolve()
+
+
+def _workflow_paths(root: Path, site: str, options: LegacyWorkflowOptions) -> dict[str, Path]:
+    site_path = _default_site_path(root, site)
+    out_dir = _resolve_optional(options.out_dir) or site_path / "outputs"
+    return {
+        "site_path": site_path,
+        "out_dir": out_dir,
+        "dem_path": _resolve_optional(options.dem_path) or site_path / "demlr" / "cliped_utm.tif",
+        "outlet_path": _resolve_optional(options.outlet_path) or out_dir / "outlet.shp",
+        "flowline_path": _resolve_optional(options.flowline_path) or out_dir / "NHDFlowline_clip.gpkg",
+        "flowdir_path": _resolve_optional(options.flowdir_path) or out_dir / "flow_dir.tif",
+        "flowacc_path": _resolve_optional(options.flowacc_path) or out_dir / "flow_acc.tif",
+        "pour_points_path": _resolve_optional(options.pour_points_path) or out_dir / "pour_points.shp",
+        "watershed_path": _resolve_optional(options.watershed_path) or out_dir / "watershed_boundary.gpkg",
+        "reaches_path": _resolve_optional(options.reaches_path) or out_dir / "reaches.gpkg",
+        "junctions_path": _resolve_optional(options.junctions_path) or out_dir / "junctions.gpkg",
+    }
+
+
+def _shapefile_components(path: Path) -> list[Path]:
+    if path.suffix.lower() != ".shp":
+        return [path]
+    return [path.with_suffix(suffix) for suffix in (".shp", ".shx", ".dbf")]
+
+
+def _input_exists(path: Path) -> bool:
+    return all(component.is_file() for component in _shapefile_components(path))
+
+
+def required_inputs(
+    root: Path,
+    site: str,
+    phase: LegacyPhase,
+    options: LegacyWorkflowOptions | None = None,
+) -> list[tuple[Path, str]]:
+    paths = _workflow_paths(root, site, options or LegacyWorkflowOptions())
     if phase == "phase1":
         return [
-            (out_dir / "outlet.shp", "single-feature watershed outlet"),
-            (site_dir / "demlr" / "cliped_utm.tif", "real-elevation DEM"),
-            (out_dir / "NHDFlowline_clip.gpkg", "clipped NHD flowlines"),
+            (paths["outlet_path"], "single-feature watershed outlet"),
+            (paths["dem_path"], "real-elevation DEM"),
+            (paths["flowline_path"], "flowlines used for channel burning/reach extraction"),
+            (paths["flowdir_path"], "flow-direction raster from hydrology preprocessing"),
+            (paths["flowacc_path"], "flow-accumulation raster from hydrology preprocessing"),
         ]
     if phase == "phase2":
         return [
-            (out_dir / "pour_points.shp", "hand-placed pour points"),
-            (out_dir / "watershed_boundary.gpkg", "phase-1 watershed boundary"),
-            (out_dir / "reaches.gpkg", "phase-1 reaches with topology"),
-            (out_dir / "junctions.gpkg", "phase-1 junctions"),
-            (out_dir / "outlet.shp", "phase-1 outlet"),
+            (paths["pour_points_path"], "hand-placed pour points"),
+            (paths["watershed_path"], "phase-1 watershed boundary"),
+            (paths["reaches_path"], "phase-1 reaches with topology"),
+            (paths["junctions_path"], "phase-1 junctions"),
+            (paths["outlet_path"], "phase-1 outlet"),
         ]
     return []
 
 
-def check_required_inputs(root: Path, site: str, phase: LegacyPhase) -> None:
-    missing = [(path, why) for path, why in required_inputs(root, site, phase) if not path.is_file()]
+def check_required_inputs(
+    root: Path,
+    site: str,
+    phase: LegacyPhase,
+    options: LegacyWorkflowOptions | None = None,
+) -> None:
+    missing: list[tuple[Path, str, list[Path]]] = []
+    for path, why in required_inputs(root, site, phase, options):
+        if not _input_exists(path):
+            missing.append((path, why, [p for p in _shapefile_components(path) if not p.is_file()]))
     if not missing:
         return
     lines = [f"Missing required {phase} input(s):"]
-    lines.extend(f"  - {path} ({why})" for path, why in missing)
+    for path, why, components in missing:
+        lines.append(f"  - {path} ({why})")
+        if len(components) > 1 or components[0] != path:
+            lines.extend(f"      missing component: {component}" for component in components)
     lines.append("Create or download these inputs before running prepare-inputs.")
     raise LegacyInputWorkflowError("\n".join(lines))
 
 
 def write_input_manifest(root: str | Path, site: str) -> Path:
     root_path = Path(root).expanduser().resolve()
-    site_path = root_path / site
+    site_path = _default_site_path(root_path, site)
     outputs_path = site_path / "outputs"
     demlr_path = site_path / "demlr"
     outputs_path.mkdir(parents=True, exist_ok=True)
     demlr_path.mkdir(parents=True, exist_ok=True)
     manifest_path = site_path / "INPUTS.md"
+    options = LegacyWorkflowOptions()
     lines = [
         "# GIStoOHQ source inputs",
         "",
@@ -83,10 +170,10 @@ def write_input_manifest(root: str | Path, site: str) -> Path:
         "",
         "## Phase 1",
     ]
-    for path, why in required_inputs(root_path, site, "phase1"):
+    for path, why in required_inputs(root_path, site, "phase1", options):
         lines.append(f"- `{path.relative_to(site_path)}` — {why}")
     lines.extend(["", "## Phase 2"])
-    for path, why in required_inputs(root_path, site, "phase2"):
+    for path, why in required_inputs(root_path, site, "phase2", options):
         lines.append(f"- `{path.relative_to(site_path)}` — {why}")
     lines.extend([
         "",
@@ -96,16 +183,41 @@ def write_input_manifest(root: str | Path, site: str) -> Path:
     return manifest_path
 
 
-def _run_phase(script_path: Path, root: Path, site: str, script_dir: Path) -> None:
-    if not script_path.is_file():
-        raise LegacyInputWorkflowError(f"Legacy phase script not found: {script_path}")
-
-    namespace = {
+def _namespace_for_phase(root: Path, site: str, script_dir: Path, options: LegacyWorkflowOptions) -> dict[str, object]:
+    paths = _workflow_paths(root, site, options)
+    namespace: dict[str, object] = {
         "__name__": "__main__",
         "ROOT": str(root),
         "SITE_DIR": site,
+        "SITE_PATH": str(paths["site_path"]),
         "SCRIPT_DIR": str(script_dir),
+        "OUT_DIR": str(paths["out_dir"]),
+        "DEM_PATH": str(paths["dem_path"]),
+        "OUTLET_PATH": str(paths["outlet_path"]),
+        "FLOWLINE_PATH": str(paths["flowline_path"]),
+        "FLOWDIR_PATH": str(paths["flowdir_path"]),
+        "FLOWACC_PATH": str(paths["flowacc_path"]),
+        "POUR_POINTS_PATH": str(paths["pour_points_path"]),
+        "WATERSHED_PATH": str(paths["watershed_path"]),
+        "REACHES_PATH": str(paths["reaches_path"]),
+        "JUNCTIONS_PATH": str(paths["junctions_path"]),
+        "FORCE": options.force,
+        "DRY_RUN": options.dry_run,
     }
+    if options.target_epsg is not None:
+        namespace["TARGET_EPSG"] = int(options.target_epsg)
+    if options.child_options:
+        namespace["CHILD_OPTIONS"] = dict(options.child_options)
+        namespace.update(options.child_options)
+    return namespace
+
+
+def _run_phase(script_path: Path, root: Path, site: str, script_dir: Path, options: LegacyWorkflowOptions) -> None:
+    if not script_path.is_file():
+        raise LegacyInputWorkflowError(f"Legacy phase script not found: {script_path}")
+
+    namespace = _namespace_for_phase(root, site, script_dir, options)
+    namespace["__file__"] = str(script_path)
     source = script_path.read_text(encoding="utf-8")
     exec(compile(source, str(script_path), "exec"), namespace)
 
@@ -115,6 +227,7 @@ def run_legacy_input_workflow(
     site: str,
     script_dir: str | Path | None = None,
     phase: LegacyPhase = "all",
+    options: LegacyWorkflowOptions | None = None,
 ) -> None:
     """Run the retained QGIS scripts that create GIStoOHQ input GeoPackages.
 
@@ -129,10 +242,17 @@ def run_legacy_input_workflow(
 
     _require_qgis()
 
+    workflow_options = options or LegacyWorkflowOptions()
     root_path = Path(root).expanduser().resolve()
     script_path = Path(script_dir).expanduser().resolve() if script_dir else default_script_dir()
     phases = ("phase1", "phase2") if phase == "all" else (phase,)
 
     for selected_phase in phases:
-        check_required_inputs(root_path, site, selected_phase)
-        _run_phase(script_path / _PHASE_SCRIPTS[selected_phase], root_path, site, script_path)
+        check_required_inputs(root_path, site, selected_phase, workflow_options)
+        _run_phase(
+            script_path / _PHASE_SCRIPTS[selected_phase],
+            root_path,
+            site,
+            script_path,
+            workflow_options,
+        )

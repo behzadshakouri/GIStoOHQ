@@ -14,6 +14,9 @@ def test_prepare_inputs_parser_defaults_to_all_phases():
     assert args.command == "prepare-inputs"
     assert args.phase == "all"
     assert args.script_dir is None
+    assert args.out_dir is None
+    assert args.dem_path is None
+    assert args.no_force is False
 
 
 def test_prepare_inputs_cli_returns_error_when_legacy_workflow_fails(monkeypatch):
@@ -58,6 +61,8 @@ def test_run_parser_supports_end_to_end_options():
     assert args.project_name == "Custom"
     assert args.skip_prepare is True
     assert args.no_schema is True
+    assert args.out_dir is None
+    assert args.prepare_dry_run is False
 
 
 def test_run_command_can_skip_prepare_and_build(monkeypatch, tmp_path):
