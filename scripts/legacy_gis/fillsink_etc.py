@@ -1,5 +1,29 @@
 # =============================================================================
 # Hydrology preprocessing with SELECTABLE STREAM-BURNING MODE.
+#
+# BURN_MODE:
+#   "none"      - no burning; r.watershed runs on the raw DEM.
+#   "constant"  - lower every channel cell by a constant depth (CONST_DEPTH).
+#                 Simple, but can leave reverse gradients where the flowline
+#                 and DEM disagree.
+#   "synthetic" - overwrite the channel with a strictly-descending synthetic
+#                 staircase (ANCHOR_BELOW + DROP_PER_CELL), descending in the
+#                 TRUE downhill direction (uphill-digitized lines auto-reversed).
+#                 Guarantees no flow-direction reversals in the channel.
+#
+# In "constant" and "synthetic" modes the CHANNEL cell elevations are altered
+# (synthetic ones are fully artificial). Use dem_carved.tif ONLY for
+# flow_dir / flow_acc / delineation. Use DEM_PATH for real elevation/slope.
+#
+# Extra output: channel_elev.gpkg (and channel_elev.tif) -- ONLY the channel
+# cells, each carrying its final burned elevation, as points. Lets you inspect
+# exactly what the channel profile became.
+#
+# Runner-overridable paths:
+#   ROOT, SITE_DIR, OUT_DIR, DEM_PATH, FLOWLINE_PATH
+#
+# All outputs go to OUT_DIR, defaulting to <SITE>/outputs/.
+# Run from: QGIS -> Plugins -> Python Console.
 # =============================================================================
 
 import os
@@ -9,41 +33,57 @@ from osgeo import gdal, ogr, osr
 from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer
 from processing.core.Processing import Processing
 
-try:
-    ROOT
-except NameError:
-    ROOT = "/home/arash/Dropbox/Chloeta/NHA/"
-try:
-    SITE_DIR
-except NameError:
-    SITE_DIR = "WS3_GIS/AZ12-100"
+ROOT = globals().get(
+    "ROOT",
+    "/mnt/3rd900/Projects/SligoCreek_QGIS",
+)
+SITE_DIR = globals().get("SITE_DIR", "")
 
-DEM_REL = "demlr/cliped_utm.tif"
-FLOW_REL = "outputs/NHDFlowline_clip.gpkg"
+DEM_REL = globals().get("DEM_REL", os.path.join("demlr", "cliped_utm.tif"))
+FLOW_REL = globals().get("FLOW_REL", os.path.join("outputs", "NHDFlowline_clip.gpkg"))
 
-BURN_MODE = "synthetic"  # "none" | "constant" | "synthetic"
+BURN_MODE = globals().get(
+    "BURN_MODE",
+    "synthetic",
+)  # "none" | "constant" | "synthetic"
 
-CONST_DEPTH = 10.0
-ANCHOR_BELOW = 50.0
-DROP_PER_CELL = 0.1
+CONST_DEPTH = float(globals().get("CONST_DEPTH", 10.0))
+ANCHOR_BELOW = float(globals().get("ANCHOR_BELOW", 50.0))
+DROP_PER_CELL = float(globals().get("DROP_PER_CELL", 0.1))
 
-MAKE_CHANNEL_OUTPUT = True
-ADD_TO_PROJECT = True
+MAKE_CHANNEL_OUTPUT = bool(globals().get("MAKE_CHANNEL_OUTPUT", True))
+ADD_TO_PROJECT = bool(globals().get("ADD_TO_PROJECT", True))
 
-site_path = os.path.join(ROOT, SITE_DIR)
-DEM_PATH = os.path.join(site_path, DEM_REL)
-FLOW_PATH = os.path.join(site_path, FLOW_REL)
+ROOT = os.path.abspath(os.path.expanduser(ROOT))
+if os.path.isabs(SITE_DIR):
+    site_path = os.path.abspath(os.path.expanduser(SITE_DIR))
+else:
+    site_path = os.path.abspath(os.path.join(ROOT, SITE_DIR))
 
-OUT_DIR = os.path.join(site_path, "outputs")
+OUT_DIR = globals().get("OUT_DIR", os.path.join(site_path, "outputs"))
+OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
 TEMP_DIR = os.path.join(OUT_DIR, "temp")
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-carved_path = os.path.join(OUT_DIR, "dem_carved.tif")
-fdir_path = os.path.join(OUT_DIR, "flow_dir.tif")
-facc_path = os.path.join(OUT_DIR, "flow_acc.tif")
-chan_pts = os.path.join(OUT_DIR, "channel_elev.gpkg")
-chan_ras = os.path.join(OUT_DIR, "channel_elev.tif")
+DEM_PATH = globals().get("DEM_PATH", os.path.join(site_path, DEM_REL))
+DEM_PATH = os.path.abspath(os.path.expanduser(DEM_PATH))
+FLOW_PATH = globals().get(
+    "FLOWLINE_PATH",
+    globals().get("FLOW_PATH", os.path.join(site_path, FLOW_REL)),
+)
+FLOW_PATH = os.path.abspath(os.path.expanduser(FLOW_PATH))
+
+carved_path = globals().get("CARVED_DEM_PATH", os.path.join(OUT_DIR, "dem_carved.tif"))
+carved_path = os.path.abspath(os.path.expanduser(carved_path))
+fdir_path = globals().get("FLOWDIR_PATH", os.path.join(OUT_DIR, "flow_dir.tif"))
+fdir_path = os.path.abspath(os.path.expanduser(fdir_path))
+facc_path = globals().get("FLOWACC_PATH", os.path.join(OUT_DIR, "flow_acc.tif"))
+facc_path = os.path.abspath(os.path.expanduser(facc_path))
+chan_pts = globals().get("CHANNEL_POINTS_PATH", os.path.join(OUT_DIR, "channel_elev.gpkg"))
+chan_pts = os.path.abspath(os.path.expanduser(chan_pts))
+chan_ras = globals().get("CHANNEL_RASTER_PATH", os.path.join(OUT_DIR, "channel_elev.tif"))
+chan_ras = os.path.abspath(os.path.expanduser(chan_ras))
 flow_utm = os.path.join(TEMP_DIR, "flowlines_utm.gpkg")
 
 
@@ -74,6 +114,7 @@ def grass_id(name):
 
 
 def release_lock(path):
+    """Remove any project layer holding path open before overwrite."""
     proj = QgsProject.instance()
     target = os.path.normcase(os.path.abspath(path))
     for lyr in list(proj.mapLayers().values()):
@@ -91,6 +132,13 @@ print("DEM       :", DEM_PATH)
 print("Flowlines :", FLOW_PATH)
 print("Outputs   :", OUT_DIR)
 print("Burn mode :", BURN_MODE)
+
+for path, description in (
+    (DEM_PATH, "DEM"),
+    (FLOW_PATH, "flowlines"),
+):
+    if not os.path.isfile(path):
+        raise Exception("%s not found: %s" % (description, path))
 
 dem = QgsRasterLayer(DEM_PATH, "dem")
 if not dem.isValid():
@@ -256,7 +304,7 @@ msg = "      traced %d line part(s)" % n_lines
 if BURN_MODE == "synthetic":
     msg += "; reversed %d uphill-digitized line(s)" % n_rev
 elif BURN_MODE == "none":
-    msg += "; no burn applied"
+    msg += "; no burn applied (channel keeps real DEM elevations)"
 print(msg + ".")
 
 out = elev.copy()
@@ -396,4 +444,5 @@ if MAKE_CHANNEL_OUTPUT:
     print("  channel_elev.gpkg - channel cells only, final elevation points")
 
 if BURN_MODE != "none":
-    print("Reminder: channel elevations are modified; use cliped_utm.tif for real elevation/slope work.")
+    print("Reminder: channel elevations are modified; use DEM_PATH for real")
+    print("elevation/slope work, not dem_carved.tif:", DEM_PATH)
