@@ -69,6 +69,7 @@ SNAP = bool(globals().get("SNAP", True))
 SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
+SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.90))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
 )
@@ -258,6 +259,32 @@ def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
     return snap_x, snap_y, raw_accumulation, moved, snap_col, snap_row
 
 
+def print_alignment_guidance(snap_acc=None, moved=None):
+    """Print field checks for outlet/routing-grid alignment failures."""
+    print("\nOUTLET / ROUTING-GRID ALIGNMENT CHECK")
+    print("  The runner and preflight passed; this is a routing alignment issue.")
+    if moved is not None:
+        print("  snap movement      : %.2f m of %.2f m" % (moved, SNAP_RADIUS_M))
+    if snap_acc is not None:
+        print("  snapped |flow_acc| : %.3f cells" % abs(snap_acc))
+    print("\n  Check these layers together in QGIS:")
+    print("   ", OUTLET_PATH)
+    print("   ", FLOWACC_PATH)
+    print("   ", FLOWDIR_PATH)
+    print("   ", os.path.join(site_path, "clipped_dem_utm.tif"))
+    print("\n  Use Identify Features on flow_acc.tif along the intended channel near")
+    print("  the outlet. A real downstream channel cell should have accumulation")
+    print("  far greater than the small snapped value shown above.")
+    print("\n  Safest correction:")
+    print("   1. Display flow_acc.tif with a stretched/log renderer.")
+    print("   2. Move outlet.shp directly onto the highest-accumulation raster cell")
+    print("      that matches the intended NHD/channel centerline.")
+    print("   3. Save outlet.shp in the routing-grid CRS (%s)." % crs_authid)
+    print("   4. Rerun the same Phase 1 runner.")
+    print("\n  Do not lower MIN_WATERSHED_AREA_KM2 just to continue; it is preventing")
+    print("  a meaningless tiny watershed from propagating through later steps.")
+
+
 # =============================================================================
 # PREFLIGHT / INPUTS
 # =============================================================================
@@ -329,6 +356,9 @@ print(
     % (x, y, crs_authid)
 )
 
+snap_acc = None
+moved = None
+
 if SNAP:
     x, y, snap_acc, moved, snap_col, snap_row = snap_to_flow_accumulation(
         x,
@@ -343,12 +373,23 @@ if SNAP:
     print("  raw flow accumulation: %.3f" % snap_acc)
     print("  |flow accumulation|  : %.3f cells" % abs(snap_acc))
     print("  movement             : %.2f m" % moved)
+    if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
+        print(
+            "  WARNING: snap used %.0f%% or more of the search radius; "
+            "the intended routed channel may not be near the outlet."
+            % (SNAP_EDGE_FRACTION * 100.0)
+        )
     if abs(snap_acc) < MIN_SNAP_ACC_CELLS:
         print(
             "  WARNING: snapped accumulation is below %.0f cells; "
             "the operator point may not be near the intended channel."
             % MIN_SNAP_ACC_CELLS
         )
+    if (
+        moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M
+        and abs(snap_acc) < MIN_SNAP_ACC_CELLS
+    ):
+        print_alignment_guidance(snap_acc=snap_acc, moved=moved)
 else:
     print("Automatic outlet snapping is disabled; using operator point as-is.")
 
@@ -435,11 +476,13 @@ boundary = QgsGeometry.unaryUnion(geometries).makeValid()
 area_km2 = boundary.area() / 1e6
 print("Whole-watershed area: %.4f km2" % area_km2)
 if area_km2 < MIN_WATERSHED_AREA_KM2:
+    print_alignment_guidance(snap_acc=snap_acc, moved=moved)
     raise Exception(
         "Delineated watershed area %.4f km2 is below the sanity threshold "
-        "%.4f km2. The outlet did not snap to a meaningful drainage path. "
-        "Move outlet.shp closer to the intended channel or increase "
-        "SNAP_RADIUS_M cautiously."
+        "%.4f km2. The outlet/routing grid alignment is not producing a "
+        "meaningful drainage path. Move outlet.shp onto a high-accumulation "
+        "cell on the intended channel and rerun Phase 1; do not lower the "
+        "sanity threshold to continue."
         % (area_km2, MIN_WATERSHED_AREA_KM2)
     )
 
