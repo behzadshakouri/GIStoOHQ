@@ -63,15 +63,23 @@ ADD_TO_PROJECT = True
 # ---------------------------------------------------------------------------
 
 site_path = os.path.join(ROOT, SITE_DIR)
-OUT_DIR   = os.path.join(site_path, "outputs")
-TEMP_DIR  = os.path.join(OUT_DIR, "temp")
+OUT_DIR = globals().get("OUT_DIR", os.path.join(site_path, "outputs"))
+OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
+TEMP_DIR = os.path.join(OUT_DIR, "temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-OUTLET_PATH  = os.path.join(OUT_DIR, OUTLET_REL)
-FLOWDIR_PATH = os.path.join(OUT_DIR, FLOWDIR_REL)
-FLOWACC_PATH = os.path.join(OUT_DIR, FLOWACC_REL)
-BOUNDARY_OUT = os.path.join(OUT_DIR, "watershed_boundary.gpkg")
-SNAPPED_OUT  = os.path.join(OUT_DIR, "outlet_snapped.gpkg")
+OUTLET_PATH = globals().get("OUTLET_PATH", os.path.join(OUT_DIR, OUTLET_REL))
+OUTLET_PATH = os.path.abspath(os.path.expanduser(OUTLET_PATH))
+FLOWDIR_PATH = globals().get("FLOWDIR_PATH", os.path.join(OUT_DIR, FLOWDIR_REL))
+FLOWDIR_PATH = os.path.abspath(os.path.expanduser(FLOWDIR_PATH))
+FLOWACC_PATH = globals().get("FLOWACC_PATH", os.path.join(OUT_DIR, FLOWACC_REL))
+FLOWACC_PATH = os.path.abspath(os.path.expanduser(FLOWACC_PATH))
+BOUNDARY_OUT = globals().get(
+    "BOUNDARY_PATH",
+    os.path.join(OUT_DIR, "watershed_boundary.gpkg"),
+)
+BOUNDARY_OUT = os.path.abspath(os.path.expanduser(BOUNDARY_OUT))
+SNAPPED_OUT = os.path.join(OUT_DIR, "outlet_snapped.gpkg")
 
 print("Site       :", site_path)
 print("Outlet     :", OUTLET_PATH)
