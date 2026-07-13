@@ -9,19 +9,25 @@
 # run_phase2.py.
 #
 # CURRENT STEPS:
-#   1. delineate_whole_watershed.py
+#   1. clip_only.py
+#        clip the source DEM/flowlines to the project working area
+#
+#   2. fillsink_etc.py
+#        prepare hydrologically conditioned rasters
+#
+#   3. delineate_whole_watershed.py
 #        outlet.shp -> watershed_boundary.gpkg
 #
-#   2. clip_dem_to_watershed.py
+#   4. clip_dem_to_watershed.py
 #        -> clipped/cliped_utm_wsclip.tif
 #
-#   3. extract_reaches.py
+#   5. extract_reaches.py
 #        -> reaches.gpkg
 #
-#   4. derive_topology_reaches.py
+#   6. derive_topology_reaches.py
 #        adds reach-to-reach topology to reaches.gpkg
 #
-#   5. materialize_junctions.py
+#   7. materialize_junctions.py
 #        -> junctions.gpkg
 #
 # REQUIRED INPUTS:
@@ -69,7 +75,10 @@ except NameError:
 try:
     SCRIPT_DIR
 except NameError:
-    SCRIPT_DIR = "/mnt/3rd900/Projects/PythonScripts"
+    if "__file__" in globals():
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    else:
+        SCRIPT_DIR = os.getcwd()
 
 
 # Convert paths to normalized absolute paths.
@@ -104,6 +113,8 @@ if SCRIPT_DIR not in sys.path:
 # =============================================================================
 
 PHASE1_STEPS = [
+    "clip_only.py",
+    "fillsink_etc.py",
     "delineate_whole_watershed.py",
     "clip_dem_to_watershed.py",
     "extract_reaches.py",
