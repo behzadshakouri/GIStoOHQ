@@ -24,8 +24,11 @@ def test_prepare_inputs_runs_selected_phase_with_seeded_namespace(tmp_path, monk
 
     out_dir = tmp_path / "root" / "SITE_A" / "outputs"
     out_dir.mkdir(parents=True)
-    (out_dir / "outlet.shp").write_text("", encoding="utf-8")
+    for suffix in (".shp", ".shx", ".dbf"):
+        (out_dir / f"outlet{suffix}").write_text("", encoding="utf-8")
     (out_dir / "NHDFlowline_clip.gpkg").write_text("", encoding="utf-8")
+    (out_dir / "flow_dir.tif").write_text("", encoding="utf-8")
+    (out_dir / "flow_acc.tif").write_text("", encoding="utf-8")
     dem_dir = tmp_path / "root" / "SITE_A" / "demlr"
     dem_dir.mkdir()
     (dem_dir / "cliped_utm.tif").write_text("", encoding="utf-8")
@@ -46,6 +49,70 @@ def test_prepare_inputs_runs_selected_phase_with_seeded_namespace(tmp_path, monk
     )
 
 
+def test_prepare_inputs_passes_configurable_paths_to_phase_script(tmp_path, monkeypatch):
+    qgis = types.ModuleType("qgis")
+    qgis_core = types.ModuleType("qgis.core")
+    processing = types.ModuleType("processing")
+    monkeypatch.setitem(sys.modules, "qgis", qgis)
+    monkeypatch.setitem(sys.modules, "qgis.core", qgis_core)
+    monkeypatch.setitem(sys.modules, "processing", processing)
+
+    from ohqbuilder.legacy_inputs import LegacyWorkflowOptions
+
+    root = tmp_path / "root"
+    out_dir = tmp_path / "custom_outputs"
+    out_dir.mkdir(parents=True)
+    for suffix in (".shp", ".shx", ".dbf"):
+        (out_dir / f"custom_outlet{suffix}").write_text("", encoding="utf-8")
+    dem_path = tmp_path / "custom_dem.tif"
+    dem_path.write_text("", encoding="utf-8")
+    flowline_path = tmp_path / "flowlines.gpkg"
+    flowline_path.write_text("", encoding="utf-8")
+    flowdir_path = tmp_path / "flow_dir.tif"
+    flowdir_path.write_text("", encoding="utf-8")
+    flowacc_path = tmp_path / "flow_acc.tif"
+    flowacc_path.write_text("", encoding="utf-8")
+
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    marker = tmp_path / "namespace.txt"
+    (script_dir / "run_phase1.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('\\n'.join([OUT_DIR, DEM_PATH, OUTLET_PATH, FLOWLINE_PATH, FLOWDIR_PATH, FLOWACC_PATH, str(TARGET_EPSG), str(FORCE), str(DRY_RUN)]))\n",
+        encoding="utf-8",
+    )
+
+    run_legacy_input_workflow(
+        root,
+        "SITE_A",
+        script_dir,
+        phase="phase1",
+        options=LegacyWorkflowOptions(
+            out_dir=out_dir,
+            dem_path=dem_path,
+            outlet_path=out_dir / "custom_outlet.shp",
+            flowline_path=flowline_path,
+            flowdir_path=flowdir_path,
+            flowacc_path=flowacc_path,
+            target_epsg=26918,
+            force=False,
+            dry_run=True,
+        ),
+    )
+
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        str(out_dir.resolve()),
+        str(dem_path.resolve()),
+        str((out_dir / "custom_outlet.shp").resolve()),
+        str(flowline_path.resolve()),
+        str(flowdir_path.resolve()),
+        str(flowacc_path.resolve()),
+        "26918",
+        "False",
+        "True",
+    ]
+
+
 def test_prepare_inputs_reports_missing_phase1_inputs(tmp_path, monkeypatch):
     import types
 
@@ -63,6 +130,8 @@ def test_prepare_inputs_reports_missing_phase1_inputs(tmp_path, monkeypatch):
         assert "Missing required phase1 input" in message
         assert "cliped_utm.tif" in message
         assert "NHDFlowline_clip.gpkg" in message
+        assert "flow_dir.tif" in message
+        assert "flow_acc.tif" in message
     else:
         raise AssertionError("expected LegacyInputWorkflowError")
 
@@ -77,3 +146,5 @@ def test_write_input_manifest_creates_directories_and_checklist(tmp_path):
     text = manifest.read_text(encoding="utf-8")
     assert "demlr/cliped_utm.tif" in text
     assert "outputs/NHDFlowline_clip.gpkg" in text
+    assert "outputs/flow_dir.tif" in text
+    assert "outputs/flow_acc.tif" in text
