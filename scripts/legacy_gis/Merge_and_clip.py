@@ -50,10 +50,10 @@
 #
 # exec(open(f"{SCRIPT_DIR}/Merge_and_clip.py").read())
 #
-# Main outputs:
+# Main outputs (by default under <ROOT>/<SITE_DIR>/demlr):
 #   merged_dem.tif
 #   merged_dem_utm.tif
-#   clipped_dem_utm.tif
+#   cliped_utm.tif
 # =============================================================================
 
 import os
@@ -84,7 +84,7 @@ ROOT = globals().get(
 SITE_DIR = globals().get("SITE_DIR", "")
 
 # Output directory:
-#   None -> ROOT/SITE_DIR
+#   None -> ROOT/SITE_DIR/demlr, matching the legacy Phase 1 DEM input path.
 OUT_DIR = globals().get("OUT_DIR", None)
 
 # Source DEM selection.
@@ -170,7 +170,7 @@ REPROJECTED_NAME = globals().get(
 )
 CLIPPED_NAME = globals().get(
     "CLIPPED_NAME",
-    "clipped_dem_utm.tif",
+    "cliped_utm.tif",
 )
 
 # Processing behavior.
@@ -199,7 +199,7 @@ LAYER_TREE_ROOT = PROJECT.layerTreeRoot()
 SITE_PATH = os.path.abspath(os.path.join(ROOT, SITE_DIR))
 
 if OUT_DIR is None:
-    OUT_DIR = SITE_PATH
+    OUT_DIR = os.path.join(SITE_PATH, "demlr")
 else:
     OUT_DIR = os.path.abspath(OUT_DIR)
 
@@ -223,9 +223,9 @@ EXCLUDED_OUTPUT_NAMES = {
     "merged_dem_utm.tif",
     "clipped_dem.tif",
     "clipped_dem_utm.tif",
+    "cliped_utm.tif",
     "cliped_dem.tif",
     "cliped_dem_utm.tif",
-    "cliped_utm.tif",
 }
 
 
