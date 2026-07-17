@@ -65,10 +65,18 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
     status = main([
         "full-run", "--root", str(tmp_path), "--site", "SITE_A",
         "--lat", "34.1", "--lon", "-111.2",
+        "--site-id", "source-id", "--download-dir", str(tmp_path / "raw"),
+        "--max-tiles", "6", "--soil-pixel-size", "0.0002",
+        "--soil-top-depth", "20",
     ])
     assert status == 0
     assert calls[0][2]["lat"] == 34.1
     assert calls[0][2]["lon"] == -111.2
+    assert calls[0][2]["site_id"] == "source-id"
+    assert calls[0][2]["download_dir"] == str(tmp_path / "raw")
+    assert calls[0][2]["max_tiles"] == 6
+    assert calls[0][2]["soil_pixel_size"] == 0.0002
+    assert calls[0][2]["soil_top_depth"] == 20
     assert "Full pipeline complete" in capsys.readouterr().out
 
 
