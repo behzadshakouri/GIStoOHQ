@@ -5,8 +5,31 @@ from ohqbuilder.cli import main
 
 
 def test_parse_products_all_and_subset():
-    assert dd.parse_products("all") == ["dem", "hydro"]
+    assert dd.parse_products("all") == ["dem", "demlr", "hydro"]
     assert dd.parse_products("dem,hydro") == ["dem", "hydro"]
+    assert dd.parse_products("demhr,demlr") == ["dem", "demlr"]
+
+
+def test_query_tnm_reads_current_nested_download_url(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return (
+                b'{"items":[{"title":"USGS tile","urls":{"TIFF":"https://example.test/a.tif"},'
+                b'"publicationDate":"2025-01-02","sizeInBytes":"42"}]}'
+            )
+
+    monkeypatch.setattr(dd.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    item = dd.query_tnm(-111.2, 35.1, dd.ELEVATION_TIERS[0], 30)[0]
+
+    assert item.url == "https://example.test/a.tif"
+    assert item.publication_date == "2025-01-02"
+    assert item.size_bytes == 42
 
 
 def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
