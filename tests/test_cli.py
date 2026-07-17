@@ -4,6 +4,7 @@ from ohqbuilder.cli import build_parser, main
 from ohqbuilder.legacy_inputs import LegacyInputWorkflowError
 from ohqbuilder.pour_points import PourPointGenerationError, PourPointResult
 from ohqbuilder.outlet_creator import OutletCreationError, OutletCreationResult
+from ohqbuilder.full_runner import FullRunError, FullRunResult
 
 
 def test_prepare_inputs_parser_defaults_to_all_phases():
@@ -50,6 +51,35 @@ def test_create_outlet_cli_reports_error(monkeypatch, tmp_path):
     monkeypatch.setattr("ohqbuilder.cli.create_outlet_from_flow_accumulation", fail)
     assert main([
         "create-outlet", "--root", str(tmp_path), "--site", "SITE_A"
+    ]) == 2
+
+
+def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_full(root, site, **kwargs):
+        calls.append((root, site, kwargs))
+        return FullRunResult(tmp_path / "final.ohq")
+
+    monkeypatch.setattr("ohqbuilder.cli.run_full_pipeline", fake_full)
+    status = main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "34.1", "--lon", "-111.2",
+    ])
+    assert status == 0
+    assert calls[0][2]["lat"] == 34.1
+    assert calls[0][2]["lon"] == -111.2
+    assert "Full pipeline complete" in capsys.readouterr().out
+
+
+def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "ohqbuilder.cli.run_full_pipeline",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FullRunError("download failed")),
+    )
+    assert main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "34.1", "--lon", "-111.2",
     ]) == 2
 
 

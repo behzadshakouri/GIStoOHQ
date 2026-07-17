@@ -52,6 +52,21 @@ To create the expected folders and an `INPUTS.md` checklist, run:
 ohqbuild init-inputs --root /mnt/3rd900/Projects/GIStoOHQ --site .
 ```
 
+### One-command workflow
+
+From a QGIS Python environment, the full workflow can start from an approximate
+outlet coordinate:
+
+```bash
+ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
+  --lat 34.123 --lon -111.456
+```
+
+This downloads DEM and NHD source products, materializes the legacy input files,
+creates routing rasters, runs both preparation phases, validates their outputs,
+and writes the final OHQ file. Network access and the optional GIS dependencies
+are required. The staged commands below remain supported.
+
 Before running the QGIS workflow, the site directory should contain:
 
 ```text

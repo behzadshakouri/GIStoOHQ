@@ -290,3 +290,21 @@ def run_legacy_input_workflow(
             script_path,
             workflow_options,
         )
+
+
+def run_hydrology_preprocessing(
+    root: str | Path,
+    site: str,
+    script_dir: str | Path | None = None,
+    options: LegacyWorkflowOptions | None = None,
+) -> None:
+    """Create flow-direction and accumulation rasters before the phase runners."""
+    _require_qgis()
+    workflow_options = options or LegacyWorkflowOptions()
+    root_path = Path(root).expanduser().resolve()
+    scripts = Path(script_dir).expanduser().resolve() if script_dir else default_script_dir()
+    paths = _workflow_paths(root_path, site, workflow_options)
+    for key, description in (("dem_path", "DEM"), ("flowline_path", "flowlines")):
+        if not _input_exists(paths[key]):
+            raise LegacyInputWorkflowError(f"Hydrology preprocessing {description} not found: {paths[key]}")
+    _run_phase(scripts / "fillsink_etc.py", root_path, site, scripts, workflow_options)
