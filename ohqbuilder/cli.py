@@ -177,11 +177,6 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--script-dir", default=None)
     full.add_argument("--buffer", type=float, default=5000.0, help="Source-data query buffer in meters.")
     full.add_argument("--target-crs", default=None, help="Optional DEM target CRS, e.g. EPSG:26912.")
-    full.add_argument(
-        "--demcheck",
-        default=None,
-        help="Path to ArashMassoudieh/DEMDownloader demcheck; auto-detected on PATH.",
-    )
 
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
@@ -307,7 +302,6 @@ def main(argv: list[str] | None = None) -> int:
                 script_dir=args.script_dir,
                 buffer_m=args.buffer,
                 target_crs=args.target_crs,
-                demcheck_path=args.demcheck,
             )
         except FullRunError as exc:
             print(f"full-run failed: {exc}")

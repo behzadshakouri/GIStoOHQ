@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .dem_materializer import materialize_dem
-from .demcheck_adapter import download_with_demcheck, find_demcheck
 from .hydro_materializer import materialize_flowlines
 from .legacy_inputs import LegacyWorkflowOptions, run_hydrology_preprocessing, run_legacy_input_workflow
 from .phase1_fetcher import fetch_phase1_inputs
@@ -33,19 +32,12 @@ def run_full_pipeline(
     script_dir: str | Path | None = None,
     buffer_m: float = 5000.0,
     target_crs: str | None = None,
-    demcheck_path: str | Path | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
     try:
-        demcheck = find_demcheck(demcheck_path)
-        if demcheck:
-            fetched = download_with_demcheck(
-                demcheck, root, site, lon=lon, lat=lat, buffer_m=buffer_m
-            )
-        else:
-            fetched = fetch_phase1_inputs(
-                root, site, lon=lon, lat=lat, products="all", buffer_m=buffer_m
-            )
+        fetched = fetch_phase1_inputs(
+            root, site, lon=lon, lat=lat, products="all", buffer_m=buffer_m
+        )
         dem = materialize_dem(root, site, source_dir=fetched.download_dir, dst_crs=target_crs)
         materialize_flowlines(
             root, site, source_dir=fetched.download_dir, dem_path=dem.output_path

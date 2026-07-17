@@ -8,7 +8,6 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     calls = []
     downloads = tmp_path / "downloads"
     dem = tmp_path / "dem.tif"
-    monkeypatch.setattr("ohqbuilder.full_runner.find_demcheck", lambda path=None: None)
 
     monkeypatch.setattr(
         "ohqbuilder.full_runner.fetch_phase1_inputs",
