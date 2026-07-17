@@ -92,6 +92,12 @@ subwatersheds
 build
 ```
 
+`download-landcover` in this conceptual sequence is not an implemented
+GIStoOHQ command yet. See the downloader inventory in
+[`data_downloaders.md`](data_downloaders.md) for the distinction between
+available Python commands and products that exist only in the vendored C++
+reference implementation.
+
 ## Shared USDA helper
 
 Shared SDA behavior lives in `ohqbuilder.usda`, including:
