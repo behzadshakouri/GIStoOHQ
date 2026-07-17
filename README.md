@@ -41,13 +41,49 @@ For a single command that starts from an approximate outlet coordinate, download
 source data, materializes the DEM and NHD flowlines, runs both GIS phases, and
 writes the final OHQ file, use a QGIS Python environment:
 
+### Run the complete workflow
+
+From the repository root, install the package and GIS extras into the Python
+environment used by QGIS:
+
 ```bash
-ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
-  --lat 34.123 --lon -111.456
+cd /path/to/GIStoOHQ
+python -m pip install -e '.[gis]'
+ohqbuild doctor --strict-gis
 ```
 
+Then provide a project root, a site directory relative to that root, and an
+approximate WGS84 outlet coordinate:
+
+```bash
+ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
+  --lat 34.123 --lon -111.456 \
+  --buffer 5000
+```
+
+The final file is written to `<ROOT>/<SITE>/outputs/<SITE>.ohq` unless `--out`
+is supplied. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
+target-CRS, and soil-resolution options.
+
 `full-run` uses GIStoOHQ's built-in Python TNM downloader; compiling or installing
-the external C++ `demcheck` program is not required.
+the external C++ `demcheck` program is not required. It runs the complete
+four-step workflow: download all supported inputs (DEM, hydrography, HSG, and
+soil texture), merge/clip source products, generate GIS inputs, then validate and
+write the OHQ file. The corresponding staged commands are `download-inputs`,
+`materialize-inputs`, `prepare-inputs`, and `build`.
+
+To inspect or rerun individual stages, use:
+
+```bash
+ohqbuild download-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 \
+  --lat 34.123 --lon -111.456 --buffer 5000
+ohqbuild materialize-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
+ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
+ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+The download stages require network access. Materialization requires the GIS
+extras, and `prepare-inputs`/`full-run` require QGIS plus its `processing` plugin.
 
 The existing three-step workflow remains available for controlled or offline runs.
 

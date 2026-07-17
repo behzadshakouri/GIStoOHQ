@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
 
-ProductKey = Literal["dem", "hydro"]
+ProductKey = Literal["dem", "demlr", "hydro"]
 
 TNM_PRODUCTS_URL = "https://tnmaccess.nationalmap.gov/api/v1/products"
 METERS_PER_DEGREE = 111_320.0
@@ -31,6 +31,8 @@ class DownloadItem:
     url: str
     dataset: str
     resolution: str
+    publication_date: str = ""
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -52,22 +54,36 @@ ELEVATION_TIERS: tuple[ProductTier, ...] = (
     ProductTier("National Elevation Dataset (NED) 1/3 arc-second", ("GeoTIFF",), "1/3 arc-second"),
     ProductTier("National Elevation Dataset (NED) 1 arc-second", ("GeoTIFF",), "1 arc-second"),
 )
+LOW_RES_ELEVATION_TIERS: tuple[ProductTier, ...] = (
+    ProductTier("National Elevation Dataset (NED) 1/3 arc-second", ("GeoTIFF",), "1/3 arc-second"),
+)
 HYDRO_TIERS: tuple[ProductTier, ...] = (
     ProductTier("National Hydrography Dataset Plus High Resolution (NHDPlus HR)", ("Shapefile", "FileGDB"), "NHDPlus HR"),
     ProductTier("National Hydrography Dataset (NHD) Best Resolution", ("Shapefile", "FileGDB"), "NHD Best Resolution"),
 )
-PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {"dem": ELEVATION_TIERS, "hydro": HYDRO_TIERS}
-DEFAULT_MAX_TILES: dict[ProductKey, int] = {"dem": 8, "hydro": 4}
+PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {
+    "dem": ELEVATION_TIERS,
+    "demlr": LOW_RES_ELEVATION_TIERS,
+    "hydro": HYDRO_TIERS,
+}
+DEFAULT_MAX_TILES: dict[ProductKey, int] = {"dem": 4, "demlr": 8, "hydro": 4}
 
 
 def parse_products(value: str) -> list[ProductKey]:
     if value == "all":
-        return ["dem", "hydro"]
+        return ["dem", "demlr", "hydro"]
     products: list[ProductKey] = []
     for part in value.split(","):
         key = part.strip().lower()
-        if key not in {"dem", "hydro"}:
-            raise ValueError("products must be 'dem', 'hydro', 'all', or a comma-separated subset")
+        # DEMDownloader calls its high-resolution product ``demhr``.  Keep the
+        # historical GIStoOHQ ``dem`` spelling (and folder layout) as an alias.
+        if key == "demhr":
+            key = "dem"
+        if key not in {"dem", "demlr", "hydro"}:
+            raise ValueError(
+                "products must be 'dem' (or 'demhr'), 'demlr', 'hydro', 'all', "
+                "or a comma-separated subset"
+            )
         products.append(key)  # type: ignore[arg-type]
     return products
 
@@ -112,9 +128,35 @@ def query_tnm(lon: float, lat: float, tier: ProductTier, buffer_m: float, timeou
     items = data.get("items") or []
     results: list[DownloadItem] = []
     for item in items:
-        download_url = item.get("downloadURL") or item.get("downloadUrl") or item.get("url")
+        # TNM responses are not uniform: current elevation records generally
+        # put links under ``urls.TIFF``, while older/vector records expose a
+        # top-level downloadURL.  This mirrors the probes in vendor/demcheck.
+        urls = item.get("urls") or {}
+        download_url = (
+            urls.get("TIFF")
+            or urls.get("Shapefile")
+            or urls.get("GeoPackage")
+            or urls.get("FileGDB")
+            or item.get("downloadURL")
+            or item.get("downloadUrl")
+            or item.get("url")
+        )
         if download_url:
-            results.append(DownloadItem(item.get("title") or Path(download_url).name, download_url, tier.dataset, tier.resolution_label))
+            raw_size = item.get("sizeInBytes")
+            try:
+                size = int(raw_size) if raw_size not in (None, "") else None
+            except (TypeError, ValueError):
+                size = None
+            results.append(
+                DownloadItem(
+                    item.get("title") or Path(download_url).name,
+                    download_url,
+                    tier.dataset,
+                    tier.resolution_label,
+                    item.get("publicationDate") or item.get("dateCreated") or "",
+                    size,
+                )
+            )
     return results
 
 
