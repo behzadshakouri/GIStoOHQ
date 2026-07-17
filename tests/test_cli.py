@@ -3,6 +3,7 @@ from pathlib import Path
 from ohqbuilder.cli import build_parser, main
 from ohqbuilder.legacy_inputs import LegacyInputWorkflowError
 from ohqbuilder.pour_points import PourPointGenerationError, PourPointResult
+from ohqbuilder.outlet_creator import OutletCreationError, OutletCreationResult
 
 
 def test_prepare_inputs_parser_defaults_to_all_phases():
@@ -21,6 +22,35 @@ def test_prepare_inputs_parser_defaults_to_all_phases():
     assert args.dem_path is None
     assert args.no_force is False
     assert args.no_auto_pour_points is False
+    assert args.no_auto_outlet is False
+
+
+def test_create_outlet_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_create(flow_acc, output, overwrite=False):
+        calls.append((flow_acc, output, overwrite))
+        return OutletCreationResult(Path(output).resolve(), 10.0, 20.0, 99.0)
+
+    monkeypatch.setattr("ohqbuilder.cli.create_outlet_from_flow_accumulation", fake_create)
+    status = main([
+        "create-outlet", "--root", str(tmp_path), "--site", "SITE_A", "--overwrite"
+    ])
+
+    outputs = tmp_path / "SITE_A" / "outputs"
+    assert status == 0
+    assert calls == [(outputs / "flow_acc.tif", outputs / "outlet.shp", True)]
+    assert "Created outlet at (10.000, 20.000)" in capsys.readouterr().out
+
+
+def test_create_outlet_cli_reports_error(monkeypatch, tmp_path):
+    def fail(*args, **kwargs):
+        raise OutletCreationError("no valid cells")
+
+    monkeypatch.setattr("ohqbuilder.cli.create_outlet_from_flow_accumulation", fail)
+    assert main([
+        "create-outlet", "--root", str(tmp_path), "--site", "SITE_A"
+    ]) == 2
 
 
 def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):

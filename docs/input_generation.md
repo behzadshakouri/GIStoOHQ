@@ -71,6 +71,17 @@ The legacy phase-1 runner expects:
 - `outputs/NHDFlowline_clip.gpkg` — clipped NHD flowlines used for channel
   burning and reach extraction.
 
+If `outputs/outlet.shp` is absent, `prepare-inputs` derives it automatically at
+the center of the maximum valid flow-accumulation cell. The same operation can
+be run explicitly:
+
+```bash
+ohqbuild create-outlet --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+Use `--no-auto-outlet` to require a supplied outlet instead, or
+`create-outlet --overwrite` to intentionally replace an existing outlet.
+
 If DEM or flowline inputs are missing, see [`docs/data_downloaders.md`](data_downloaders.md)
 for notes on using DEMDownloader/`demcheck` upstream.
 

@@ -8,6 +8,7 @@ from typing import Literal
 
 from .qgis_env import ensure_processing_available
 from .pour_points import PourPointGenerationError, generate_pour_points
+from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 
 LegacyPhase = Literal["phase1", "phase2", "all"]
 
@@ -36,6 +37,7 @@ class LegacyWorkflowOptions:
     dry_run: bool = False
     child_options: dict[str, object] | None = None
     auto_pour_points: bool = True
+    auto_outlet: bool = True
 
 
 class LegacyInputWorkflowError(RuntimeError):
@@ -250,6 +252,24 @@ def run_legacy_input_workflow(
     phases = ("phase1", "phase2") if phase == "all" else (phase,)
 
     for selected_phase in phases:
+        if selected_phase == "phase1" and workflow_options.auto_outlet:
+            paths = _workflow_paths(root_path, site, workflow_options)
+            if (
+                not _input_exists(paths["outlet_path"])
+                and _input_exists(paths["flowacc_path"])
+            ):
+                try:
+                    result = create_outlet_from_flow_accumulation(
+                        paths["flowacc_path"], paths["outlet_path"]
+                    )
+                except OutletCreationError as exc:
+                    raise LegacyInputWorkflowError(
+                        f"Automatic outlet creation failed: {exc}"
+                    ) from exc
+                print(
+                    f"Created outlet at ({result.x:.3f}, {result.y:.3f}): "
+                    f"{result.output_path}"
+                )
         if selected_phase == "phase2" and workflow_options.auto_pour_points:
             paths = _workflow_paths(root_path, site, workflow_options)
             if not _input_exists(paths["pour_points_path"]):
