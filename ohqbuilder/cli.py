@@ -11,6 +11,7 @@ from .legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
+from .full_runner import FullRunError, run_full_pipeline
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
@@ -163,6 +164,20 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-auto-pour-points", action="store_true", help="Require manually supplied pour points.")
     run.add_argument("--no-auto-outlet", action="store_true", help="Require a manually supplied outlet.")
 
+    full = sub.add_parser(
+        "full-run",
+        help="Download source data and build an OHQ project in one command.",
+    )
+    full.add_argument("--root", required=True)
+    full.add_argument("--site", required=True)
+    full.add_argument("--lat", type=float, required=True, help="Approximate outlet latitude.")
+    full.add_argument("--lon", type=float, required=True, help="Approximate outlet longitude.")
+    full.add_argument("--project-name", default=None)
+    full.add_argument("--out", default=None)
+    full.add_argument("--script-dir", default=None)
+    full.add_argument("--buffer", type=float, default=5000.0, help="Source-data query buffer in meters.")
+    full.add_argument("--target-crs", default=None, help="Optional DEM target CRS, e.g. EPSG:26912.")
+
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
     doctor.add_argument("--strict-gis", action="store_true")
@@ -274,6 +289,24 @@ def main(argv: list[str] | None = None) -> int:
             f"Created outlet at ({result.x:.3f}, {result.y:.3f}), "
             f"flow accumulation {result.accumulation:g}: {result.output_path}"
         )
+        return 0
+    if args.command == "full-run":
+        try:
+            result = run_full_pipeline(
+                args.root,
+                args.site,
+                lon=args.lon,
+                lat=args.lat,
+                project_name=args.project_name,
+                output_path=args.out,
+                script_dir=args.script_dir,
+                buffer_m=args.buffer,
+                target_crs=args.target_crs,
+            )
+        except FullRunError as exc:
+            print(f"full-run failed: {exc}")
+            return 2
+        print(f"Full pipeline complete: {result.output_path}")
         return 0
     if args.command == "download-data":
         try:
