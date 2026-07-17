@@ -79,10 +79,17 @@ def build_parser() -> argparse.ArgumentParser:
     pour.add_argument("--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp.")
     pour.add_argument("--overwrite", action="store_true")
 
-    dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
+    dl = sub.add_parser(
+        "download-data",
+        help="Query/download USGS DEM and hydrography products for site coordinates.",
+    )
     dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
     dl.add_argument("output_csv", nargs="?", default=None, help="Optional CSV summary to write.")
-    dl.add_argument("--products", default="dem", help="dem, hydro, all, or comma-separated subset (default: dem).")
+    dl.add_argument(
+        "--products",
+        default="dem",
+        help="dem/demhr, demlr, hydro, all, or a comma-separated subset (default: dem).",
+    )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
     dl.add_argument("--lat-col", default=None, help="Latitude column (auto-detected by default).")

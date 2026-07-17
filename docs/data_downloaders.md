@@ -45,11 +45,13 @@ so both the one-command and staged workflows continue to work.
 
 ## Python `download-data` helper
 
-GIStoOHQ includes a Python helper inspired by DEMDownloader for users who do not
-want to build the C++ `demcheck` binary. It queries the USGS TNMAccess products
-API for each WGS84 coordinate in a CSV, chooses the first available tier in the
-same priority order as DEMDownloader, and can optionally download matching files
-into per-site folders.
+GIStoOHQ includes a Python implementation of the relevant DEMDownloader workflow,
+so users do not need to build the C++ `demcheck` binary. It queries the USGS
+TNMAccess products API for each WGS84 coordinate in a CSV, understands both the
+current nested TNM download links and legacy links, chooses the first available
+tier in the same priority order as DEMDownloader, and can optionally download
+matching files into per-site folders. The product selector supports high-resolution
+`dem` (`demhr` is accepted as an alias), 1/3 arc-second `demlr`, and `hydro`.
 
 This Python implementation is the downloader used by `fetch-phase1-inputs` and
 `full-run`. The external C++ repository is therefore optional reference tooling,
