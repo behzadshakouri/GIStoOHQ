@@ -8,14 +8,12 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     calls = []
     download_options = {}
     downloads = tmp_path / "downloads"
-    dem = tmp_path / "dem.tif"
 
     def fake_download(*args, **kwargs):
         download_options.update(kwargs)
         calls.append("download-all")
         return SimpleNamespace(
             download_dir=downloads,
-            product_dir=lambda product: downloads / product,
         )
 
     monkeypatch.setattr(
@@ -23,12 +21,8 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         fake_download,
     )
     monkeypatch.setattr(
-        "ohqbuilder.full_runner.materialize_dem",
-        lambda *args, **kwargs: calls.append("dem") or SimpleNamespace(output_path=dem),
-    )
-    monkeypatch.setattr(
-        "ohqbuilder.full_runner.materialize_flowlines",
-        lambda *args, **kwargs: calls.append("hydro"),
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *args, **kwargs: calls.append("materialize"),
     )
     monkeypatch.setattr(
         "ohqbuilder.full_runner.run_hydrology_preprocessing",
@@ -61,8 +55,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
 
     assert calls == [
         "download-all",
-        "dem",
-        "hydro",
+        "materialize",
         "routing",
         "phases",
         "validate",

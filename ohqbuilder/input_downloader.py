@@ -23,15 +23,6 @@ class InputDownloadResult:
     def download_dir(self) -> Path:
         return self.phase1.download_dir
 
-    def product_dir(self, product: str) -> Path:
-        matches = sorted(path for path in self.download_dir.rglob(product) if path.is_dir())
-        if not matches:
-            raise FileNotFoundError(
-                f"Downloaded {product} product directory not found under {self.download_dir}"
-            )
-        return matches[0]
-
-
 def download_all_inputs(
     root: str | Path,
     site: str,

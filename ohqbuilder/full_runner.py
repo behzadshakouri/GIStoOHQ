@@ -3,12 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .dem_materializer import materialize_dem
-from .hydro_materializer import materialize_flowlines
 from .legacy_inputs import LegacyWorkflowOptions, run_hydrology_preprocessing, run_legacy_input_workflow
 from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
+from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 
 
@@ -54,11 +53,11 @@ def run_full_pipeline(
             soil_top_depth=soil_top_depth,
         )
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
-        dem = materialize_dem(
-            root, site, source_dir=fetched.product_dir("demlr"), dst_crs=target_crs
-        )
-        materialize_flowlines(
-            root, site, source_dir=fetched.product_dir("hydro"), dem_path=dem.output_path
+        materialize_source_inputs(
+            root,
+            site,
+            source_dir=fetched.download_dir,
+            target_crs=target_crs,
         )
         # Step 3: generate the GIS-derived model inputs.
         options = LegacyWorkflowOptions(auto_outlet=True, auto_pour_points=True)

@@ -16,6 +16,7 @@ from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
+from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 
 
@@ -150,6 +151,15 @@ def build_parser() -> argparse.ArgumentParser:
     all_inputs.add_argument("--max-tiles", type=int, default=None)
     all_inputs.add_argument("--soil-pixel-size", type=float, default=0.0003)
     all_inputs.add_argument("--soil-top-depth", type=float, default=30.0)
+
+    materialize = sub.add_parser(
+        "materialize-inputs",
+        help="Merge/project DEM and extract/clip hydrography in one step.",
+    )
+    materialize.add_argument("--root", required=True)
+    materialize.add_argument("--site", required=True)
+    materialize.add_argument("--source-dir", default=None)
+    materialize.add_argument("--target-crs", default=None)
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -395,6 +405,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote HSG vector: {result.vector_path}")
         for raster in result.raster_paths:
             print(f"Wrote HSG raster: {raster}")
+        return 0
+    if args.command == "materialize-inputs":
+        try:
+            result = materialize_source_inputs(
+                args.root,
+                args.site,
+                source_dir=args.source_dir,
+                target_crs=args.target_crs,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"materialize-inputs failed: {exc}")
+            return 2
+        print(f"Wrote DEM: {result.dem.output_path}")
+        print(f"Wrote flowlines: {result.hydro.output_path}")
         return 0
     if args.command == "download-texture":
         try:

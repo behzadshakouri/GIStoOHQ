@@ -61,10 +61,23 @@ watershed later.
 
 The one-command pipeline now follows four top-level steps:
 
-1. Download all supported source inputs.
-2. Merge/project/clip DEM and hydrography.
-3. Generate the GIS-derived watershed inputs.
-4. Validate the inputs and write the OHQ file.
+1. `download-inputs` downloads all supported source inputs.
+2. `materialize-inputs` merges/projects the DEM and extracts/clips hydrography.
+3. `prepare-inputs` generates the GIS-derived watershed inputs.
+4. `build` validates the inputs and writes the OHQ file.
+
+Each stage can be run independently:
+
+```bash
+ohqbuild download-inputs --root /path/to/NHA --site SITE_A --lat 34.123 --lon -111.456
+ohqbuild materialize-inputs --root /path/to/NHA --site SITE_A
+ohqbuild prepare-inputs --root /path/to/NHA --site SITE_A
+ohqbuild build --root /path/to/NHA --site SITE_A
+```
+
+`materialize-inputs` deliberately requires an unambiguous `demlr` and `hydro`
+directory beneath the source directory. Pass `--source-dir` when downloads for
+multiple sites share a parent folder.
 
 `ohqbuild full-run` executes these four steps from the supplied outlet
 coordinate through the final `.ohq` output.
