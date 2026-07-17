@@ -1,0 +1,48 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+build/Desktop_Qt_6_8_3-Debug/
+
+build/Desktop_Qt_6_8_2-Debug/.qtc_clangd/.cache/clangd/index/
+
+build/Desktop_Qt_6_8_2-Debug/.qtc_clangd/
+
+build/Desktop_Qt_6_8_2-Debug/
+
+build/Desktop_Qt_6_8_2-Release/.qtc_clangd/.cache/clangd/index/
+
+build/Desktop_Qt_6_8_2-Release/.qtc_clangd/
+
+*.zip
+
+build/Desktop_Qt_6_8_2-Release/
