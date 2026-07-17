@@ -39,6 +39,10 @@ API for each WGS84 coordinate in a CSV, chooses the first available tier in the
 same priority order as DEMDownloader, and can optionally download matching files
 into per-site folders.
 
+This Python implementation is the downloader used by `fetch-phase1-inputs` and
+`full-run`. The external C++ repository is therefore optional reference tooling,
+not a runtime dependency of GIStoOHQ.
+
 ```bash
 ohqbuild download-data WS3_Site_Coordinates.csv download_summary.csv \
   --id-col "Project No." \
