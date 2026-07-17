@@ -53,6 +53,17 @@ def download_all_inputs(
     boundary when exact watershed coverage is required.
     """
 
+    if not -180.0 <= lon <= 180.0:
+        raise ValueError("longitude must be between -180 and 180 degrees")
+    if not -90.0 <= lat <= 90.0:
+        raise ValueError("latitude must be between -90 and 90 degrees")
+    if buffer_m <= 0:
+        raise ValueError("buffer_m must be greater than zero")
+    if soil_pixel_size <= 0:
+        raise ValueError("soil_pixel_size must be greater than zero")
+    if soil_top_depth <= 0:
+        raise ValueError("soil_top_depth must be greater than zero")
+
     phase1 = fetch_phase1_inputs(
         root,
         site,

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from ohqbuilder.cli import main
 from ohqbuilder.input_downloader import download_all_inputs
 
@@ -58,3 +60,18 @@ def test_cli_download_inputs(monkeypatch, tmp_path, capsys):
 
     assert status == 0
     assert "Downloaded DEM/hydrography" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"lon": -181, "lat": 0}, "longitude"),
+        ({"lon": 0, "lat": 91}, "latitude"),
+        ({"lon": 0, "lat": 0, "buffer_m": 0}, "buffer_m"),
+        ({"lon": 0, "lat": 0, "soil_pixel_size": 0}, "soil_pixel_size"),
+        ({"lon": 0, "lat": 0, "soil_top_depth": 0}, "soil_top_depth"),
+    ],
+)
+def test_download_all_inputs_validates_request_before_network(tmp_path, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        download_all_inputs(tmp_path, "SITE_A", **kwargs)

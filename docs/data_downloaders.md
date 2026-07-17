@@ -100,17 +100,8 @@ ID column:
 ./demcheck WS3_Site_Coordinates.csv --id-col "Project No." --products all --download ./GIS --buffer 500
 ```
 
-`full-run` now discovers `demcheck` on `PATH` and uses it as its preferred source
-downloader. You can also provide the executable explicitly:
-
-```bash
-ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
-  --lat 34.123 --lon -111.456 \
-  --demcheck /path/to/DEMDownloader/demcheck
-```
-
-When `demcheck` is unavailable, the built-in TNM downloader remains the fallback,
-so both the one-command and staged workflows continue to work.
+The C++ command is retained as reference tooling. `full-run` uses the built-in
+Python downloaders directly and does not discover or execute `demcheck`.
 
 ## Python `download-data` helper
 

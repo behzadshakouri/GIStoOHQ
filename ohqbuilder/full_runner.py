@@ -32,11 +32,27 @@ def run_full_pipeline(
     script_dir: str | Path | None = None,
     buffer_m: float = 5000.0,
     target_crs: str | None = None,
+    site_id: str | None = None,
+    download_dir: str | Path | None = None,
+    max_tiles: int | None = None,
+    soil_pixel_size: float = 0.0003,
+    soil_top_depth: float = 30.0,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
     try:
         # Step 1: download every supported source product before any merge/clip.
-        fetched = download_all_inputs(root, site, lon=lon, lat=lat, buffer_m=buffer_m)
+        fetched = download_all_inputs(
+            root,
+            site,
+            lon=lon,
+            lat=lat,
+            site_id=site_id,
+            download_dir=download_dir,
+            buffer_m=buffer_m,
+            max_tiles=max_tiles,
+            soil_pixel_size=soil_pixel_size,
+            soil_top_depth=soil_top_depth,
+        )
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         dem = materialize_dem(
             root, site, source_dir=fetched.product_dir("demlr"), dst_crs=target_crs
