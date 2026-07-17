@@ -31,6 +31,18 @@ ID column:
 ./demcheck WS3_Site_Coordinates.csv --id-col "Project No." --products all --download ./GIS --buffer 500
 ```
 
+`full-run` now discovers `demcheck` on `PATH` and uses it as its preferred source
+downloader. You can also provide the executable explicitly:
+
+```bash
+ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
+  --lat 34.123 --lon -111.456 \
+  --demcheck /path/to/DEMDownloader/demcheck
+```
+
+When `demcheck` is unavailable, the built-in TNM downloader remains the fallback,
+so both the one-command and staged workflows continue to work.
+
 ## Python `download-data` helper
 
 GIStoOHQ includes a Python helper inspired by DEMDownloader for users who do not
@@ -120,8 +132,8 @@ pip install -e .[gis]
 
 The built-in helpers cover TNM lookup, raw downloads, input-folder creation,
 outlet shapefile creation, and DEM mosaic/reprojection into `demlr/cliped_utm.tif`.
-They intentionally do not yet perform NHD flowline extraction or watershed
-clipping; those remain explicit GIS preparation steps before running:
+The staged helpers leave NHD conversion explicit. The `full-run` workflow also
+materializes and clips the downloaded NHD flowlines before GIS preparation.
 
 ```bash
 python3 run.py config.json
