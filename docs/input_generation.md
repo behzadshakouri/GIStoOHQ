@@ -71,6 +71,17 @@ The legacy phase-1 runner expects:
 - `outputs/NHDFlowline_clip.gpkg` — clipped NHD flowlines used for channel
   burning and reach extraction.
 
+If `outputs/outlet.shp` is absent, `prepare-inputs` derives it automatically at
+the center of the maximum valid flow-accumulation cell. The same operation can
+be run explicitly:
+
+```bash
+ohqbuild create-outlet --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+Use `--no-auto-outlet` to require a supplied outlet instead, or
+`create-outlet --overwrite` to intentionally replace an existing outlet.
+
 If DEM or flowline inputs are missing, see [`docs/data_downloaders.md`](data_downloaders.md)
 for notes on using DEMDownloader/`demcheck` upstream.
 
@@ -104,8 +115,15 @@ Expected phase-1 outputs include:
 <ROOT>/<SITE>/outputs/junctions.gpkg
 ```
 
-After phase 1, inspect `reaches.gpkg` and `junctions.gpkg` in QGIS. Then create
-interior pour points manually and save them as:
+After phase 1, pour points are generated automatically from the Phase 1 junction
+network when `prepare-inputs --phase all` advances to Phase 2. To create or
+inspect them as a separate step, run:
+
+```bash
+ohqbuild create-pour-points --root /path/to/NHA --site WS3_GIS/AZ12-100
+```
+
+This writes deterministic `id` and `name` fields to:
 
 ```text
 <ROOT>/<SITE>/outputs/pour_points.shp
@@ -113,12 +131,15 @@ interior pour points manually and save them as:
 
 ### Phase 2 — create subbasin parameters and topology
 
-After manually placing `pour_points.shp`, run the phase-2 orchestrator from a
-QGIS Python environment:
+Then run the phase-2 orchestrator from a QGIS Python environment:
 
 ```bash
 ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 --phase phase2
 ```
+
+Pass `--no-auto-pour-points` to `prepare-inputs` or `run` to retain a manually
+created file. Existing pour points are never overwritten automatically; use
+`create-pour-points --overwrite` when replacement is intentional.
 
 To run both phases in sequence, use the default `all` phase:
 

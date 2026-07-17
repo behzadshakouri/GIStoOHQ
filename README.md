@@ -43,6 +43,13 @@ Need to create those GIS input files first? Run the full workflow with
 `build` and `validate` commands also check inputs by default. See
 [`docs/input_generation.md`](docs/input_generation.md).
 
+When running both preparation phases, GIStoOHQ automatically creates
+`outputs/pour_points.shp` from the Phase 1 junction network before Phase 2. The
+same operation is available independently with `ohqbuild create-pour-points`.
+If `outputs/outlet.shp` is missing, Phase 1 now creates it automatically at the
+largest valid cell in `outputs/flow_acc.tif`. Use `ohqbuild create-outlet` to run
+that operation independently.
+
 The output is written to:
 
 ```text
