@@ -148,3 +148,37 @@ def test_write_input_manifest_creates_directories_and_checklist(tmp_path):
     assert "outputs/NHDFlowline_clip.gpkg" in text
     assert "outputs/flow_dir.tif" in text
     assert "outputs/flow_acc.tif" in text
+
+
+def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "qgis", types.ModuleType("qgis"))
+    monkeypatch.setitem(sys.modules, "qgis.core", types.ModuleType("qgis.core"))
+    monkeypatch.setitem(sys.modules, "processing", types.ModuleType("processing"))
+
+    outputs = tmp_path / "root" / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    for name in ("watershed_boundary.gpkg", "reaches.gpkg", "junctions.gpkg"):
+        (outputs / name).write_text("", encoding="utf-8")
+    for suffix in (".shp", ".shx", ".dbf"):
+        (outputs / f"outlet{suffix}").write_text("", encoding="utf-8")
+
+    calls = []
+
+    def fake_generate(junctions, output):
+        calls.append((junctions, output))
+        for suffix in (".shp", ".shx", ".dbf"):
+            output.with_suffix(suffix).write_text("", encoding="utf-8")
+        return types.SimpleNamespace(count=2, output_path=output)
+
+    monkeypatch.setattr("ohqbuilder.legacy_inputs.generate_pour_points", fake_generate)
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    marker = tmp_path / "phase2-ran"
+    (script_dir / "run_phase2.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8"
+    )
+
+    run_legacy_input_workflow(tmp_path / "root", "SITE_A", script_dir, phase="phase2")
+
+    assert calls == [(outputs / "junctions.gpkg", outputs / "pour_points.shp")]
+    assert marker.is_file()

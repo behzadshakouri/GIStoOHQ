@@ -9,6 +9,7 @@ from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
 from .legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_legacy_input_workflow, write_input_manifest
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
+from .pour_points import PourPointGenerationError, generate_pour_points
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
@@ -53,6 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
     prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
     prep.add_argument("--dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
+    prep.add_argument("--no-auto-pour-points", action="store_true", help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.")
+
+    pour = sub.add_parser(
+        "create-pour-points",
+        help="Create Phase 2 pour_points.shp automatically from Phase 1 junctions.",
+    )
+    pour.add_argument("--root", required=True)
+    pour.add_argument("--site", required=True)
+    pour.add_argument("--junctions", default=None, help="Defaults to <root>/<site>/outputs/junctions.gpkg.")
+    pour.add_argument("--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp.")
+    pour.add_argument("--overwrite", action="store_true")
 
     dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
     dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
@@ -136,6 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--prepare-dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
     run.add_argument("--skip-prepare", action="store_true")
     run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+    run.add_argument("--no-auto-pour-points", action="store_true", help="Require manually supplied pour points.")
 
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
@@ -179,6 +192,7 @@ def _legacy_options_from_args(args) -> LegacyWorkflowOptions:
         target_epsg=getattr(args, "target_epsg", None),
         force=not getattr(args, "no_force", False),
         dry_run=getattr(args, "dry_run", False),
+        auto_pour_points=not getattr(args, "no_auto_pour_points", False),
     )
 
 
@@ -213,6 +227,20 @@ def main(argv: list[str] | None = None) -> int:
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
+        return 0
+    if args.command == "create-pour-points":
+        site_path = Path(args.site).expanduser()
+        if not site_path.is_absolute():
+            site_path = Path(args.root).expanduser().resolve() / site_path
+        outputs = site_path.resolve() / "outputs"
+        junctions = Path(args.junctions).expanduser() if args.junctions else outputs / "junctions.gpkg"
+        output = Path(args.out).expanduser() if args.out else outputs / "pour_points.shp"
+        try:
+            result = generate_pour_points(junctions, output, overwrite=args.overwrite)
+        except PourPointGenerationError as exc:
+            print(f"create-pour-points failed: {exc}")
+            return 2
+        print(f"Generated {result.count} pour point(s): {result.output_path}")
         return 0
     if args.command == "download-data":
         try:

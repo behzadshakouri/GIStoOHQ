@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from .qgis_env import ensure_processing_available
+from .pour_points import PourPointGenerationError, generate_pour_points
 
 LegacyPhase = Literal["phase1", "phase2", "all"]
 
@@ -34,6 +35,7 @@ class LegacyWorkflowOptions:
     force: bool = True
     dry_run: bool = False
     child_options: dict[str, object] | None = None
+    auto_pour_points: bool = True
 
 
 class LegacyInputWorkflowError(RuntimeError):
@@ -124,7 +126,7 @@ def required_inputs(
         ]
     if phase == "phase2":
         return [
-            (paths["pour_points_path"], "hand-placed pour points"),
+            (paths["pour_points_path"], "automatically generated or user-supplied pour points"),
             (paths["watershed_path"], "phase-1 watershed boundary"),
             (paths["reaches_path"], "phase-1 reaches with topology"),
             (paths["junctions_path"], "phase-1 junctions"),
@@ -248,6 +250,18 @@ def run_legacy_input_workflow(
     phases = ("phase1", "phase2") if phase == "all" else (phase,)
 
     for selected_phase in phases:
+        if selected_phase == "phase2" and workflow_options.auto_pour_points:
+            paths = _workflow_paths(root_path, site, workflow_options)
+            if not _input_exists(paths["pour_points_path"]):
+                try:
+                    result = generate_pour_points(
+                        paths["junctions_path"], paths["pour_points_path"]
+                    )
+                except PourPointGenerationError as exc:
+                    raise LegacyInputWorkflowError(
+                        f"Automatic pour-point generation failed: {exc}"
+                    ) from exc
+                print(f"Generated {result.count} pour point(s): {result.output_path}")
         check_required_inputs(root_path, site, selected_phase, workflow_options)
         _run_phase(
             script_path / _PHASE_SCRIPTS[selected_phase],
