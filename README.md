@@ -47,7 +47,10 @@ ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
 ```
 
 `full-run` uses GIStoOHQ's built-in Python TNM downloader; compiling or installing
-the external C++ `demcheck` program is not required.
+the external C++ `demcheck` program is not required. It runs the complete
+four-step workflow: download all supported inputs (DEM, hydrography, HSG, and
+soil texture), merge/clip source products, generate GIS inputs, then validate and
+write the OHQ file. Use `ohqbuild download-inputs` to run only the first step.
 
 The existing three-step workflow remains available for controlled or offline runs.
 

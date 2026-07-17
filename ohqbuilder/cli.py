@@ -12,6 +12,7 @@ from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
+from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
@@ -79,10 +80,17 @@ def build_parser() -> argparse.ArgumentParser:
     pour.add_argument("--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp.")
     pour.add_argument("--overwrite", action="store_true")
 
-    dl = sub.add_parser("download-data", help="Query/download USGS DEM and hydrography products for site coordinates.")
+    dl = sub.add_parser(
+        "download-data",
+        help="Query/download USGS DEM and hydrography products for site coordinates.",
+    )
     dl.add_argument("input_csv", help="CSV with WGS84 latitude/longitude columns.")
     dl.add_argument("output_csv", nargs="?", default=None, help="Optional CSV summary to write.")
-    dl.add_argument("--products", default="dem", help="dem, hydro, all, or comma-separated subset (default: dem).")
+    dl.add_argument(
+        "--products",
+        default="dem",
+        help="dem/demhr, demlr, hydro, all, or a comma-separated subset (default: dem).",
+    )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
     dl.add_argument("--lat-col", default=None, help="Latitude column (auto-detected by default).")
@@ -127,6 +135,21 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
     fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
     fetch.add_argument("--skip-outlet", action="store_true", help="Only create folders and download source products.")
+
+    all_inputs = sub.add_parser(
+        "download-inputs",
+        help="Download DEM, hydrography, HSG, and soil texture before merge/clip.",
+    )
+    all_inputs.add_argument("--root", required=True)
+    all_inputs.add_argument("--site", required=True)
+    all_inputs.add_argument("--lat", type=float, required=True)
+    all_inputs.add_argument("--lon", type=float, required=True)
+    all_inputs.add_argument("--site-id", default=None)
+    all_inputs.add_argument("--download-dir", default=None)
+    all_inputs.add_argument("--buffer", type=float, default=5000.0)
+    all_inputs.add_argument("--max-tiles", type=int, default=None)
+    all_inputs.add_argument("--soil-pixel-size", type=float, default=0.0003)
+    all_inputs.add_argument("--soil-top-depth", type=float, default=30.0)
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -329,6 +352,27 @@ def main(argv: list[str] | None = None) -> int:
                 f"{result.site_id} {result.product}: {result.status}; "
                 f"{result.count} item(s), downloaded {result.downloaded}"
             )
+        return 0
+    if args.command == "download-inputs":
+        try:
+            result = download_all_inputs(
+                args.root,
+                args.site,
+                lon=args.lon,
+                lat=args.lat,
+                site_id=args.site_id,
+                download_dir=args.download_dir,
+                buffer_m=args.buffer,
+                max_tiles=args.max_tiles,
+                soil_pixel_size=args.soil_pixel_size,
+                soil_top_depth=args.soil_top_depth,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-inputs failed: {exc}")
+            return 2
+        print(f"Downloaded DEM/hydrography under: {result.download_dir}")
+        print(f"Wrote HSG data: {result.hsg.vector_path}")
+        print(f"Wrote soil texture data: {result.texture.vector_path}")
         return 0
     if args.command == "download-hsg":
         try:
