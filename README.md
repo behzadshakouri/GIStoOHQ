@@ -46,6 +46,11 @@ ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
   --lat 34.123 --lon -111.456
 ```
 
+If [`ArashMassoudieh/DEMDownloader`](https://github.com/ArashMassoudieh/DEMDownloader)
+is installed as `demcheck` on `PATH`, `full-run` uses it automatically. Otherwise,
+the built-in compatible downloader is used. A nonstandard binary can be selected
+with `--demcheck /path/to/DEMDownloader/demcheck`.
+
 The existing three-step workflow remains available for controlled or offline runs.
 
 Need to create those GIS input files first? Run the full workflow with
