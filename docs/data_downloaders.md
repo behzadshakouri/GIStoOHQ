@@ -35,7 +35,39 @@ are not downloaded datasets. For the supported end-to-end hydrology workflow,
 the external source downloads are DEM and hydrography. The outlet, routing
 rasters, watershed boundary, reaches, junctions, subwatershed parameters, and
 topology are created locally. Soil downloads are optional enrichment and are
-not currently invoked by `full-run`.
+downloaded by the all-input and `full-run` workflows.
+
+## Download all source inputs
+
+Run all Python-supported downloaders in one step before merging or clipping:
+
+```bash
+ohqbuild download-inputs \
+  --root /path/to/NHA \
+  --site WS3_GIS/AZ12-100 \
+  --lat 34.123 \
+  --lon -111.456 \
+  --buffer 5000
+```
+
+The same step is available as `python scripts/download_all_inputs.py` with the
+same arguments.
+
+This downloads DEM and hydrography source products, creates the outlet, and
+retrieves hydrologic soil groups and soil texture. Because a watershed boundary
+does not exist yet, the soil queries use the coordinate-centered query box. The
+standalone soil commands remain available for re-querying the exact delineated
+watershed later.
+
+The one-command pipeline now follows four top-level steps:
+
+1. Download all supported source inputs.
+2. Merge/project/clip DEM and hydrography.
+3. Generate the GIS-derived watershed inputs.
+4. Validate the inputs and write the OHQ file.
+
+`ohqbuild full-run` executes these four steps from the supplied outlet
+coordinate through the final `.ohq` output.
 
 GIStoOHQ's legacy QGIS preparation flow expects local DEM and flowline inputs
 before `prepare-inputs` starts. In particular, phase 1 needs:

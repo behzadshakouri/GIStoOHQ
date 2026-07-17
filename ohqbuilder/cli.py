@@ -12,6 +12,7 @@ from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
+from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
@@ -134,6 +135,21 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
     fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
     fetch.add_argument("--skip-outlet", action="store_true", help="Only create folders and download source products.")
+
+    all_inputs = sub.add_parser(
+        "download-inputs",
+        help="Download DEM, hydrography, HSG, and soil texture before merge/clip.",
+    )
+    all_inputs.add_argument("--root", required=True)
+    all_inputs.add_argument("--site", required=True)
+    all_inputs.add_argument("--lat", type=float, required=True)
+    all_inputs.add_argument("--lon", type=float, required=True)
+    all_inputs.add_argument("--site-id", default=None)
+    all_inputs.add_argument("--download-dir", default=None)
+    all_inputs.add_argument("--buffer", type=float, default=5000.0)
+    all_inputs.add_argument("--max-tiles", type=int, default=None)
+    all_inputs.add_argument("--soil-pixel-size", type=float, default=0.0003)
+    all_inputs.add_argument("--soil-top-depth", type=float, default=30.0)
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -336,6 +352,27 @@ def main(argv: list[str] | None = None) -> int:
                 f"{result.site_id} {result.product}: {result.status}; "
                 f"{result.count} item(s), downloaded {result.downloaded}"
             )
+        return 0
+    if args.command == "download-inputs":
+        try:
+            result = download_all_inputs(
+                args.root,
+                args.site,
+                lon=args.lon,
+                lat=args.lat,
+                site_id=args.site_id,
+                download_dir=args.download_dir,
+                buffer_m=args.buffer,
+                max_tiles=args.max_tiles,
+                soil_pixel_size=args.soil_pixel_size,
+                soil_top_depth=args.soil_top_depth,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-inputs failed: {exc}")
+            return 2
+        print(f"Downloaded DEM/hydrography under: {result.download_dir}")
+        print(f"Wrote HSG data: {result.hsg.vector_path}")
+        print(f"Wrote soil texture data: {result.texture.vector_path}")
         return 0
     if args.command == "download-hsg":
         try:
