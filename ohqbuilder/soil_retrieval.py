@@ -65,6 +65,24 @@ def _watershed_bounds(root: Path, site: str, buffer: float) -> tuple[float, floa
     return (minx - degree_buffer, miny - degree_buffer, maxx + degree_buffer, maxy + degree_buffer)
 
 
+def _query_bounds(
+    root: Path,
+    site: str,
+    buffer: float,
+    center: tuple[float, float] | None,
+) -> tuple[float, float, float, float]:
+    if center is None:
+        return _watershed_bounds(root, site, buffer)
+    lon, lat = center
+    degree_buffer = buffer / 111_320.0
+    return (
+        lon - degree_buffer,
+        lat - degree_buffer,
+        lon + degree_buffer,
+        lat + degree_buffer,
+    )
+
+
 def _write_vector(path: Path, layer: str, rows: list[dict[str, Any]], geom_col: str = "geom_wkt") -> None:
     _require_gis()
     import geopandas as gpd
@@ -293,11 +311,12 @@ def retrieve_soil_groups(
     *,
     buffer: float = 5000.0,
     pixel_size: float = 0.0003,
+    center: tuple[float, float] | None = None,
 ) -> SoilRetrievalResult:
     _validate_positive("pixel_size", pixel_size)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
-    wkt = bbox_wkt(_watershed_bounds(root_path, site, buffer))
+    wkt = bbox_wkt(_query_bounds(root_path, site, buffer, center))
     rows = _query_hsg_polygons(wkt)
     vector = soils_dir / "hydrologic_soil_groups.gpkg"
     raster = soils_dir / "hsg.tif"
@@ -312,8 +331,12 @@ def retrieve_hydrologic_soil_groups(
     *,
     buffer: float = 5000.0,
     pixel_size: float = 0.0003,
+    center: tuple[float, float] | None = None,
 ) -> SoilRetrievalResult:
-    return retrieve_soil_groups(root, site, buffer=buffer, pixel_size=pixel_size)
+    kwargs: dict[str, Any] = {"buffer": buffer, "pixel_size": pixel_size}
+    if center is not None:
+        kwargs["center"] = center
+    return retrieve_soil_groups(root, site, **kwargs)
 
 
 def retrieve_soil_texture(
@@ -323,12 +346,13 @@ def retrieve_soil_texture(
     buffer: float = 5000.0,
     pixel_size: float = 0.0003,
     top_depth: float = 30.0,
+    center: tuple[float, float] | None = None,
 ) -> SoilRetrievalResult:
     _validate_positive("pixel_size", pixel_size)
     _validate_positive("top_depth", top_depth)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
-    wkt = bbox_wkt(_watershed_bounds(root_path, site, buffer))
+    wkt = bbox_wkt(_query_bounds(root_path, site, buffer, center))
     polygon_rows = _query_soil_polygons(wkt)
     mukeys = sorted({str(row["mukey"]) for row in polygon_rows if row.get("mukey") is not None})
     topsoil: dict[str, dict[str, Any]] = {}

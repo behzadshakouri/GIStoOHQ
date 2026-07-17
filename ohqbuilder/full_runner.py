@@ -3,12 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .dem_materializer import materialize_dem
-from .hydro_materializer import materialize_flowlines
 from .legacy_inputs import LegacyWorkflowOptions, run_hydrology_preprocessing, run_legacy_input_workflow
-from .phase1_fetcher import fetch_phase1_inputs
+from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
+from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 
 
@@ -32,19 +31,39 @@ def run_full_pipeline(
     script_dir: str | Path | None = None,
     buffer_m: float = 5000.0,
     target_crs: str | None = None,
+    site_id: str | None = None,
+    download_dir: str | Path | None = None,
+    max_tiles: int | None = None,
+    soil_pixel_size: float = 0.0003,
+    soil_top_depth: float = 30.0,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
     try:
-        fetched = fetch_phase1_inputs(
-            root, site, lon=lon, lat=lat, products="all", buffer_m=buffer_m
+        # Step 1: download every supported source product before any merge/clip.
+        fetched = download_all_inputs(
+            root,
+            site,
+            lon=lon,
+            lat=lat,
+            site_id=site_id,
+            download_dir=download_dir,
+            buffer_m=buffer_m,
+            max_tiles=max_tiles,
+            soil_pixel_size=soil_pixel_size,
+            soil_top_depth=soil_top_depth,
         )
-        dem = materialize_dem(root, site, source_dir=fetched.download_dir, dst_crs=target_crs)
-        materialize_flowlines(
-            root, site, source_dir=fetched.download_dir, dem_path=dem.output_path
+        # Step 2: merge, project, and clip the downloaded DEM and hydrography.
+        materialize_source_inputs(
+            root,
+            site,
+            source_dir=fetched.download_dir,
+            target_crs=target_crs,
         )
+        # Step 3: generate the GIS-derived model inputs.
         options = LegacyWorkflowOptions(auto_outlet=True, auto_pour_points=True)
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)
+        # Step 4: validate the generated inputs and write the OHQ file.
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
         validation = InputValidator().validate(settings)
         if not validation.ok:
