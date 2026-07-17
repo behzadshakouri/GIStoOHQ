@@ -85,6 +85,24 @@ ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
 The download stages require network access. Materialization requires the GIS
 extras, and `prepare-inputs`/`full-run` require QGIS plus its `processing` plugin.
 
+### Run from the config-driven script
+
+`run.py` now supports both layouts. Copy and edit one of the supplied files:
+
+```bash
+# One pipeline command (`ohqbuild full-run`)
+cp config.one-step.example.json my-run.json
+python3 run.py my-run.json
+
+# Four explicit commands (download, materialize, prepare, build)
+cp config.four-step.example.json my-four-steps.json
+python3 run.py my-four-steps.json
+```
+
+Set `workflow` to `one-step` or `four-step`; both require `lat` and `lon`.
+Use `python3 run.py my-run.json --dry-run` to print the commands without running
+them. The original config behavior remains available with `workflow: legacy`.
+
 The existing three-step workflow remains available for controlled or offline runs.
 
 Need to create those GIS input files first? Run the full workflow with
