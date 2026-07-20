@@ -157,6 +157,11 @@ MATERIALIZE_CMD=(
   --source-dir "${RAW_DOWNLOAD_DIR}"
   --target-crs "${TARGET_CRS}"
 )
+HYDROLOGY_CMD=(
+  "${PYTHON_BIN}" -m ohqbuilder.cli prepare-hydrology
+  --root "${ROOT}"
+  --site "${SITE}"
+)
 PREPARE_PHASE1_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli prepare-inputs
   --root "${ROOT}"
@@ -204,6 +209,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     printf '  %q' "${DOWNLOAD_CMD[@]}"; printf '\n'
     printf '  %q' "${CHECK_DOWNLOAD_CMD[@]}"; printf ' <<PY ...\n'
     printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
+    printf '  %q' "${HYDROLOGY_CMD[@]}"; printf '\n'
     printf '  %q' "${PREPARE_PHASE1_CMD[@]}"; printf '\n'
     printf '  %q' "${HSG_CMD[@]}"; printf '\n'
     printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
@@ -242,6 +248,7 @@ if errors:
 print("Downloader required statuses are OK: " + ", ".join(sorted(required)))
 PY
   "${MATERIALIZE_CMD[@]}"
+  "${HYDROLOGY_CMD[@]}"
   "${PREPARE_PHASE1_CMD[@]}"
   "${HSG_CMD[@]}"
   "${TEXTURE_CMD[@]}"

@@ -7,7 +7,13 @@ from pathlib import Path
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
-from .legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_legacy_input_workflow, write_input_manifest
+from .legacy_inputs import (
+    LegacyInputWorkflowError,
+    LegacyWorkflowOptions,
+    run_hydrology_preprocessing,
+    run_legacy_input_workflow,
+    write_input_manifest,
+)
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
@@ -60,6 +66,22 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
     prep.add_argument("--no-auto-pour-points", action="store_true", help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.")
     prep.add_argument("--no-auto-outlet", action="store_true", help="Require an existing outlet.shp instead of deriving it from flow_acc.tif.")
+
+    hydro_prep = sub.add_parser(
+        "prepare-hydrology",
+        help="Create flow_dir.tif and flow_acc.tif from materialized DEM and hydrography.",
+    )
+    hydro_prep.add_argument("--root", required=True)
+    hydro_prep.add_argument("--site", required=True)
+    hydro_prep.add_argument("--script-dir", default=None)
+    hydro_prep.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
+    hydro_prep.add_argument("--dem-path", default=None, help="DEM path passed to hydrology preprocessing.")
+    hydro_prep.add_argument("--flowline-path", default=None, help="Flowline path passed to hydrology preprocessing.")
+    hydro_prep.add_argument("--flowdir-path", default=None, help="flow_dir.tif output path.")
+    hydro_prep.add_argument("--flowacc-path", default=None, help="flow_acc.tif output path.")
+    hydro_prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
+    hydro_prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
+    hydro_prep.add_argument("--dry-run", action="store_true", help="Run preflight and list steps without executing processing.")
 
     outlet = sub.add_parser(
         "create-outlet",
@@ -303,6 +325,19 @@ def main(argv: list[str] | None = None) -> int:
         except LegacyInputWorkflowError as exc:
             print(f"prepare-inputs failed: {exc}")
             return 2
+        return 0
+    if args.command == "prepare-hydrology":
+        try:
+            run_hydrology_preprocessing(
+                args.root,
+                args.site,
+                args.script_dir,
+                _legacy_options_from_args(args),
+            )
+        except LegacyInputWorkflowError as exc:
+            print(f"prepare-hydrology failed: {exc}")
+            return 2
+        print("Hydrology preprocessing complete.")
         return 0
     if args.command == "create-pour-points":
         site_path = Path(args.site).expanduser()
