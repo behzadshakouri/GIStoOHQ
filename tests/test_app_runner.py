@@ -210,3 +210,77 @@ def test_build_steps_can_insert_soil_downloads(tmp_path):
     texture = next(step for step in steps if step.name == "download-texture")
     assert hsg.command[-4:] == ["--buffer", "2500.0", "--pixel-size", "0.0002"]
     assert texture.command[-2:] == ["--top-depth", "15.0"]
+
+
+def test_build_steps_supports_one_step_full_run(tmp_path):
+    config = PipelineConfig.from_mapping(
+        {
+            "root": str(tmp_path),
+            "site": "SITE_A",
+            "workflow": "one-step",
+            "lat": 35.1,
+            "lon": -111.2,
+            "source_buffer": 750,
+            "target_crs": "EPSG:26912",
+        }
+    )
+
+    steps = build_steps(config)
+
+    assert [step.name for step in steps] == ["doctor", "full-run"]
+    assert "--strict-gis" in steps[0].command
+    assert steps[1].command[3] == "full-run"
+    assert steps[1].command[-2:] == ["--target-crs", "EPSG:26912"]
+    assert ["--lat", "35.1"] == steps[1].command[8:10]
+
+
+def test_build_steps_supports_explicit_four_step_workflow(tmp_path):
+    config = PipelineConfig.from_mapping(
+        {
+            "root": str(tmp_path),
+            "site": "SITE_A",
+            "workflow": "four-step",
+            "lat": 35.1,
+            "lon": -111.2,
+            "download_dir": str(tmp_path / "raw"),
+        }
+    )
+
+    steps = build_steps(config)
+
+    assert [step.name for step in steps] == [
+        "doctor",
+        "download-inputs",
+        "materialize-inputs",
+        "prepare-inputs",
+        "build",
+    ]
+    assert ["--source-dir", str(tmp_path / "raw")] == steps[2].command[-2:]
+
+
+def test_download_workflows_require_coordinates(tmp_path):
+    try:
+        PipelineConfig.from_mapping(
+            {"root": str(tmp_path), "site": "SITE_A", "workflow": "one-step"}
+        )
+    except ValueError as exc:
+        assert "requires lat and lon" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_check_run_workflows_script_validates_both_layouts():
+    import subprocess
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/check_run_workflows.py"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "one-step: OK" in completed.stdout
+    assert "four-step: OK" in completed.stdout
+    assert "Both run.py approaches validate" in completed.stdout

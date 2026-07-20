@@ -1,0 +1,19 @@
+{
+  "workflow": "four-step",
+  "root": "/path/to/NHA",
+  "site": "WS3_GIS/AZ12-100",
+  "lat": 34.123,
+  "lon": -111.456,
+  "source_buffer": 5000.0,
+  "target_crs": null,
+  "project_name": null,
+  "out": null,
+  "script_dir": null,
+  "download_dir": null,
+  "max_tiles": null,
+  "soil_pixel_size": 0.0003,
+  "soil_top_depth": 30.0,
+  "phase": "all",
+  "no_schema": false,
+  "strict_gis": true
+}

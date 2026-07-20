@@ -5,6 +5,7 @@ import importlib.util
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .dem_downloader import ProductKey, parse_products, process_csv
 
@@ -65,7 +66,9 @@ def _write_manifest(
         if outlet_path
         else "- Skipped outlet creation because `--skip-outlet` was used."
     )
-    product_lines = "\n".join(f"- Downloaded/query summary for `{product}` source products." for product in products)
+    product_lines = "\n".join(
+        f"- Downloaded/query summary for `{product}` source products." for product in products
+    )
     path.write_text(
         "\n".join(
             [
@@ -107,6 +110,7 @@ def fetch_phase1_inputs(
     buffer_m: float = 500.0,
     max_tiles: int | None = None,
     skip_outlet: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> Phase1FetchResult:
     """Bootstrap source data for the phase-1 legacy GIS workflow.
 
@@ -122,9 +126,15 @@ def fetch_phase1_inputs(
     outputs_path.mkdir(parents=True, exist_ok=True)
     demlr_path.mkdir(parents=True, exist_ok=True)
 
-    outlet_path = None if skip_outlet else write_outlet_shapefile(outputs_path / "outlet.shp", lon, lat)
+    outlet_path = (
+        None if skip_outlet else write_outlet_shapefile(outputs_path / "outlet.shp", lon, lat)
+    )
     selected_products = parse_products(products)
-    source_dir = Path(download_dir).expanduser().resolve() if download_dir else site_path / "source_downloads"
+    source_dir = (
+        Path(download_dir).expanduser().resolve()
+        if download_dir
+        else site_path / "source_downloads"
+    )
     summary_csv = site_path / "source_downloads_summary.csv"
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +150,7 @@ def fetch_phase1_inputs(
             lon_col="lon",
             buffer_m=buffer_m,
             max_tiles=max_tiles,
+            progress=progress,
         )
 
     manifest_path = site_path / "PHASE1_INPUTS.md"

@@ -5,8 +5,31 @@ from ohqbuilder.cli import main
 
 
 def test_parse_products_all_and_subset():
-    assert dd.parse_products("all") == ["dem", "hydro"]
+    assert dd.parse_products("all") == ["dem", "demlr", "hydro"]
     assert dd.parse_products("dem,hydro") == ["dem", "hydro"]
+    assert dd.parse_products("demhr,demlr") == ["dem", "demlr"]
+
+
+def test_query_tnm_reads_current_nested_download_url(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return (
+                b'{"items":[{"title":"USGS tile","urls":{"TIFF":"https://example.test/a.tif"},'
+                b'"publicationDate":"2025-01-02","sizeInBytes":"42"}]}'
+            )
+
+    monkeypatch.setattr(dd.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    item = dd.query_tnm(-111.2, 35.1, dd.ELEVATION_TIERS[0], 30)[0]
+
+    assert item.url == "https://example.test/a.tif"
+    assert item.publication_date == "2025-01-02"
+    assert item.size_bytes == 42
 
 
 def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
@@ -19,7 +42,11 @@ def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
         assert lon == -111.2
         assert lat == 35.1
         assert buffer_m == 500
-        return [dd.DownloadItem("tile", "https://example.test/tile.tif", tier.dataset, tier.resolution_label)]
+        return [
+            dd.DownloadItem(
+                "tile", "https://example.test/tile.tif", tier.dataset, tier.resolution_label
+            )
+        ]
 
     def fake_download(url, destination, timeout=120.0):
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -44,13 +71,65 @@ def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
     assert "AZ12-100,dem,ok,1,1" in summary.read_text(encoding="utf-8")
 
 
+def test_process_csv_limits_hydro_to_smallest_archive(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nAZ12-100,35.1,-111.2\n", encoding="utf-8")
+    summary = tmp_path / "summary.csv"
+    downloads = tmp_path / "downloads"
+    progress_messages = []
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        return [
+            dd.DownloadItem(
+                "large",
+                "https://example.test/large.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=5000,
+            ),
+            dd.DownloadItem(
+                "small",
+                "https://example.test/small.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=50,
+            ),
+        ]
+
+    def fake_download(url, destination, timeout=120.0):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(url, encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+    monkeypatch.setattr(dd, "download_file", fake_download)
+
+    results = dd.process_csv(
+        source,
+        summary,
+        products=["hydro"],
+        download_dir=downloads,
+        id_col="site_id",
+        buffer_m=5000,
+        progress=progress_messages.append,
+    )
+
+    assert results[0].count == 2
+    assert results[0].downloaded == 1
+    assert results[0].url == "https://example.test/small.zip"
+    assert (downloads / "AZ12-100" / "hydro" / "small.zip").is_file()
+    assert any("downloading 1" in message for message in progress_messages)
+
+
 def test_cli_download_data(monkeypatch, tmp_path, capsys):
     source = tmp_path / "sites.csv"
     source.write_text("lat,lon\n35,-111\n", encoding="utf-8")
 
     monkeypatch.setattr(
         "ohqbuilder.cli.process_csv",
-        lambda *args, **kwargs: [dd.SiteDownloadResult("site_1", "dem", "no coverage", 0, 0, Path("out"))],
+        lambda *args, **kwargs: [
+            dd.SiteDownloadResult("site_1", "dem", "no coverage", 0, 0, Path("out"))
+        ],
     )
 
     assert main(["download-data", str(source), "--products", "dem"]) == 0
