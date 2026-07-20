@@ -18,15 +18,22 @@ ROW_ID="${ROW_ID:-SligoCreek_Mouth}"
 ROOT="${ROOT:-${REPO_ROOT}/runs}"
 SITE="${SITE:-SligoCreek}"
 PROJECT_NAME="${PROJECT_NAME:-SligoCreek}"
-BUFFER="${BUFFER:-5000}"
+BUFFER="${BUFFER:-20000}"
 TARGET_CRS="${TARGET_CRS:-EPSG:26918}"
 MAX_FILE_SIZE_MB="${MAX_FILE_SIZE_MB:-512}"
+MAX_TILES="${MAX_TILES:-50}"
 SOIL_PIXEL_SIZE="${SOIL_PIXEL_SIZE:-0.0003}"
 SOIL_TOP_DEPTH="${SOIL_TOP_DEPTH:-30.0}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 RUN_MODE="${RUN_MODE:-download-then-three-step}"
+PRODUCTS="${PRODUCTS:-all}"
+RAW_DOWNLOAD_DIR="${RAW_DOWNLOAD_DIR:-${ROOT}/${SITE}/source_downloads}"
+DOWNLOAD_SUMMARY="${DOWNLOAD_SUMMARY:-${ROOT}/${SITE}/source_downloads_summary.csv}"
+POINTS_DIR="${POINTS_DIR:-${RAW_DOWNLOAD_DIR}}"
+TIGER_YEAR="${TIGER_YEAR:-2025}"
+NLCD_YEAR="${NLCD_YEAR:-2023}"
 
-mkdir -p "${ROOT}"
+mkdir -p "${ROOT}/${SITE}"
 
 read -r SITE_ID LAT LON < <("${PYTHON_BIN}" - "${CSV_PATH}" "${ROW_ID}" <<'PY'
 import csv
@@ -73,21 +80,28 @@ cd "${REPO_ROOT}"
 
 DOCTOR_CMD=("${PYTHON_BIN}" -m ohqbuilder.cli doctor --strict-gis)
 DOWNLOAD_CMD=(
-  "${PYTHON_BIN}" -m ohqbuilder.cli download-inputs
-  --root "${ROOT}"
-  --site "${SITE}"
-  --lat "${LAT}"
-  --lon "${LON}"
-  --site-id "${SITE_ID}"
+  "${PYTHON_BIN}" -m ohqbuilder.cli download-data
+  "${CSV_PATH}"
+  "${DOWNLOAD_SUMMARY}"
+  --id-col id
+  --products "${PRODUCTS}"
+  --download "${RAW_DOWNLOAD_DIR}"
   --buffer "${BUFFER}"
+  --make-points
+  --points-dir "${POINTS_DIR}"
+  --max-tiles "${MAX_TILES}"
   --max-file-size-mb "${MAX_FILE_SIZE_MB}"
-  --soil-pixel-size "${SOIL_PIXEL_SIZE}"
-  --soil-top-depth "${SOIL_TOP_DEPTH}"
+  --tiger-year "${TIGER_YEAR}"
+  --nlcd-year "${NLCD_YEAR}"
+)
+CHECK_DOWNLOAD_CMD=(
+  "${PYTHON_BIN}" - "${DOWNLOAD_SUMMARY}"
 )
 MATERIALIZE_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli materialize-inputs
   --root "${ROOT}"
   --site "${SITE}"
+  --source-dir "${RAW_DOWNLOAD_DIR}"
   --target-crs "${TARGET_CRS}"
 )
 PREPARE_CMD=(
@@ -112,13 +126,14 @@ FULL_RUN_CMD=(
   --project-name "${PROJECT_NAME}"
   --buffer "${BUFFER}"
   --target-crs "${TARGET_CRS}"
+  --max-tiles "${MAX_TILES}"
   --max-file-size-mb "${MAX_FILE_SIZE_MB}"
   --soil-pixel-size "${SOIL_PIXEL_SIZE}"
   --soil-top-depth "${SOIL_TOP_DEPTH}"
 )
 
 printf 'Sligo Creek row: id=%s lat=%s lon=%s\n' "${SITE_ID}" "${LAT}" "${LON}"
-printf 'Project root: %s\nSite: %s\nRun mode: %s\n' "${ROOT}" "${SITE}" "${RUN_MODE}"
+printf 'Project root: %s\nSite: %s\nRun mode: %s\nRaw downloads: %s\nSummary CSV: %s\n' "${ROOT}" "${SITE}" "${RUN_MODE}" "${RAW_DOWNLOAD_DIR}" "${DOWNLOAD_SUMMARY}"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'Dry run; commands that would run:\n'
@@ -128,6 +143,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     printf '  %q' "${FULL_RUN_CMD[@]}"; printf '\n'
   elif [[ "${RUN_MODE}" == "download-then-three-step" ]]; then
     printf '  %q' "${DOWNLOAD_CMD[@]}"; printf '\n'
+    printf '  %q' "${CHECK_DOWNLOAD_CMD[@]}"; printf ' <<PY ...\n'
     printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
     printf '  %q' "${PREPARE_CMD[@]}"; printf '\n'
     printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
@@ -145,6 +161,24 @@ if [[ "${RUN_MODE}" == "full-run" ]]; then
   "${FULL_RUN_CMD[@]}"
 elif [[ "${RUN_MODE}" == "download-then-three-step" ]]; then
   "${DOWNLOAD_CMD[@]}"
+  "${CHECK_DOWNLOAD_CMD[@]}" <<'PY'
+import csv
+import sys
+from pathlib import Path
+
+summary = Path(sys.argv[1])
+required = {"dem", "demlr", "hydro"}
+errors = []
+with summary.open(newline="", encoding="utf-8") as handle:
+    for row in csv.DictReader(handle):
+        for product in required:
+            status = row.get(f"{product}_status", "")
+            if status != "ok":
+                errors.append(f"{row.get('id') or row.get('site_id') or 'site'} {product}: {status or 'missing status'}")
+if errors:
+    raise SystemExit("Downloader did not produce required OK statuses:\n" + "\n".join(errors))
+print("Downloader required statuses are OK: " + ", ".join(sorted(required)))
+PY
   "${MATERIALIZE_CMD[@]}"
   "${PREPARE_CMD[@]}"
   "${BUILD_CMD[@]}"

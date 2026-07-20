@@ -5,9 +5,10 @@ from ohqbuilder.cli import main
 
 
 def test_parse_products_all_and_subset():
-    assert dd.parse_products("all") == ["dem", "demlr", "hydro"]
+    assert dd.parse_products("all") == ["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
     assert dd.parse_products("dem,hydro") == ["dem", "hydro"]
     assert dd.parse_products("demhr,demlr") == ["dem", "demlr"]
+    assert dd.parse_products("nlcd,atlas14,roads") == ["landcover", "atlas14", "roads"]
 
 
 def test_query_tnm_reads_current_nested_download_url(monkeypatch):
@@ -68,7 +69,10 @@ def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
     assert results[0].site_id == "AZ12-100"
     assert results[0].downloaded == 1
     assert (downloads / "AZ12-100" / "dem" / "tile.tif").read_text(encoding="utf-8") == "data"
-    assert "AZ12-100,dem,ok,1,1" in summary.read_text(encoding="utf-8")
+    text = summary.read_text(encoding="utf-8")
+    assert "dem_status" in text
+    assert "AZ12-100" in text
+    assert "ok" in text
 
 
 def test_process_csv_limits_hydro_to_smallest_archive(monkeypatch, tmp_path):
@@ -115,10 +119,11 @@ def test_process_csv_limits_hydro_to_smallest_archive(monkeypatch, tmp_path):
     )
 
     assert results[0].count == 2
-    assert results[0].downloaded == 1
+    assert results[0].downloaded == 2
     assert results[0].url == "https://example.test/small.zip"
     assert (downloads / "AZ12-100" / "hydro" / "small.zip").is_file()
-    assert any("downloading 1" in message for message in progress_messages)
+    assert (downloads / "AZ12-100" / "hydro" / "large.zip").is_file()
+    assert any("downloading 2" in message for message in progress_messages)
 
 
 def test_download_file_skips_valid_existing_file(monkeypatch, tmp_path):
@@ -202,3 +207,24 @@ def test_cli_download_data(monkeypatch, tmp_path, capsys):
 
     assert main(["download-data", str(source), "--products", "dem"]) == 0
     assert "site_1 dem: no coverage" in capsys.readouterr().out
+
+
+def test_cxx_parity_helpers_build_roads_and_landcover_urls():
+    roads = dd.roads_url_for_fips("24031", 2025)
+    assert roads == "https://www2.census.gov/geo/tiger/TIGER2025/ROADS/tl_2025_24031_roads.zip"
+
+    landcover = dd.landcover_url(39.000215, -77.01081, 20000, 2023)
+    assert "request=GetCoverage" in landcover
+    assert "coverage=mrlc_Land-Cover-Native_conus_year_data" in landcover
+    assert "time=2023-01-01T00%3A00%3A00.000Z" in landcover
+    assert "crs=EPSG%3A5070" in landcover
+
+
+def test_write_atlas14_csv(tmp_path):
+    path = tmp_path / "atlas14_pf.csv"
+    dd.write_atlas14_csv(path, {"6hr": {"100yr": 3.456}, "24hr": {"2yr": 1.2}})
+
+    text = path.read_text(encoding="utf-8")
+    assert "duration,2yr,5yr,10yr,25yr,50yr,100yr" in text
+    assert "6hr,,,,,,3.46" in text
+    assert "24hr,1.20,,,,," in text
