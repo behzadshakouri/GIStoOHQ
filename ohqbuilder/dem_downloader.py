@@ -22,6 +22,7 @@ MRLC_COVERAGE_ID = "mrlc_Land-Cover-Native_conus_year_data:Land-Cover-Native_con
 ATLAS14_URL = "https://hdsc.nws.noaa.gov/cgi-bin/hdsc/new/cgi_readH5.py"
 METERS_PER_DEGREE = 111_320.0
 DEFAULT_MAX_FILE_SIZE_MB = 512.0
+DEFAULT_DEM_RESOLUTION = "1/3"
 NLCD_PIXEL_M = 30.0
 NLCD_GRID_OFF = 15.0
 
@@ -167,6 +168,37 @@ def _filename_from_url(url: str, fallback: str) -> str:
     parsed = urllib.parse.urlparse(url)
     name = Path(urllib.parse.unquote(parsed.path)).name or fallback
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
+
+
+def _item_date_key(item: DownloadItem) -> str:
+    text = " ".join((item.publication_date, item.title, item.url))
+    matches = re.findall(r"(?:19|20)\d{6}", text)
+    if matches:
+        return max(matches)
+    year_matches = re.findall(r"(?:19|20)\d{2}", text)
+    return max(year_matches) if year_matches else ""
+
+
+def _tile_key(item: DownloadItem, product: ProductKey) -> str:
+    text = f"{item.title} {_filename_from_url(item.url, item.title)}"
+    if product in {"dem", "demlr"}:
+        match = re.search(r"[ns]\d{2}[ew]\d{3}", text, re.IGNORECASE)
+        if match:
+            return match.group(0).lower()
+        match = re.search(r"x\d+y\d+", text, re.IGNORECASE)
+        if match:
+            return match.group(0).lower()
+    return _filename_from_url(item.url, item.title)
+
+
+def _dedupe_latest_by_tile(items: list[DownloadItem], product: ProductKey) -> list[DownloadItem]:
+    latest: dict[str, DownloadItem] = {}
+    for item in items:
+        key = _tile_key(item, product)
+        current = latest.get(key)
+        if current is None or _item_date_key(item) >= _item_date_key(current):
+            latest[key] = item
+    return sorted(latest.values(), key=lambda item: (_tile_key(item, product), item.title, item.url))
 
 
 def download_file(url: str, destination: Path, timeout: float = 120.0, expected_size: int | None = None) -> bool:
@@ -353,24 +385,66 @@ def _tnm_product_result(
     max_tiles: int | None,
     max_file_size_mb: float | None,
     progress: Callable[[str], None] | None,
+    dem_resolution: str = DEFAULT_DEM_RESOLUTION,
 ) -> SiteDownloadResult:
-    if progress:
-        progress(f"Querying {product} products for {site}...")
-    found: list[DownloadItem] = []
-    for tier in PRODUCT_TIERS[product]:
-        found = query_tnm(lon, lat, tier, buffer_m)
-        if found:
-            break
-    if product == "hydro":
-        found = sorted(found, key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18)
     size_limit = None if max_file_size_mb in (None, 0) else int(max_file_size_mb * 1024 * 1024)
-    allowed = [item for item in found if size_limit is None or item.size_bytes is None or item.size_bytes <= size_limit]
     cap = DEFAULT_MAX_TILES[product] if max_tiles is None else max_tiles
-    selected = allowed if cap == 0 else allowed[:cap]
+    high_res_dem_limit = DEFAULT_MAX_TILES["dem"]
+    best_found: list[DownloadItem] = []
+    best_allowed: list[DownloadItem] = []
+
+    tiers = PRODUCT_TIERS[product]
+    if product == "dem" and dem_resolution != "auto":
+        aliases = {"1m": "1 m", "1": "1 m", "1/9": "1/9 arc-second", "1/3": "1/3 arc-second", "10m": "1/3 arc-second", "30m": "1 arc-second"}
+        wanted = aliases.get(dem_resolution.lower(), dem_resolution)
+        tiers = tuple(tier for tier in tiers if tier.resolution_label == wanted) or tiers
+
+    for tier in tiers:
+        if progress:
+            progress(f"Querying {product} {tier.resolution_label} products for {site}...")
+        found = query_tnm(lon, lat, tier, buffer_m)
+        if product == "hydro":
+            found = sorted(found, key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18)
+        deduped = _dedupe_latest_by_tile(found, product) if product in {"dem", "demlr"} else found
+        allowed = [
+            item
+            for item in deduped
+            if size_limit is None or item.size_bytes is None or item.size_bytes <= size_limit
+        ]
+        if found:
+            best_found = found
+            best_allowed = allowed
+        if product == "dem" and tier.resolution_label == "1 m" and len(allowed) > high_res_dem_limit:
+            if progress:
+                progress(
+                    f"Skipping 1 m DEM for {site}: {len(allowed)} unique tile(s) after latest-version filtering; "
+                    f"using a coarser seamless tier instead."
+                )
+            continue
+        if allowed:
+            selected = allowed if cap == 0 else allowed[:cap]
+            return _download_selected_product(product, site, selected, found, allowed, out_base, progress)
+
+    selected = best_allowed if cap == 0 else best_allowed[:cap]
+    return _download_selected_product(product, site, selected, best_found, best_allowed, out_base, progress)
+
+
+def _download_selected_product(
+    product: ProductKey,
+    site: str,
+    selected: list[DownloadItem],
+    found: list[DownloadItem],
+    allowed: list[DownloadItem],
+    out_base: Path | None,
+    progress: Callable[[str], None] | None,
+) -> SiteDownloadResult:
     product_dir = out_base / site / product if out_base else None
     downloaded = 0
     if progress:
-        progress(f"Found {len(found)} {product} candidate(s); {len(allowed)} under size limit; downloading {len(selected)}.")
+        progress(
+            f"Found {len(found)} {product} candidate(s); {len(allowed)} unique/latest under size limit; "
+            f"downloading {len(selected)}."
+        )
     if product_dir:
         for item_index, item in enumerate(selected, start=1):
             name = _filename_from_url(item.url, f"{product}_{item_index}.dat")
@@ -475,6 +549,7 @@ def process_csv(
     buffer_m: float = 30.0,
     max_tiles: int | None = None,
     max_file_size_mb: float | None = DEFAULT_MAX_FILE_SIZE_MB,
+    dem_resolution: str = DEFAULT_DEM_RESOLUTION,
     make_points: bool = False,
     points_dir: str | Path | None = None,
     tiger_year: int = 2025,
@@ -507,7 +582,7 @@ def process_csv(
             continue
         for product in products:
             if product in PRODUCT_TIERS:
-                result = _tnm_product_result(product, site, lat, lon, out_base, buffer_m, max_tiles, max_file_size_mb, progress)
+                result = _tnm_product_result(product, site, lat, lon, out_base, buffer_m, max_tiles, max_file_size_mb, progress, dem_resolution)
             else:
                 result = _special_product_result(product, site, lat, lon, out_base, buffer_m, tiger_year, nlcd_year, progress)
             results.append(result)

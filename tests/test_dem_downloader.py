@@ -228,3 +228,125 @@ def test_write_atlas14_csv(tmp_path):
     assert "duration,2yr,5yr,10yr,25yr,50yr,100yr" in text
     assert "6hr,,,,,,3.46" in text
     assert "24hr,1.20,,,,," in text
+
+
+def test_process_csv_deduplicates_demlr_to_latest_tile(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nSligo,39,-77\n", encoding="utf-8")
+    downloads = tmp_path / "downloads"
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        return [
+            dd.DownloadItem(
+                "USGS_13_n39w077_20211220",
+                "https://example.test/USGS_13_n39w077_20211220.tif",
+                tier.dataset,
+                tier.resolution_label,
+            ),
+            dd.DownloadItem(
+                "USGS_13_n39w077_20260407",
+                "https://example.test/USGS_13_n39w077_20260407.tif",
+                tier.dataset,
+                tier.resolution_label,
+            ),
+        ]
+
+    def fake_download(url, destination, timeout=120.0, expected_size=None):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(url, encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+    monkeypatch.setattr(dd, "download_file", fake_download)
+
+    results = dd.process_csv(
+        source,
+        None,
+        products=["demlr"],
+        download_dir=downloads,
+        id_col="site_id",
+        max_tiles=50,
+    )
+
+    assert results[0].count == 2
+    assert results[0].downloaded == 1
+    assert results[0].url.endswith("20260407.tif")
+    assert not (downloads / "Sligo" / "demlr" / "USGS_13_n39w077_20211220.tif").exists()
+    assert (downloads / "Sligo" / "demlr" / "USGS_13_n39w077_20260407.tif").is_file()
+
+
+def test_process_csv_skips_excessive_one_meter_dem_for_coarser_tier(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nSligo,39,-77\n", encoding="utf-8")
+    downloads = tmp_path / "downloads"
+    calls = []
+    progress_messages = []
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        calls.append(tier.resolution_label)
+        if tier.resolution_label == "1 m":
+            return [
+                dd.DownloadItem(
+                    f"USGS_1M_x{i}y430_2020",
+                    f"https://example.test/USGS_1M_x{i}y430_2020.tif",
+                    tier.dataset,
+                    tier.resolution_label,
+                )
+                for i in range(10)
+            ]
+        return [
+            dd.DownloadItem(
+                "USGS_13_n39w077_20260407",
+                "https://example.test/USGS_13_n39w077_20260407.tif",
+                tier.dataset,
+                tier.resolution_label,
+            )
+        ]
+
+    def fake_download(url, destination, timeout=120.0, expected_size=None):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(url, encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+    monkeypatch.setattr(dd, "download_file", fake_download)
+
+    results = dd.process_csv(
+        source,
+        None,
+        products=["dem"],
+        download_dir=downloads,
+        id_col="site_id",
+        max_tiles=50,
+        progress=progress_messages.append,
+        dem_resolution="auto",
+    )
+
+    assert calls[:2] == ["1 m", "1/9 arc-second"]
+    assert results[0].downloaded == 1
+    assert results[0].best_resolution == "1/9 arc-second"
+    assert any("Skipping 1 m DEM" in message for message in progress_messages)
+
+
+def test_process_csv_defaults_dem_to_one_third_arc_second(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nSligo,39,-77\n", encoding="utf-8")
+    calls = []
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        calls.append(tier.resolution_label)
+        return [
+            dd.DownloadItem(
+                "USGS_13_n39w077_20260407",
+                "https://example.test/USGS_13_n39w077_20260407.tif",
+                tier.dataset,
+                tier.resolution_label,
+            )
+        ]
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+
+    results = dd.process_csv(source, None, products=["dem"], id_col="site_id")
+
+    assert calls == ["1/3 arc-second"]
+    assert results[0].best_resolution == "1/3 arc-second"

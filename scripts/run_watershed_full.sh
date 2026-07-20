@@ -26,11 +26,12 @@ BUFFER="${BUFFER:-20000}"
 TARGET_CRS="${TARGET_CRS:-EPSG:26918}"
 MAX_FILE_SIZE_MB="${MAX_FILE_SIZE_MB:-512}"
 MAX_TILES="${MAX_TILES:-50}"
+DEM_RESOLUTION="${DEM_RESOLUTION:-1/3}"
 SOIL_PIXEL_SIZE="${SOIL_PIXEL_SIZE:-0.0003}"
 SOIL_TOP_DEPTH="${SOIL_TOP_DEPTH:-30.0}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 RUN_MODE="${RUN_MODE:-download-then-three-step}"
-PRODUCTS="${PRODUCTS:-all}"
+PRODUCTS="${PRODUCTS:-demlr,hydro,roads,landcover,atlas14}"
 RAW_DOWNLOAD_DIR="${RAW_DOWNLOAD_DIR:-${ROOT}/${SITE}/source_downloads}"
 DOWNLOAD_SUMMARY="${DOWNLOAD_SUMMARY:-${ROOT}/${SITE}/source_downloads_summary.csv}"
 POINTS_DIR="${POINTS_DIR:-${RAW_DOWNLOAD_DIR}}"
@@ -127,6 +128,7 @@ DOWNLOAD_CMD=(
   --points-dir "${POINTS_DIR}"
   --max-tiles "${MAX_TILES}"
   --max-file-size-mb "${MAX_FILE_SIZE_MB}"
+  --dem-resolution "${DEM_RESOLUTION}"
   --tiger-year "${TIGER_YEAR}"
   --nlcd-year "${NLCD_YEAR}"
 )
@@ -220,7 +222,7 @@ import sys
 from pathlib import Path
 
 summary = Path(sys.argv[1])
-required = {"dem", "demlr", "hydro"}
+required = {"demlr", "hydro"}
 errors = []
 with summary.open(newline="", encoding="utf-8") as handle:
     for row in csv.DictReader(handle):

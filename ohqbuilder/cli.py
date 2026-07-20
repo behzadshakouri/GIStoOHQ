@@ -99,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
     dl.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
+    dl.add_argument("--dem-resolution", default="1/3", help="DEM tier for product dem: 1/3, 1/9, 1m, 30m, or auto (default: 1/3).")
     dl.add_argument("--make-points", action="store_true", help="Write a single-point shapefile per site.")
     dl.add_argument("--points-dir", default=None, help="Base directory for point shapefiles; defaults to --download when set.")
     dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
@@ -375,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
                 max_file_size_mb=args.max_file_size_mb,
+                dem_resolution=args.dem_resolution,
                 make_points=args.make_points,
                 points_dir=args.points_dir,
                 tiger_year=args.tiger_year,
