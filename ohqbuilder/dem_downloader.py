@@ -201,6 +201,47 @@ def _dedupe_latest_by_tile(items: list[DownloadItem], product: ProductKey) -> li
     return sorted(latest.values(), key=lambda item: (_tile_key(item, product), item.title, item.url))
 
 
+def _hydro_hu4_key(item: DownloadItem) -> str:
+    text = f"{item.title} {_filename_from_url(item.url, item.title)}"
+    match = re.search(r"H_(\d{4})_HU4", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"HU4[_-]?(\d{4})", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return _filename_from_url(item.url, item.title)
+
+
+def _is_hydro_raster_package(item: DownloadItem) -> bool:
+    text = f"{item.title} {_filename_from_url(item.url, item.title)}"
+    return bool(re.search(r"(?:^|[_-])raster(?:[_\.-]|$)", text, re.IGNORECASE))
+
+
+def _hydro_vector_rank(item: DownloadItem) -> int:
+    text = f"{item.title} {_filename_from_url(item.url, item.title)}".lower()
+    if "gdb" in text or "geodatabase" in text:
+        return 0
+    if "shp" in text or "shape" in text or "shapefile" in text:
+        return 1
+    return 2
+
+
+def _prefer_hydro_packages(items: list[DownloadItem]) -> list[DownloadItem]:
+    vector_items = [item for item in items if not _is_hydro_raster_package(item)]
+    latest: dict[str, DownloadItem] = {}
+    for item in vector_items:
+        key = _hydro_hu4_key(item)
+        current = latest.get(key)
+        if current is None:
+            latest[key] = item
+            continue
+        current_score = (_item_date_key(current), -_hydro_vector_rank(current), current.title, current.url)
+        item_score = (_item_date_key(item), -_hydro_vector_rank(item), item.title, item.url)
+        if item_score > current_score:
+            latest[key] = item
+    return sorted(latest.values(), key=lambda item: (item.size_bytes if item.size_bytes is not None else 10**18, _hydro_hu4_key(item), item.title, item.url))
+
+
 def download_file(url: str, destination: Path, timeout: float = 120.0, expected_size: int | None = None) -> bool:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
@@ -405,7 +446,9 @@ def _tnm_product_result(
         found = query_tnm(lon, lat, tier, buffer_m)
         if product == "hydro":
             found = sorted(found, key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18)
-        deduped = _dedupe_latest_by_tile(found, product) if product in {"dem", "demlr"} else found
+            deduped = _prefer_hydro_packages(found)
+        else:
+            deduped = _dedupe_latest_by_tile(found, product) if product in {"dem", "demlr"} else found
         allowed = [
             item
             for item in deduped
@@ -441,8 +484,9 @@ def _download_selected_product(
     product_dir = out_base / site / product if out_base else None
     downloaded = 0
     if progress:
+        candidate_label = "preferred unique/latest vector package" if product == "hydro" else "unique/latest"
         progress(
-            f"Found {len(found)} {product} candidate(s); {len(allowed)} unique/latest under size limit; "
+            f"Found {len(found)} {product} candidate(s); {len(allowed)} {candidate_label} under size limit; "
             f"downloading {len(selected)}."
         )
     if product_dir:

@@ -350,3 +350,74 @@ def test_process_csv_defaults_dem_to_one_third_arc_second(monkeypatch, tmp_path)
 
     assert calls == ["1/3 arc-second"]
     assert results[0].best_resolution == "1/3 arc-second"
+
+
+def test_process_csv_hydro_prefers_one_latest_vector_package_per_hu4(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nSligo,39,-77\n", encoding="utf-8")
+    downloads = tmp_path / "downloads"
+    progress_messages = []
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        return [
+            dd.DownloadItem(
+                "NHDPLUS_H_0206_HU4_20220324_RASTER",
+                "https://example.test/NHDPLUS_H_0206_HU4_20220324_RASTER.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=10,
+            ),
+            dd.DownloadItem(
+                "NHDPLUS_H_0206_HU4_20210101_GDB",
+                "https://example.test/NHDPLUS_H_0206_HU4_20210101_GDB.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=20,
+            ),
+            dd.DownloadItem(
+                "NHDPLUS_H_0206_HU4_20240401_GDB",
+                "https://example.test/NHDPLUS_H_0206_HU4_20240401_GDB.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=30,
+            ),
+            dd.DownloadItem(
+                "NHDPLUS_H_0206_HU4_20240501_RASTER",
+                "https://example.test/NHDPLUS_H_0206_HU4_20240501_RASTER.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=40,
+            ),
+            dd.DownloadItem(
+                "NHDPLUS_H_0206_HU4_20230301_SHAPE",
+                "https://example.test/NHDPLUS_H_0206_HU4_20230301_SHAPE.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=50,
+            ),
+        ]
+
+    def fake_download(url, destination, timeout=120.0, expected_size=None):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(url, encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+    monkeypatch.setattr(dd, "download_file", fake_download)
+
+    results = dd.process_csv(
+        source,
+        None,
+        products=["hydro"],
+        download_dir=downloads,
+        id_col="site_id",
+        max_tiles=50,
+        progress=progress_messages.append,
+    )
+
+    assert results[0].count == 5
+    assert results[0].downloaded == 1
+    assert results[0].url.endswith("20240401_GDB.zip")
+    assert not (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20240501_RASTER.zip").exists()
+    assert (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20240401_GDB.zip").is_file()
+    assert any("1 preferred unique/latest vector package" in message for message in progress_messages)
