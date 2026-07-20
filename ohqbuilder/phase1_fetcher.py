@@ -109,6 +109,7 @@ def fetch_phase1_inputs(
     download_dir: str | Path | None = None,
     buffer_m: float = 500.0,
     max_tiles: int | None = None,
+    max_file_size_mb: float | None = None,
     skip_outlet: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> Phase1FetchResult:
@@ -150,6 +151,7 @@ def fetch_phase1_inputs(
             lon_col="lon",
             buffer_m=buffer_m,
             max_tiles=max_tiles,
+            max_file_size_mb=max_file_size_mb,
             progress=progress,
         )
 

@@ -47,6 +47,7 @@ class PipelineConfig:
     source_buffer: float = 5000.0
     download_dir: str | None = None
     max_tiles: int | None = None
+    max_file_size_mb: float | None = 512.0
     target_crs: str | None = None
 
     @classmethod
@@ -88,6 +89,11 @@ class PipelineConfig:
             source_buffer=float(data.get("source_buffer", 5000.0)),
             download_dir=data.get("download_dir"),
             max_tiles=int(data["max_tiles"]) if data.get("max_tiles") is not None else None,
+            max_file_size_mb=(
+                float(data["max_file_size_mb"])
+                if data.get("max_file_size_mb") is not None
+                else None
+            ),
             target_crs=data.get("target_crs"),
         )
 
@@ -157,6 +163,8 @@ def _source_args(config: PipelineConfig) -> list[str]:
         args.extend(["--download-dir", config.download_dir])
     if config.max_tiles is not None:
         args.extend(["--max-tiles", str(config.max_tiles)])
+    if config.max_file_size_mb is not None:
+        args.extend(["--max-file-size-mb", str(config.max_file_size_mb)])
     return args
 
 
@@ -224,7 +232,13 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
         steps.append(PipelineStep("build", build))
         return steps
 
-    prepare = _base_command() + ["prepare-inputs", "--root", str(config.root), "--site", config.site]
+    prepare = _base_command() + [
+        "prepare-inputs",
+        "--root",
+        str(config.root),
+        "--site",
+        config.site,
+    ]
     if config.script_dir:
         prepare.extend(["--script-dir", config.script_dir])
     prepare.extend(["--phase", config.phase])
@@ -233,10 +247,11 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
             "prepare-inputs",
             prepare,
             skipped=skip_prepare,
-            reason="required outputs already exist" if skip_prepare and not config.skip_prepare else "configured skip_prepare",
+            reason="required outputs already exist"
+            if skip_prepare and not config.skip_prepare
+            else "configured skip_prepare",
         )
     )
-
 
     if config.download_hsg:
         hsg = _base_command() + [
@@ -324,7 +339,9 @@ def _maybe_create_config_from_example(config_path: Path) -> bool:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the full GIStoOHQ pipeline from a config file.")
+    parser = argparse.ArgumentParser(
+        description="Run the full GIStoOHQ pipeline from a config file."
+    )
     parser.add_argument("config", nargs="?", default=DEFAULT_CONFIG)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -337,7 +354,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = PipelineConfig.from_file(config_path)
     except PipelineConfigError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        print(f"Tip: copy {EXAMPLE_CONFIG} to {DEFAULT_CONFIG} and edit root/site.", file=sys.stderr)
+        print(
+            f"Tip: copy {EXAMPLE_CONFIG} to {DEFAULT_CONFIG} and edit root/site.", file=sys.stderr
+        )
         return 2
     return run_pipeline(config, dry_run=args.dry_run).returncode
 

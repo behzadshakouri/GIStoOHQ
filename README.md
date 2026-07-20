@@ -63,7 +63,9 @@ ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
 
 The final file is written to `<ROOT>/<SITE>/outputs/<SITE>.ohq` unless `--out`
 is supplied. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
-target-CRS, and soil-resolution options.
+maximum-file-size, target-CRS, and soil-resolution options. The downloader checks
+existing files against TNM size metadata, skips valid cached files, and
+redownloads incomplete/corrupt files.
 
 `full-run` uses GIStoOHQ's built-in Python TNM downloader; compiling or installing
 the external C++ `demcheck` program is not required. It runs the complete

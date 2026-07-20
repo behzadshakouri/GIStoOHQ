@@ -48,7 +48,7 @@ def test_process_csv_writes_summary_and_downloads(monkeypatch, tmp_path):
             )
         ]
 
-    def fake_download(url, destination, timeout=120.0):
+    def fake_download(url, destination, timeout=120.0, expected_size=None):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text("data", encoding="utf-8")
         return True
@@ -96,7 +96,7 @@ def test_process_csv_limits_hydro_to_smallest_archive(monkeypatch, tmp_path):
             ),
         ]
 
-    def fake_download(url, destination, timeout=120.0):
+    def fake_download(url, destination, timeout=120.0, expected_size=None):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(url, encoding="utf-8")
         return True
@@ -119,6 +119,74 @@ def test_process_csv_limits_hydro_to_smallest_archive(monkeypatch, tmp_path):
     assert results[0].url == "https://example.test/small.zip"
     assert (downloads / "AZ12-100" / "hydro" / "small.zip").is_file()
     assert any("downloading 1" in message for message in progress_messages)
+
+
+def test_download_file_skips_valid_existing_file(monkeypatch, tmp_path):
+    destination = tmp_path / "tile.tif"
+    destination.write_bytes(b"12345")
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("valid cached file should not be downloaded")
+
+    monkeypatch.setattr(dd.urllib.request, "urlopen", fail_urlopen)
+
+    assert not dd.download_file("https://example.test/tile.tif", destination, expected_size=5)
+    assert destination.read_bytes() == b"12345"
+
+
+def test_download_file_redownloads_corrupt_existing_file(monkeypatch, tmp_path):
+    destination = tmp_path / "tile.tif"
+    destination.write_bytes(b"bad")
+
+    class Response:
+        def __init__(self):
+            self.remaining = b"correct"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, size=-1):
+            data = self.remaining
+            self.remaining = b""
+            return data
+
+    monkeypatch.setattr(dd.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+
+    assert dd.download_file("https://example.test/tile.tif", destination, expected_size=7)
+    assert destination.read_bytes() == b"correct"
+
+
+def test_process_csv_marks_all_oversized_candidates_too_large(monkeypatch, tmp_path):
+    source = tmp_path / "sites.csv"
+    source.write_text("site_id,lat,lon\nAZ12-100,35.1,-111.2\n", encoding="utf-8")
+
+    def fake_query(lon, lat, tier, buffer_m, timeout=60.0):
+        return [
+            dd.DownloadItem(
+                "huge",
+                "https://example.test/huge.zip",
+                tier.dataset,
+                tier.resolution_label,
+                size_bytes=10 * 1024 * 1024,
+            )
+        ]
+
+    monkeypatch.setattr(dd, "query_tnm", fake_query)
+
+    results = dd.process_csv(
+        source,
+        None,
+        products=["hydro"],
+        download_dir=tmp_path / "downloads",
+        id_col="site_id",
+        max_file_size_mb=1,
+    )
+
+    assert results[0].status == "too large"
+    assert results[0].downloaded == 0
 
 
 def test_cli_download_data(monkeypatch, tmp_path, capsys):

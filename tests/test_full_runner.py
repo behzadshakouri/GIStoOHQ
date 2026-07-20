@@ -73,6 +73,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "download_dir": downloads,
         "buffer_m": 5000.0,
         "max_tiles": 5,
+        "max_file_size_mb": None,
         "soil_pixel_size": 0.0002,
         "soil_top_depth": 15,
     }

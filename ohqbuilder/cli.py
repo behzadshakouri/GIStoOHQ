@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+    dl.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
 
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
@@ -135,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--download-dir", default=None, help="Raw source download directory; defaults under the site folder.")
     fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
     fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
+    fetch.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
     fetch.add_argument("--skip-outlet", action="store_true", help="Only create folders and download source products.")
 
     all_inputs = sub.add_parser(
@@ -149,6 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     all_inputs.add_argument("--download-dir", default=None)
     all_inputs.add_argument("--buffer", type=float, default=5000.0)
     all_inputs.add_argument("--max-tiles", type=int, default=None)
+    all_inputs.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
     all_inputs.add_argument("--soil-pixel-size", type=float, default=0.0003)
     all_inputs.add_argument("--soil-top-depth", type=float, default=30.0)
 
@@ -213,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--site-id", default=None, help="Folder-safe source download ID.")
     full.add_argument("--download-dir", default=None, help="Override the raw download directory.")
     full.add_argument("--max-tiles", type=int, default=None, help="Cap files per product; 0 means no cap.")
+    full.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
     full.add_argument("--soil-pixel-size", type=float, default=0.0003)
     full.add_argument("--soil-top-depth", type=float, default=30.0)
 
@@ -343,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                 site_id=args.site_id,
                 download_dir=args.download_dir,
                 max_tiles=args.max_tiles,
+                max_file_size_mb=args.max_file_size_mb,
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
                 progress=lambda message: print(message, flush=True),
@@ -364,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
                 lon_col=args.lon_col,
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
+                max_file_size_mb=args.max_file_size_mb,
                 progress=lambda message: print(message, flush=True),
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
@@ -386,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
                 download_dir=args.download_dir,
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
+                max_file_size_mb=args.max_file_size_mb,
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
                 progress=lambda message: print(message, flush=True),
@@ -467,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
                 download_dir=args.download_dir,
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
+                max_file_size_mb=args.max_file_size_mb,
                 skip_outlet=args.skip_outlet,
             )
         except (Phase1FetchError, ValueError) as exc:

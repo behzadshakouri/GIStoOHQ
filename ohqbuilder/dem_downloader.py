@@ -16,6 +16,7 @@ ProductKey = Literal["dem", "demlr", "hydro"]
 
 TNM_PRODUCTS_URL = "https://tnmaccess.nationalmap.gov/api/v1/products"
 METERS_PER_DEGREE = 111_320.0
+DEFAULT_MAX_FILE_SIZE_MB = 512.0
 
 
 @dataclass(frozen=True)
@@ -178,10 +179,15 @@ def _filename_from_url(url: str, fallback: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
 
 
-def download_file(url: str, destination: Path, timeout: float = 120.0) -> bool:
+def download_file(
+    url: str, destination: Path, timeout: float = 120.0, expected_size: int | None = None
+) -> bool:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() and destination.stat().st_size > 0:
-        return False
+    if destination.exists():
+        actual_size = destination.stat().st_size
+        if actual_size > 0 and (expected_size is None or actual_size == expected_size):
+            return False
+        destination.unlink()
     with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - URL comes from TNM API
         with tempfile.NamedTemporaryFile(
             dir=destination.parent, suffix=".part", delete=False
@@ -203,6 +209,7 @@ def process_csv(
     lon_col: str | None = None,
     buffer_m: float = 30.0,
     max_tiles: int | None = None,
+    max_file_size_mb: float | None = DEFAULT_MAX_FILE_SIZE_MB,
     progress: Callable[[str], None] | None = None,
 ) -> list[SiteDownloadResult]:
     input_path = Path(input_csv)
@@ -232,19 +239,39 @@ def process_csv(
                     found,
                     key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18,
                 )
+            size_limit = (
+                None if max_file_size_mb in (None, 0) else int(max_file_size_mb * 1024 * 1024)
+            )
+            allowed = [
+                item
+                for item in found
+                if size_limit is None or item.size_bytes is None or item.size_bytes <= size_limit
+            ]
             cap = DEFAULT_MAX_TILES[product] if max_tiles is None else max_tiles
-            selected = found if cap == 0 else found[:cap]
+            selected = allowed if cap == 0 else allowed[:cap]
             product_dir = out_base / site / product if out_base else None
             downloaded = 0
             if progress:
-                progress(f"Found {len(found)} {product} candidate(s); downloading {len(selected)}.")
+                progress(
+                    f"Found {len(found)} {product} candidate(s); {len(allowed)} under size limit; downloading {len(selected)}."
+                )
             if product_dir:
                 for item_index, item in enumerate(selected, start=1):
                     name = _filename_from_url(item.url, f"{product}_{item_index}.dat")
                     destination = product_dir / name
                     if progress:
                         progress(f"Downloading {product} {item_index}/{len(selected)}: {name}")
-                    if download_file(item.url, destination):
+                    if (
+                        destination.exists()
+                        and item.size_bytes is not None
+                        and destination.stat().st_size != item.size_bytes
+                    ):
+                        progress_message = (
+                            f"Existing {product} file is incomplete/corrupt; redownloading: {name}"
+                        )
+                        if progress:
+                            progress(progress_message)
+                    if download_file(item.url, destination, expected_size=item.size_bytes):
                         downloaded += 1
                     if progress:
                         size = destination.stat().st_size if destination.exists() else 0
@@ -253,7 +280,7 @@ def process_csv(
                 SiteDownloadResult(
                     site,
                     product,
-                    "ok" if found else "no coverage",
+                    "ok" if selected else ("too large" if found else "no coverage"),
                     len(found),
                     downloaded,
                     product_dir,

@@ -11,6 +11,7 @@
   "script_dir": null,
   "download_dir": null,
   "max_tiles": null,
+  "max_file_size_mb": 512.0,
   "soil_pixel_size": 0.0003,
   "soil_top_depth": 30.0,
   "phase": "all",

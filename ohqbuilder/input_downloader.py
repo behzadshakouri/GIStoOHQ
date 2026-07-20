@@ -35,6 +35,7 @@ def download_all_inputs(
     download_dir: str | Path | None = None,
     buffer_m: float = 5000.0,
     max_tiles: int | None = None,
+    max_file_size_mb: float | None = None,
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
     progress: Callable[[str], None] | None = None,
@@ -70,6 +71,7 @@ def download_all_inputs(
         download_dir=download_dir,
         buffer_m=buffer_m,
         max_tiles=max_tiles,
+        max_file_size_mb=max_file_size_mb,
         progress=progress,
     )
     center = (lon, lat)
