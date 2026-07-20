@@ -7,7 +7,13 @@ from pathlib import Path
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
-from .legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_legacy_input_workflow, write_input_manifest
+from .legacy_inputs import (
+    LegacyInputWorkflowError,
+    LegacyWorkflowOptions,
+    run_hydrology_preprocessing,
+    run_legacy_input_workflow,
+    write_input_manifest,
+)
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
@@ -61,6 +67,22 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--no-auto-pour-points", action="store_true", help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.")
     prep.add_argument("--no-auto-outlet", action="store_true", help="Require an existing outlet.shp instead of deriving it from flow_acc.tif.")
 
+    hydro_prep = sub.add_parser(
+        "prepare-hydrology",
+        help="Create flow_dir.tif and flow_acc.tif from materialized DEM and hydrography.",
+    )
+    hydro_prep.add_argument("--root", required=True)
+    hydro_prep.add_argument("--site", required=True)
+    hydro_prep.add_argument("--script-dir", default=None)
+    hydro_prep.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
+    hydro_prep.add_argument("--dem-path", default=None, help="DEM path passed to hydrology preprocessing.")
+    hydro_prep.add_argument("--flowline-path", default=None, help="Flowline path passed to hydrology preprocessing.")
+    hydro_prep.add_argument("--flowdir-path", default=None, help="flow_dir.tif output path.")
+    hydro_prep.add_argument("--flowacc-path", default=None, help="flow_acc.tif output path.")
+    hydro_prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
+    hydro_prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
+    hydro_prep.add_argument("--dry-run", action="store_true", help="Run preflight and list steps without executing processing.")
+
     outlet = sub.add_parser(
         "create-outlet",
         help="Create outlet.shp at the maximum flow-accumulation cell.",
@@ -90,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument(
         "--products",
         default="dem",
-        help="dem/demhr, demlr, hydro, all, or a comma-separated subset (default: dem).",
+        help="dem/demhr, demlr, hydro, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
     )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
@@ -99,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
     dl.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
+    dl.add_argument("--dem-resolution", default="1/3", help="DEM tier for product dem: 1/3, 1/9, 1m, 30m, or auto (default: 1/3).")
+    dl.add_argument("--make-points", action="store_true", help="Write a single-point shapefile per site.")
+    dl.add_argument("--points-dir", default=None, help="Base directory for point shapefiles; defaults to --download when set.")
+    dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
+    dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
 
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
@@ -132,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
     fetch.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
     fetch.add_argument("--site-id", default=None, help="Folder-safe ID for source downloads; defaults to the site name.")
-    fetch.add_argument("--products", default="all", help="dem, hydro, all, or comma-separated subset (default: all).")
+    fetch.add_argument("--products", default="all", help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).")
     fetch.add_argument("--download-dir", default=None, help="Raw source download directory; defaults under the site folder.")
     fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
     fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
@@ -141,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     all_inputs = sub.add_parser(
         "download-inputs",
-        help="Download DEM, hydrography, HSG, and soil texture before merge/clip.",
+        help="Download C++-parity source products plus HSG and soil texture before merge/clip.",
     )
     all_inputs.add_argument("--root", required=True)
     all_inputs.add_argument("--site", required=True)
@@ -299,6 +326,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"prepare-inputs failed: {exc}")
             return 2
         return 0
+    if args.command == "prepare-hydrology":
+        try:
+            run_hydrology_preprocessing(
+                args.root,
+                args.site,
+                args.script_dir,
+                _legacy_options_from_args(args),
+            )
+        except LegacyInputWorkflowError as exc:
+            print(f"prepare-hydrology failed: {exc}")
+            return 2
+        print("Hydrology preprocessing complete.")
+        return 0
     if args.command == "create-pour-points":
         site_path = Path(args.site).expanduser()
         if not site_path.is_absolute():
@@ -359,9 +399,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "download-data":
         try:
+            default_output = str(Path(args.input_csv).with_name(Path(args.input_csv).stem + "_dem.csv"))
             results = process_csv(
                 args.input_csv,
-                args.output_csv,
+                args.output_csv or default_output,
                 products=parse_products(args.products),
                 download_dir=args.download,
                 id_col=args.id_col,
@@ -370,6 +411,11 @@ def main(argv: list[str] | None = None) -> int:
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
                 max_file_size_mb=args.max_file_size_mb,
+                dem_resolution=args.dem_resolution,
+                make_points=args.make_points,
+                points_dir=args.points_dir,
+                tiger_year=args.tiger_year,
+                nlcd_year=args.nlcd_year,
                 progress=lambda message: print(message, flush=True),
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
