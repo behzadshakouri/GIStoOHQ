@@ -41,6 +41,13 @@ class PipelineConfig:
     soil_buffer: float = 5000.0
     soil_pixel_size: float = 0.0003
     soil_top_depth: float = 30.0
+    workflow: str = "legacy"
+    lat: float | None = None
+    lon: float | None = None
+    source_buffer: float = 5000.0
+    download_dir: str | None = None
+    max_tiles: int | None = None
+    target_crs: str | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "PipelineConfig":
@@ -51,6 +58,13 @@ class PipelineConfig:
         if root_value == "/path/to/NHA":
             root_value = str(Path.cwd())
             site_value = "."
+        workflow = str(data.get("workflow", "legacy"))
+        if workflow not in {"legacy", "one-step", "four-step"}:
+            raise ValueError("workflow must be 'legacy', 'one-step', or 'four-step'")
+        lat = float(data["lat"]) if data.get("lat") is not None else None
+        lon = float(data["lon"]) if data.get("lon") is not None else None
+        if workflow in {"one-step", "four-step"} and (lat is None or lon is None):
+            raise ValueError(f"workflow '{workflow}' requires lat and lon")
         return cls(
             root=Path(root_value).expanduser().resolve(),
             site=site_value,
@@ -68,6 +82,13 @@ class PipelineConfig:
             soil_buffer=float(data.get("soil_buffer", 5000.0)),
             soil_pixel_size=float(data.get("soil_pixel_size", 0.0003)),
             soil_top_depth=float(data.get("soil_top_depth", 30.0)),
+            workflow=workflow,
+            lat=lat,
+            lon=lon,
+            source_buffer=float(data.get("source_buffer", 5000.0)),
+            download_dir=data.get("download_dir"),
+            max_tiles=int(data["max_tiles"]) if data.get("max_tiles") is not None else None,
+            target_crs=data.get("target_crs"),
         )
 
     @classmethod
@@ -115,6 +136,30 @@ def _add_common_args(command: list[str], config: PipelineConfig) -> None:
         command.extend(["--config", config.config])
 
 
+def _source_args(config: PipelineConfig) -> list[str]:
+    args = [
+        "--root",
+        str(config.root),
+        "--site",
+        config.site,
+        "--lat",
+        str(config.lat),
+        "--lon",
+        str(config.lon),
+        "--buffer",
+        str(config.source_buffer),
+        "--soil-pixel-size",
+        str(config.soil_pixel_size),
+        "--soil-top-depth",
+        str(config.soil_top_depth),
+    ]
+    if config.download_dir:
+        args.extend(["--download-dir", config.download_dir])
+    if config.max_tiles is not None:
+        args.extend(["--max-tiles", str(config.max_tiles)])
+    return args
+
+
 def build_steps(config: PipelineConfig) -> list[PipelineStep]:
     steps: list[PipelineStep] = []
     skip_prepare = config.skip_prepare or (config.required_outputs_exist() and not config.force)
@@ -122,9 +167,62 @@ def build_steps(config: PipelineConfig) -> list[PipelineStep]:
     doctor = _base_command() + ["doctor"]
     if config.script_dir:
         doctor.extend(["--script-dir", config.script_dir])
-    if config.strict_gis or not skip_prepare:
+    if config.strict_gis or not skip_prepare or config.workflow in {"one-step", "four-step"}:
         doctor.append("--strict-gis")
     steps.append(PipelineStep("doctor", doctor))
+
+    if config.workflow == "one-step":
+        command = _base_command() + ["full-run", *_source_args(config)]
+        if config.script_dir:
+            command.extend(["--script-dir", config.script_dir])
+        if config.project_name:
+            command.extend(["--project-name", config.project_name])
+        if config.out:
+            command.extend(["--out", config.out])
+        if config.target_crs:
+            command.extend(["--target-crs", config.target_crs])
+        steps.append(PipelineStep("full-run", command))
+        return steps
+
+    if config.workflow == "four-step":
+        download = _base_command() + ["download-inputs", *_source_args(config)]
+        steps.append(PipelineStep("download-inputs", download))
+        materialize = _base_command() + [
+            "materialize-inputs",
+            "--root",
+            str(config.root),
+            "--site",
+            config.site,
+        ]
+        if config.download_dir:
+            materialize.extend(["--source-dir", config.download_dir])
+        if config.target_crs:
+            materialize.extend(["--target-crs", config.target_crs])
+        steps.append(PipelineStep("materialize-inputs", materialize))
+
+        prepare = _base_command() + [
+            "prepare-inputs",
+            "--root",
+            str(config.root),
+            "--site",
+            config.site,
+            "--phase",
+            config.phase,
+        ]
+        if config.script_dir:
+            prepare.extend(["--script-dir", config.script_dir])
+        steps.append(PipelineStep("prepare-inputs", prepare))
+
+        build = _base_command() + ["build"]
+        _add_common_args(build, config)
+        if config.project_name:
+            build.extend(["--project-name", config.project_name])
+        if config.out:
+            build.extend(["--out", config.out])
+        if config.no_schema:
+            build.append("--no-schema")
+        steps.append(PipelineStep("build", build))
+        return steps
 
     prepare = _base_command() + ["prepare-inputs", "--root", str(config.root), "--site", config.site]
     if config.script_dir:
