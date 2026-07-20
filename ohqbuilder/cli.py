@@ -90,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument(
         "--products",
         default="dem",
-        help="dem/demhr, demlr, hydro, all, or a comma-separated subset (default: dem).",
+        help="dem/demhr, demlr, hydro, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
     )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
@@ -99,6 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
     dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
     dl.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
+    dl.add_argument("--make-points", action="store_true", help="Write a single-point shapefile per site.")
+    dl.add_argument("--points-dir", default=None, help="Base directory for point shapefiles; defaults to --download when set.")
+    dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
+    dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
 
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
@@ -132,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
     fetch.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
     fetch.add_argument("--site-id", default=None, help="Folder-safe ID for source downloads; defaults to the site name.")
-    fetch.add_argument("--products", default="all", help="dem, hydro, all, or comma-separated subset (default: all).")
+    fetch.add_argument("--products", default="all", help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).")
     fetch.add_argument("--download-dir", default=None, help="Raw source download directory; defaults under the site folder.")
     fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
     fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
@@ -141,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     all_inputs = sub.add_parser(
         "download-inputs",
-        help="Download DEM, hydrography, HSG, and soil texture before merge/clip.",
+        help="Download C++-parity source products plus HSG and soil texture before merge/clip.",
     )
     all_inputs.add_argument("--root", required=True)
     all_inputs.add_argument("--site", required=True)
@@ -359,9 +363,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "download-data":
         try:
+            default_output = str(Path(args.input_csv).with_name(Path(args.input_csv).stem + "_dem.csv"))
             results = process_csv(
                 args.input_csv,
-                args.output_csv,
+                args.output_csv or default_output,
                 products=parse_products(args.products),
                 download_dir=args.download,
                 id_col=args.id_col,
@@ -370,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
                 max_file_size_mb=args.max_file_size_mb,
+                make_points=args.make_points,
+                points_dir=args.points_dir,
+                tiger_year=args.tiger_year,
+                nlcd_year=args.nlcd_year,
                 progress=lambda message: print(message, flush=True),
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
