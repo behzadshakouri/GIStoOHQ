@@ -16,7 +16,7 @@ def test_preferred_hydro_archives_keeps_latest_vector_hu4(tmp_path):
         path.write_bytes(b"x" * index)
         paths.append(path)
 
-    assert _preferred_hydro_archives(paths) == [tmp_path / "NHDPLUS_H_0206_HU4_20240401_GDB.zip"]
+    assert _preferred_hydro_archives(paths) == [tmp_path / "NHDPLUS_H_0206_HU4_20230301_SHAPE.zip"]
 
 
 def test_preferred_hydro_archives_falls_back_when_no_hu4(tmp_path):

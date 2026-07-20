@@ -223,9 +223,9 @@ def _is_hydro_raster_package(item: DownloadItem) -> bool:
 
 def _hydro_vector_rank(item: DownloadItem) -> int:
     text = f"{item.title} {_filename_from_url(item.url, item.title)}".lower()
-    if "gdb" in text or "geodatabase" in text:
-        return 0
     if "shp" in text or "shape" in text or "shapefile" in text:
+        return 0
+    if "gdb" in text or "geodatabase" in text:
         return 1
     return 2
 
@@ -242,8 +242,8 @@ def _prefer_hydro_packages(items: list[DownloadItem]) -> list[DownloadItem]:
         if current is None:
             latest[key] = item
             continue
-        current_score = (_item_date_key(current), -_hydro_vector_rank(current), current.title, current.url)
-        item_score = (_item_date_key(item), -_hydro_vector_rank(item), item.title, item.url)
+        current_score = (-_hydro_vector_rank(current), _item_date_key(current), current.title, current.url)
+        item_score = (-_hydro_vector_rank(item), _item_date_key(item), item.title, item.url)
         if item_score > current_score:
             latest[key] = item
     return sorted(latest.values(), key=lambda item: (item.size_bytes if item.size_bytes is not None else 10**18, _hydro_hu4_key(item), item.title, item.url))

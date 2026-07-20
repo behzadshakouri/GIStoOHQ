@@ -33,9 +33,9 @@ def _is_hydro_raster_archive(path: Path) -> bool:
 
 def _hydro_archive_vector_rank(path: Path) -> int:
     name = path.name.lower()
-    if "gdb" in name or "geodatabase" in name:
-        return 0
     if "shp" in name or "shape" in name or "shapefile" in name:
+        return 0
+    if "gdb" in name or "geodatabase" in name:
         return 1
     return 2
 
@@ -52,8 +52,8 @@ def _preferred_hydro_archives(paths: list[Path]) -> list[Path]:
         if current is None:
             latest[key] = path
             continue
-        current_score = (_hydro_archive_date(current), -_hydro_archive_vector_rank(current), current.name)
-        path_score = (_hydro_archive_date(path), -_hydro_archive_vector_rank(path), path.name)
+        current_score = (-_hydro_archive_vector_rank(current), _hydro_archive_date(current), current.name)
+        path_score = (-_hydro_archive_vector_rank(path), _hydro_archive_date(path), path.name)
         if path_score > current_score:
             latest[key] = path
     return sorted(latest.values(), key=lambda path: (path.stat().st_size if path.exists() else 10**18, path.name))

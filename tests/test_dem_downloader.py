@@ -417,7 +417,7 @@ def test_process_csv_hydro_prefers_one_latest_vector_package_per_hu4(monkeypatch
 
     assert results[0].count == 5
     assert results[0].downloaded == 1
-    assert results[0].url.endswith("20240401_GDB.zip")
+    assert results[0].url.endswith("20230301_SHAPE.zip")
     assert not (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20240501_RASTER.zip").exists()
-    assert (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20240401_GDB.zip").is_file()
+    assert (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20230301_SHAPE.zip").is_file()
     assert any("1 preferred unique/latest vector package" in message for message in progress_messages)
