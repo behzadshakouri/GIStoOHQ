@@ -1,10 +1,62 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+
+
+
+def _hydro_archive_date(path: Path) -> str:
+    matches = re.findall(r"(?:19|20)\d{6}", path.name)
+    if matches:
+        return max(matches)
+    years = re.findall(r"(?:19|20)\d{2}", path.name)
+    return max(years) if years else ""
+
+
+def _hydro_archive_hu4(path: Path) -> str | None:
+    match = re.search(r"H_(\d{4})_HU4", path.name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"HU4[_-]?(\d{4})", path.name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _is_hydro_raster_archive(path: Path) -> bool:
+    return bool(re.search(r"(?:^|[_-])raster(?:[_\.-]|$)", path.name, re.IGNORECASE))
+
+
+def _hydro_archive_vector_rank(path: Path) -> int:
+    name = path.name.lower()
+    if "gdb" in name or "geodatabase" in name:
+        return 0
+    if "shp" in name or "shape" in name or "shapefile" in name:
+        return 1
+    return 2
+
+
+def _preferred_hydro_archives(paths: list[Path]) -> list[Path]:
+    vector_paths = [path for path in paths if not _is_hydro_raster_archive(path)]
+    hu4_paths = [path for path in vector_paths if _hydro_archive_hu4(path)]
+    if hu4_paths:
+        vector_paths = hu4_paths
+    latest: dict[str, Path] = {}
+    for path in vector_paths:
+        key = _hydro_archive_hu4(path) or path.name
+        current = latest.get(key)
+        if current is None:
+            latest[key] = path
+            continue
+        current_score = (_hydro_archive_date(current), -_hydro_archive_vector_rank(current), current.name)
+        path_score = (_hydro_archive_date(path), -_hydro_archive_vector_rank(path), path.name)
+        if path_score > current_score:
+            latest[key] = path
+    return sorted(latest.values(), key=lambda path: (path.stat().st_size if path.exists() else 10**18, path.name))
 
 class HydroMaterializeError(RuntimeError):
     """Raised when downloaded hydrography cannot be converted to flowlines."""
@@ -47,7 +99,8 @@ def materialize_flowlines(
 
     with tempfile.TemporaryDirectory() as temporary:
         workspace = Path(temporary)
-        for archive_path in sources.rglob("*.zip"):
+        archive_paths = _preferred_hydro_archives(list(sources.rglob("*.zip")))
+        for archive_path in archive_paths:
             try:
                 with zipfile.ZipFile(archive_path) as archive:
                     archive.extractall(workspace / archive_path.stem)
