@@ -267,3 +267,20 @@ def test_download_workflows_require_coordinates(tmp_path):
         assert "requires lat and lon" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_check_run_workflows_script_validates_both_layouts():
+    import subprocess
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/check_run_workflows.py"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "one-step: OK" in completed.stdout
+    assert "four-step: OK" in completed.stdout
+    assert "Both run.py approaches validate" in completed.stdout

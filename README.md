@@ -101,7 +101,10 @@ python3 run.py my-four-steps.json
 
 Set `workflow` to `one-step` or `four-step`; both require `lat` and `lon`.
 Use `python3 run.py my-run.json --dry-run` to print the commands without running
-them. The original config behavior remains available with `workflow: legacy`.
+them. To check both supported start-to-finish layouts without network or QGIS,
+run `python3 scripts/check_run_workflows.py`; it dry-runs the one-step and
+four-step example configs and verifies every expected stage is present. The
+original config behavior remains available with `workflow: legacy`.
 
 The existing three-step workflow remains available for controlled or offline runs.
 
