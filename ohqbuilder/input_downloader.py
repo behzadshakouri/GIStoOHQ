@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .phase1_fetcher import Phase1FetchResult, fetch_phase1_inputs
 from .soil_retrieval import (
@@ -23,6 +24,7 @@ class InputDownloadResult:
     def download_dir(self) -> Path:
         return self.phase1.download_dir
 
+
 def download_all_inputs(
     root: str | Path,
     site: str,
@@ -35,6 +37,7 @@ def download_all_inputs(
     max_tiles: int | None = None,
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
+    progress: Callable[[str], None] | None = None,
 ) -> InputDownloadResult:
     """Download every Python-supported source input for one site.
 
@@ -55,6 +58,8 @@ def download_all_inputs(
     if soil_top_depth <= 0:
         raise ValueError("soil_top_depth must be greater than zero")
 
+    if progress:
+        progress("[1/6] Downloading DEM and hydrography source products...")
     phase1 = fetch_phase1_inputs(
         root,
         site,
@@ -65,8 +70,11 @@ def download_all_inputs(
         download_dir=download_dir,
         buffer_m=buffer_m,
         max_tiles=max_tiles,
+        progress=progress,
     )
     center = (lon, lat)
+    if progress:
+        progress("[2/6] Downloading hydrologic soil groups...")
     hsg = retrieve_hydrologic_soil_groups(
         root,
         site,
@@ -74,6 +82,8 @@ def download_all_inputs(
         pixel_size=soil_pixel_size,
         center=center,
     )
+    if progress:
+        progress("[3/6] Downloading soil texture...")
     texture = retrieve_soil_texture(
         root,
         site,

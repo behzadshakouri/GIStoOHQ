@@ -345,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_tiles=args.max_tiles,
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
+                progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:
             print(f"full-run failed: {exc}")
@@ -363,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
                 lon_col=args.lon_col,
                 buffer_m=args.buffer,
                 max_tiles=args.max_tiles,
+                progress=lambda message: print(message, flush=True),
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"download-data failed: {exc}")
@@ -386,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_tiles=args.max_tiles,
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
+                progress=lambda message: print(message, flush=True),
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"download-inputs failed: {exc}")

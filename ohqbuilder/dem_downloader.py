@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Callable, Iterable, Literal
 
 ProductKey = Literal["dem", "demlr", "hydro"]
 
@@ -58,15 +58,23 @@ LOW_RES_ELEVATION_TIERS: tuple[ProductTier, ...] = (
     ProductTier("National Elevation Dataset (NED) 1/3 arc-second", ("GeoTIFF",), "1/3 arc-second"),
 )
 HYDRO_TIERS: tuple[ProductTier, ...] = (
-    ProductTier("National Hydrography Dataset Plus High Resolution (NHDPlus HR)", ("Shapefile", "FileGDB"), "NHDPlus HR"),
-    ProductTier("National Hydrography Dataset (NHD) Best Resolution", ("Shapefile", "FileGDB"), "NHD Best Resolution"),
+    ProductTier(
+        "National Hydrography Dataset Plus High Resolution (NHDPlus HR)",
+        ("Shapefile", "FileGDB"),
+        "NHDPlus HR",
+    ),
+    ProductTier(
+        "National Hydrography Dataset (NHD) Best Resolution",
+        ("Shapefile", "FileGDB"),
+        "NHD Best Resolution",
+    ),
 )
 PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {
     "dem": ELEVATION_TIERS,
     "demlr": LOW_RES_ELEVATION_TIERS,
     "hydro": HYDRO_TIERS,
 }
-DEFAULT_MAX_TILES: dict[ProductKey, int] = {"dem": 4, "demlr": 8, "hydro": 4}
+DEFAULT_MAX_TILES: dict[ProductKey, int] = {"dem": 4, "demlr": 8, "hydro": 1}
 
 
 def parse_products(value: str) -> list[ProductKey]:
@@ -88,7 +96,9 @@ def parse_products(value: str) -> list[ProductKey]:
     return products
 
 
-def _detect_column(headers: Iterable[str], explicit: str | None, candidates: tuple[str, ...], label: str) -> str:
+def _detect_column(
+    headers: Iterable[str], explicit: str | None, candidates: tuple[str, ...], label: str
+) -> str:
     names = list(headers)
     if explicit:
         if explicit not in names:
@@ -113,7 +123,9 @@ def _bbox(lon: float, lat: float, buffer_m: float) -> str:
     return f"{lon - dlon},{lat - dlat},{lon + dlon},{lat + dlat}"
 
 
-def query_tnm(lon: float, lat: float, tier: ProductTier, buffer_m: float, timeout: float = 60.0) -> list[DownloadItem]:
+def query_tnm(
+    lon: float, lat: float, tier: ProductTier, buffer_m: float, timeout: float = 60.0
+) -> list[DownloadItem]:
     params = {
         "datasets": tier.dataset,
         "bbox": _bbox(lon, lat, buffer_m),
@@ -171,14 +183,28 @@ def download_file(url: str, destination: Path, timeout: float = 120.0) -> bool:
     if destination.exists() and destination.stat().st_size > 0:
         return False
     with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - URL comes from TNM API
-        with tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".part", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent, suffix=".part", delete=False
+        ) as tmp:
             shutil.copyfileobj(response, tmp)
             tmp_path = Path(tmp.name)
     tmp_path.replace(destination)
     return True
 
 
-def process_csv(input_csv: str | Path, output_csv: str | Path | None, *, products: list[ProductKey], download_dir: str | Path | None = None, id_col: str | None = None, lat_col: str | None = None, lon_col: str | None = None, buffer_m: float = 30.0, max_tiles: int | None = None) -> list[SiteDownloadResult]:
+def process_csv(
+    input_csv: str | Path,
+    output_csv: str | Path | None,
+    *,
+    products: list[ProductKey],
+    download_dir: str | Path | None = None,
+    id_col: str | None = None,
+    lat_col: str | None = None,
+    lon_col: str | None = None,
+    buffer_m: float = 30.0,
+    max_tiles: int | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> list[SiteDownloadResult]:
     input_path = Path(input_csv)
     rows = list(csv.DictReader(input_path.open(newline="", encoding="utf-8-sig")))
     headers = rows[0].keys() if rows else []
@@ -194,25 +220,77 @@ def process_csv(input_csv: str | Path, output_csv: str | Path | None, *, product
         except ValueError:
             continue
         for product in products:
+            if progress:
+                progress(f"Querying {product} products for {site}...")
             found: list[DownloadItem] = []
             for tier in PRODUCT_TIERS[product]:
                 found = query_tnm(lon, lat, tier, buffer_m)
                 if found:
                     break
+            if product == "hydro":
+                found = sorted(
+                    found,
+                    key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18,
+                )
             cap = DEFAULT_MAX_TILES[product] if max_tiles is None else max_tiles
             selected = found if cap == 0 else found[:cap]
             product_dir = out_base / site / product if out_base else None
             downloaded = 0
+            if progress:
+                progress(f"Found {len(found)} {product} candidate(s); downloading {len(selected)}.")
             if product_dir:
-                for item_index, item in enumerate(selected):
-                    name = _filename_from_url(item.url, f"{product}_{item_index + 1}.dat")
-                    if download_file(item.url, product_dir / name):
+                for item_index, item in enumerate(selected, start=1):
+                    name = _filename_from_url(item.url, f"{product}_{item_index}.dat")
+                    destination = product_dir / name
+                    if progress:
+                        progress(f"Downloading {product} {item_index}/{len(selected)}: {name}")
+                    if download_file(item.url, destination):
                         downloaded += 1
-            results.append(SiteDownloadResult(site, product, "ok" if found else "no coverage", len(found), downloaded, product_dir, selected[0].dataset if selected else "", selected[0].resolution if selected else "", selected[0].url if selected else ""))
+                    if progress:
+                        size = destination.stat().st_size if destination.exists() else 0
+                        progress(f"Finished {product} {item_index}/{len(selected)} ({size} bytes).")
+            results.append(
+                SiteDownloadResult(
+                    site,
+                    product,
+                    "ok" if found else "no coverage",
+                    len(found),
+                    downloaded,
+                    product_dir,
+                    selected[0].dataset if selected else "",
+                    selected[0].resolution if selected else "",
+                    selected[0].url if selected else "",
+                )
+            )
     if output_csv:
         with Path(output_csv).open("w", newline="", encoding="utf-8") as fp:
-            writer = csv.DictWriter(fp, fieldnames=["site_id", "product", "status", "count", "downloaded", "dir", "best_dataset", "best_resolution", "url"])
+            writer = csv.DictWriter(
+                fp,
+                fieldnames=[
+                    "site_id",
+                    "product",
+                    "status",
+                    "count",
+                    "downloaded",
+                    "dir",
+                    "best_dataset",
+                    "best_resolution",
+                    "url",
+                ],
+            )
             writer.writeheader()
             for r in results:
-                writer.writerow({"site_id": r.site_id, "product": r.product, "status": r.status, "count": r.count, "downloaded": r.downloaded, "dir": str(r.output_dir or ""), "best_dataset": r.best_dataset, "best_resolution": r.best_resolution, "url": r.url})
+                writer.writerow(
+                    {
+                        "site_id": r.site_id,
+                        "product": r.product,
+                        "status": r.status,
+                        "count": r.count,
+                        "downloaded": r.downloaded,
+                        "dir": str(r.output_dir or ""),
+                        "best_dataset": r.best_dataset,
+                        "best_resolution": r.best_resolution,
+                        "url": r.url,
+                    }
+                )
     return results

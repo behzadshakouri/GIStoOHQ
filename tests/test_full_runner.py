@@ -34,7 +34,11 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "ohqbuilder.full_runner.InputValidator",
-        lambda: SimpleNamespace(validate=lambda settings: calls.append("validate") or SimpleNamespace(ok=True, errors=[])),
+        lambda: SimpleNamespace(
+            validate=lambda settings: (
+                calls.append("validate") or SimpleNamespace(ok=True, errors=[])
+            )
+        ),
     )
     monkeypatch.setattr(
         "ohqbuilder.full_runner.build_ohq_project",
@@ -61,6 +65,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "validate",
         "build",
     ]
+    assert callable(download_options.pop("progress"))
     assert download_options == {
         "lon": -111.2,
         "lat": 34.1,
