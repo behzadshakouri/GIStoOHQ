@@ -157,11 +157,17 @@ MATERIALIZE_CMD=(
   --source-dir "${RAW_DOWNLOAD_DIR}"
   --target-crs "${TARGET_CRS}"
 )
-PREPARE_CMD=(
+PREPARE_PHASE1_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli prepare-inputs
   --root "${ROOT}"
   --site "${SITE}"
-  --phase all
+  --phase phase1
+)
+PREPARE_PHASE2_CMD=(
+  "${PYTHON_BIN}" -m ohqbuilder.cli prepare-inputs
+  --root "${ROOT}"
+  --site "${SITE}"
+  --phase phase2
 )
 BUILD_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli build
@@ -197,10 +203,11 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   elif [[ "${RUN_MODE}" == "download-then-three-step" ]]; then
     printf '  %q' "${DOWNLOAD_CMD[@]}"; printf '\n'
     printf '  %q' "${CHECK_DOWNLOAD_CMD[@]}"; printf ' <<PY ...\n'
+    printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
+    printf '  %q' "${PREPARE_PHASE1_CMD[@]}"; printf '\n'
     printf '  %q' "${HSG_CMD[@]}"; printf '\n'
     printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
-    printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
-    printf '  %q' "${PREPARE_CMD[@]}"; printf '\n'
+    printf '  %q' "${PREPARE_PHASE2_CMD[@]}"; printf '\n'
     printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
   else
     printf 'Unknown RUN_MODE: %s\n' "${RUN_MODE}" >&2
@@ -234,10 +241,11 @@ if errors:
     raise SystemExit("Downloader did not produce required OK statuses:\n" + "\n".join(errors))
 print("Downloader required statuses are OK: " + ", ".join(sorted(required)))
 PY
+  "${MATERIALIZE_CMD[@]}"
+  "${PREPARE_PHASE1_CMD[@]}"
   "${HSG_CMD[@]}"
   "${TEXTURE_CMD[@]}"
-  "${MATERIALIZE_CMD[@]}"
-  "${PREPARE_CMD[@]}"
+  "${PREPARE_PHASE2_CMD[@]}"
   "${BUILD_CMD[@]}"
 else
   printf 'Unknown RUN_MODE: %s\n' "${RUN_MODE}" >&2

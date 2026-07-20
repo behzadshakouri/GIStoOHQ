@@ -201,7 +201,7 @@ def _dedupe_latest_by_tile(items: list[DownloadItem], product: ProductKey) -> li
     return sorted(latest.values(), key=lambda item: (_tile_key(item, product), item.title, item.url))
 
 
-def _hydro_hu4_key(item: DownloadItem) -> str:
+def _hydro_hu4_code(item: DownloadItem) -> str | None:
     text = f"{item.title} {_filename_from_url(item.url, item.title)}"
     match = re.search(r"H_(\d{4})_HU4", text, re.IGNORECASE)
     if match:
@@ -209,7 +209,11 @@ def _hydro_hu4_key(item: DownloadItem) -> str:
     match = re.search(r"HU4[_-]?(\d{4})", text, re.IGNORECASE)
     if match:
         return match.group(1)
-    return _filename_from_url(item.url, item.title)
+    return None
+
+
+def _hydro_hu4_key(item: DownloadItem) -> str:
+    return _hydro_hu4_code(item) or _filename_from_url(item.url, item.title)
 
 
 def _is_hydro_raster_package(item: DownloadItem) -> bool:
@@ -228,6 +232,9 @@ def _hydro_vector_rank(item: DownloadItem) -> int:
 
 def _prefer_hydro_packages(items: list[DownloadItem]) -> list[DownloadItem]:
     vector_items = [item for item in items if not _is_hydro_raster_package(item)]
+    hu4_items = [item for item in vector_items if _hydro_hu4_code(item)]
+    if hu4_items:
+        vector_items = hu4_items
     latest: dict[str, DownloadItem] = {}
     for item in vector_items:
         key = _hydro_hu4_key(item)
