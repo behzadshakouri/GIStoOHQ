@@ -2,3 +2,5 @@ outputs/*
 !outputs/.gitkeep
 __pycache__/
 *.pyc
+
+gistoohq.egg-info/
