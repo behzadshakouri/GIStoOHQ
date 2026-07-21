@@ -100,9 +100,13 @@ print("Outputs  :", OUT_DIR)
 
 def grass_id(name):
     reg = QgsApplication.processingRegistry()
-    for prefix in ("grass7:", "grass:"):
-        if reg.algorithmById(prefix + name):
-            return prefix + name
+    for prefix in ("grass:", "grass7:"):
+        alg_id = prefix + name
+        if reg.algorithmById(alg_id):
+            print("Using GRASS algorithm:", alg_id)
+            return alg_id
+    if reg.algorithmById("grass:r.watershed"):
+        return "grass:" + name
     return "grass7:" + name
 
 # --- read cell size + CRS from the DEM (CRS source of truth) ---------------
