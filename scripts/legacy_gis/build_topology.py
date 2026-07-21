@@ -17,6 +17,11 @@
 #       audit so an unusually far match surfaces.
 #   reach    -> downstream : the junction at the reach's downstream end (already
 #       on reaches.gpkg from materialize_junctions), or the outlet -> Sink.
+#   junction -> downstream : prefer its recorded ds_reach_id; if that attribute
+#       is blank or incorrectly marked as outlet, recover the outgoing reach
+#       spatially from a reach whose UP endpoint lies at the junction. This
+#       prevents valid headwater/confluence junctions from being sent directly
+#       to Sink merely because junction metadata is incomplete.
 #
 # PRUNE (internal headwater reaches)
 #   A reach is INTERNAL (drop) if NOTHING drains into its UP end:
@@ -307,16 +312,76 @@ for jid in sorted(J):
 # ---------------------------------------------------------------------------
 # STEP 4: resolve downstream targets (chase through collapsed junctions)
 # ---------------------------------------------------------------------------
+def outgoing_reaches_at_junction(jid, alive_only=False):
+    """Return reaches whose UP endpoint is located at this junction.
+
+    The junction layer's ``ds_reach_id`` is useful but is not always populated
+    correctly.  Endpoint geometry is therefore the authoritative fallback.
+    Incoming reaches are not selected because their DOWN endpoint, rather than
+    their UP endpoint, lies at the junction.
+    """
+    candidates = []
+    for rid in R:
+        if alive_only and rid not in alive:
+            continue
+        if jid in up_junc.get(rid, []):
+            candidates.append(rid)
+    return sorted(candidates)
+
+
+def junction_outflow_reach(jid):
+    """Resolve the physical outgoing reach for a junction.
+
+    Priority:
+      1. valid recorded ``ds_reach_id``;
+      2. surviving reach beginning at the junction;
+      3. any reach beginning at the junction (it may need collapsed-reach
+         chasing through ``resolve_reach``).
+
+    This spatial recovery is intentionally attempted before accepting an
+    ``outlet`` flag, because some terminal-looking junction records are located
+    at the upstream end of a valid stream reach.
+    """
+    recorded = J[jid].get("ds_reach_id")
+    if recorded in R:
+        return recorded, "recorded"
+
+    alive_candidates = outgoing_reaches_at_junction(jid, alive_only=True)
+    if alive_candidates:
+        if len(alive_candidates) > 1:
+            print("WARNING: Junction_%s has multiple surviving outgoing reaches %s; "
+                  "using Reach_%s"
+                  % (jid, alive_candidates, alive_candidates[0]))
+        return alive_candidates[0], "spatial"
+
+    all_candidates = outgoing_reaches_at_junction(jid, alive_only=False)
+    if all_candidates:
+        if len(all_candidates) > 1:
+            print("WARNING: Junction_%s has multiple outgoing reaches %s; "
+                  "using Reach_%s"
+                  % (jid, all_candidates, all_candidates[0]))
+        return all_candidates[0], "spatial-dropped"
+
+    return None, "none"
+
+
 def resolve_junction(jid, seen=None):
-    if seen is None: seen = set()
-    if ("J", jid) in seen: return ("sink", None)
+    if seen is None:
+        seen = set()
+    if ("J", jid) in seen:
+        return ("sink", None)
     seen.add(("J", jid))
+
     if jid in keep_junc:
         return ("junction", jid)
-    jd = J[jid]
-    if jd["ds_type"] == "outlet" or jd["ds_reach_id"] is None:
-        return ("sink", None)
-    return resolve_reach(jd["ds_reach_id"], seen)
+
+    out_rid, source = junction_outflow_reach(jid)
+    if out_rid is not None:
+        return resolve_reach(out_rid, seen)
+
+    # Only accept Sink after both metadata and spatial endpoint recovery fail.
+    return ("sink", None)
+
 
 def resolve_reach(rid, seen=None):
     if seen is None: seen = set()
@@ -339,23 +404,41 @@ for rid in sorted(alive):
     if rid in outlet_reaches:
         reach_ds[rid] = ("sink", None, ""); continue
     at = [jid for jid in J if R[rid]["dn"].distance(J[jid]["pt"]) <= SNAP_TOL]
-    if at:
-        kind, tgt = resolve_junction(at[0])
-        note = "" if (at[0] in keep_junc) else "via collapsed J%d" % at[0]
+    # Prefer the reach layer's explicit downstream-junction id when it is one
+    # of the spatial endpoint matches; otherwise use the nearest match.
+    explicit_jid = R[rid].get("ds_junction_id")
+    if explicit_jid in at:
+        dn_jid = explicit_jid
+    elif at:
+        dn_jid = min(at, key=lambda jid: R[rid]["dn"].distance(J[jid]["pt"]))
+    else:
+        dn_jid = None
+
+    if dn_jid is not None:
+        kind, tgt = resolve_junction(dn_jid)
+        note = "" if (dn_jid in keep_junc) else "via collapsed J%d" % dn_jid
     elif R[rid]["ds_type"] == "reach" and R[rid]["ds_reach_id"] is not None:
         kind, tgt = resolve_reach(R[rid]["ds_reach_id"]); note = ""
     else:
         kind, tgt = ("sink", None); note = ""
     reach_ds[rid] = (kind, tgt, note)
 
-# junction downstream: its outflow reach (resolved through any drops)
+# junction downstream: recorded outflow reach, with spatial endpoint fallback
 junc_ds = {}      # jid -> (kind, id, note)
 for jid in sorted(keep_junc):
-    jd = J[jid]
-    if jd["ds_type"] == "outlet" or jd["ds_reach_id"] is None:
-        junc_ds[jid] = ("sink", None, ""); continue
-    kind, tgt = resolve_reach(jd["ds_reach_id"])
-    junc_ds[jid] = (kind, tgt, "" if kind == "reach" else "to sink")
+    out_rid, source = junction_outflow_reach(jid)
+    if out_rid is None:
+        junc_ds[jid] = ("sink", None, "no outgoing reach")
+        continue
+
+    kind, tgt = resolve_reach(out_rid)
+    if source == "recorded":
+        note = "" if kind == "reach" else "recorded outflow resolves to sink"
+    elif kind == "reach":
+        note = "outflow recovered spatially"
+    else:
+        note = "spatial outflow resolves to sink"
+    junc_ds[jid] = (kind, tgt, note)
 
 # subbasin downstream: its assigned junction if kept, else resolve through
 sub_ds = {}       # sid -> (kind, id, note)
