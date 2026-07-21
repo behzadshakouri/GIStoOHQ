@@ -93,7 +93,7 @@ SCRIPT_DIR = os.path.abspath(os.path.expanduser(SCRIPT_DIR))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from ws3io import release_and_delete
+from ws3io import release_and_delete  # noqa: E402
 
 if os.path.isabs(SITE_DIR):
     site_path = os.path.abspath(os.path.expanduser(SITE_DIR))

@@ -17,23 +17,37 @@ for p in (QGIS_PLUGIN_PATH, QGIS_PYTHON_PATH):
 if "processing" in sys.modules:
     del sys.modules["processing"]
 
-import processing
-from processing.core.Processing import Processing
+import processing  # noqa: E402
 
-try:
-    Processing.initialize()
-except Exception:
-    pass
+
+def initialize_processing():
+    processing_class = getattr(processing, "Processing", None)
+    initialize = getattr(processing_class, "initialize", None)
+    if initialize is None:
+        return
+    try:
+        initialize()
+    except Exception:
+        pass
 
 
 def qgis_run(alg_id, params):
-    result = Processing.runAlgorithm(alg_id, params)
+    initialize_processing()
+    processing_class = getattr(processing, "Processing", None)
+    run_algorithm = getattr(processing_class, "runAlgorithm", None)
+    if run_algorithm is not None:
+        result = run_algorithm(alg_id, params)
+    else:
+        result = processing.run(alg_id, params)
     if result is None:
         raise Exception("Processing algorithm failed: " + alg_id)
     return result
 
 
-from qgis.core import (
+initialize_processing()
+
+
+from qgis.core import (  # noqa: E402
     QgsApplication,
     QgsProject,
     QgsVectorLayer,
@@ -47,7 +61,7 @@ from qgis.core import (
     QgsWkbTypes,
     QgsCoordinateTransformContext,
 )
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant  # noqa: E402
 
 try:
     ROOT
@@ -104,10 +118,7 @@ print("Outputs     :", OUT_DIR)
 
 
 def grass_id(name):
-    try:
-        Processing.initialize()
-    except Exception:
-        pass
+    initialize_processing()
 
     registry = QgsApplication.processingRegistry()
 
@@ -124,7 +135,8 @@ def grass_id(name):
             print("  ", aid)
 
     raise Exception(
-        "Could not find GRASS algorithm for %s. Expected grass:%s or grass7:%s."
+        "Could not find GRASS algorithm for %s. Expected grass:%s or grass7:%s. "
+        "Install/enable the QGIS GRASS Processing provider (for example qgis-plugin-grass)."
         % (name, name, name)
     )
 

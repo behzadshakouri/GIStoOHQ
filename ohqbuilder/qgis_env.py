@@ -41,3 +41,23 @@ def ensure_processing_available() -> bool:
         if module_available("processing"):
             return True
     return False
+
+
+def processing_algorithm_available(*algorithm_ids: str) -> bool:
+    """Return True when QGIS Processing has at least one requested algorithm."""
+
+    if not module_available("qgis.core") or not ensure_processing_available():
+        return False
+    from qgis.core import QgsApplication
+
+    import processing
+
+    processing_class = getattr(processing, "Processing", None)
+    initialize = getattr(processing_class, "initialize", None)
+    if initialize is not None:
+        try:
+            initialize()
+        except Exception:
+            pass
+    registry = QgsApplication.processingRegistry()
+    return any(registry.algorithmById(algorithm_id) for algorithm_id in algorithm_ids)

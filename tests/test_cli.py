@@ -137,6 +137,91 @@ def test_prepare_inputs_cli_returns_error_when_legacy_workflow_fails(monkeypatch
     assert main(["prepare-inputs", "--root", "/tmp/root", "--site", "SITE_A"]) == 2
 
 
+
+
+def test_watershed_bounds_cli_prints_bounds(monkeypatch, capsys):
+    from ohqbuilder.watershed_bounds import WatershedBoundsResult
+
+    monkeypatch.setattr(
+        "ohqbuilder.cli.resolve_materialization_bounds",
+        lambda **kwargs: WatershedBoundsResult((-77.1, 39.0, -77.0, 39.1), "nldi", "url"),
+    )
+
+    status = main([
+        "watershed-bounds",
+        "--lat",
+        "39.0",
+        "--lon",
+        "-77.0",
+        "--buffer",
+        "20000",
+    ])
+
+    assert status == 0
+    assert capsys.readouterr().out.strip() == "-77.1,39.0,-77.0,39.1"
+
+def test_prepare_hydrology_parser_accepts_legacy_paths():
+    args = build_parser().parse_args([
+        "prepare-hydrology",
+        "--root",
+        "/tmp/root",
+        "--site",
+        "SITE_A",
+        "--dem-path",
+        "/tmp/dem.tif",
+        "--flowline-path",
+        "/tmp/flowlines.gpkg",
+        "--target-epsg",
+        "26918",
+        "--dry-run",
+    ])
+
+    assert args.command == "prepare-hydrology"
+    assert args.dem_path == "/tmp/dem.tif"
+    assert args.flowline_path == "/tmp/flowlines.gpkg"
+    assert args.target_epsg == "26918"
+    assert args.dry_run is True
+
+
+def test_prepare_hydrology_cli_runs_before_phase1_inputs(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_hydrology(root, site, script_dir, options):
+        calls.append((root, site, script_dir, options))
+
+    monkeypatch.setattr("ohqbuilder.cli.run_hydrology_preprocessing", fake_hydrology)
+
+    status = main([
+        "prepare-hydrology",
+        "--root",
+        str(tmp_path),
+        "--site",
+        "SITE_A",
+        "--flowdir-path",
+        str(tmp_path / "flow_dir.tif"),
+        "--flowacc-path",
+        str(tmp_path / "flow_acc.tif"),
+        "--no-force",
+    ])
+
+    assert status == 0
+    assert calls[0][0] == str(tmp_path)
+    assert calls[0][1] == "SITE_A"
+    assert calls[0][2] is None
+    assert calls[0][3].flowdir_path == str(tmp_path / "flow_dir.tif")
+    assert calls[0][3].flowacc_path == str(tmp_path / "flow_acc.tif")
+    assert calls[0][3].force is False
+    assert "Hydrology preprocessing complete." in capsys.readouterr().out
+
+
+def test_prepare_hydrology_cli_reports_legacy_errors(monkeypatch, tmp_path):
+    def fail(*args, **kwargs):
+        raise LegacyInputWorkflowError("missing flowlines")
+
+    monkeypatch.setattr("ohqbuilder.cli.run_hydrology_preprocessing", fail)
+
+    assert main(["prepare-hydrology", "--root", str(tmp_path), "--site", "SITE_A"]) == 2
+
 def test_check_inputs_parser_supports_no_schema():
     args = build_parser().parse_args([
         "check-inputs",

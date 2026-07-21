@@ -31,7 +31,17 @@ import processing
 import numpy as np
 from osgeo import gdal, ogr, osr
 from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer
-from processing.core.Processing import Processing
+
+
+def initialize_processing():
+    processing_class = getattr(processing, "Processing", None)
+    initialize = getattr(processing_class, "initialize", None)
+    if initialize is None:
+        return
+    try:
+        initialize()
+    except Exception:
+        pass
 
 ROOT = globals().get(
     "ROOT",
@@ -88,10 +98,7 @@ flow_utm = os.path.join(TEMP_DIR, "flowlines_utm.gpkg")
 
 
 def grass_id(name):
-    try:
-        Processing.initialize()
-    except Exception:
-        pass
+    initialize_processing()
 
     reg = QgsApplication.processingRegistry()
 
@@ -109,7 +116,8 @@ def grass_id(name):
 
     raise Exception(
         "Could not find GRASS watershed algorithm. "
-        "Expected grass:r.watershed or grass7:r.watershed."
+        "Expected grass:r.watershed or grass7:r.watershed. "
+        "Install/enable the QGIS GRASS Processing provider (for example qgis-plugin-grass)."
     )
 
 
