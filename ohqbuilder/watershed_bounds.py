@@ -65,7 +65,7 @@ def _feature_collection_bounds(collection: dict[str, Any]) -> tuple[float, float
 def expand_bounds(
     bounds: tuple[float, float, float, float],
     *,
-    scale: float = 1.1,
+    scale: float = 1.2,
 ) -> tuple[float, float, float, float]:
     minx, miny, maxx, maxy = bounds
     if scale <= 1.0:
@@ -79,7 +79,7 @@ def resolve_nldi_basin_bounds(
     *,
     lon: float,
     lat: float,
-    safety_scale: float = 1.1,
+    safety_scale: float = 1.2,
     timeout: float = 20.0,
 ) -> WatershedBoundsResult:
     """Resolve upstream basin bounds from the USGS NLDI web API."""
@@ -106,7 +106,7 @@ def resolve_materialization_bounds(
     lon: float,
     lat: float,
     buffer_m: float,
-    safety_scale: float = 1.1,
+    safety_scale: float = 1.2,
     prefer_web: bool = True,
     timeout: float = 20.0,
 ) -> WatershedBoundsResult:

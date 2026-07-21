@@ -78,7 +78,7 @@ def bounds_from_lonlat_buffer(
     lat: float,
     buffer_m: float,
     *,
-    scale: float = 1.1,
+    scale: float = 1.2,
 ) -> tuple[float, float, float, float]:
     """Return EPSG:4326 bounds around a point using a meter buffer plus safety scale."""
 

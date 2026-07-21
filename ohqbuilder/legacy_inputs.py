@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .qgis_env import ensure_processing_available
+from .qgis_env import (
+    ensure_processing_available,
+    initialize_processing,
+    processing_algorithm_available,
+    register_grass_provider,
+)
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 
@@ -38,6 +43,7 @@ class LegacyWorkflowOptions:
     child_options: dict[str, object] | None = None
     auto_pour_points: bool = True
     auto_outlet: bool = True
+    start_at: str | None = None
 
 
 class LegacyInputWorkflowError(RuntimeError):
@@ -69,6 +75,28 @@ def _require_qgis() -> None:
             "Creating GIS input files requires the QGIS processing plugin. The runner "
             "tried common QGIS plugin paths but could not import `processing`; run from "
             "the QGIS Python Console or set PYTHONPATH to QGIS's python/plugins folder."
+        )
+    if initialize_processing():
+        register_grass_provider()
+
+
+def _require_phase_algorithms(phase: LegacyPhase) -> None:
+    if phase != "phase1" or not initialize_processing():
+        return
+    register_grass_provider()
+    required_groups = {
+        "native:extractbyexpression": ("native:extractbyexpression",),
+        "GRASS r.stream.extract": ("grass:r.stream.extract", "grass7:r.stream.extract"),
+    }
+    missing = [
+        label
+        for label, algorithm_ids in required_groups.items()
+        if not processing_algorithm_available(*algorithm_ids)
+    ]
+    if missing:
+        raise LegacyInputWorkflowError(
+            "QGIS Processing is initialized, but required Phase 1 algorithm(s) are "
+            "not registered: " + ", ".join(missing)
         )
 
 
@@ -208,6 +236,8 @@ def _namespace_for_phase(root: Path, site: str, script_dir: Path, options: Legac
         "FORCE": options.force,
         "DRY_RUN": options.dry_run,
     }
+    if options.start_at:
+        namespace["START_AT"] = options.start_at
     if options.target_epsg is not None:
         namespace["TARGET_EPSG"] = int(options.target_epsg)
     if options.child_options:
@@ -282,6 +312,7 @@ def run_legacy_input_workflow(
                         f"Automatic pour-point generation failed: {exc}"
                     ) from exc
                 print(f"Generated {result.count} pour point(s): {result.output_path}")
+        _require_phase_algorithms(selected_phase)
         check_required_inputs(root_path, site, selected_phase, workflow_options)
         _run_phase(
             script_path / _PHASE_SCRIPTS[selected_phase],
