@@ -516,6 +516,14 @@ def run_step(index, script):
             % (index, script)
         ) from exc
 
+    except KeyboardInterrupt:
+        print("\n" + "!" * 78)
+        print("STEP INTERRUPTED:", script)
+        print("ERROR TYPE : KeyboardInterrupt")
+        print("!" * 78)
+        remember_failed_step(script)
+        raise
+
     except Exception as exc:
         print("\n" + "!" * 78)
         print("STEP FAILED:", script)

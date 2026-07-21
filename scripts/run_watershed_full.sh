@@ -120,23 +120,62 @@ fi
 
 cd "${REPO_ROOT}"
 
-if [[ "${RUN_MODE}" == "resume-phase2" && -z "${START_AT}" ]]; then
+phase2_step_index() {
+  case "$1" in
+    delineatewatershed.py) echo 1 ;;
+    subtractsubwatershed.py) echo 2 ;;
+    load_cn_inputs.py) echo 3 ;;
+    cliptowatershed.py) echo 4 ;;
+    prepcngrid.py) echo 5 ;;
+    buildcnraster.py) echo 6 ;;
+    zonal_cn.py) echo 7 ;;
+    extract_slope.py) echo 8 ;;
+    longestflowpath.py) echo 9 ;;
+    compute_tc.py) echo 10 ;;
+    build_topology.py) echo 11 ;;
+    write_basin.py) echo 12 ;;
+    write_met.py) echo 13 ;;
+    write_hms_project.py) echo 14 ;;
+    *) echo 0 ;;
+  esac
+}
+
+if [[ "${RUN_MODE}" == "resume-phase2" ]]; then
+  REQUESTED_START_AT="${START_AT}"
+  AUTO_START_AT=""
+  AUTO_START_REASON=""
   PHASE2_MARKER="${ROOT}/${SITE}/outputs/.phase2_failed_step"
   if [[ -s "${PHASE2_MARKER}" ]]; then
-    START_AT="$(head -n 1 "${PHASE2_MARKER}")"
-    printf 'Auto-resuming Phase 2 from failed step marker: %s\n' "${START_AT}"
+    AUTO_START_AT="$(head -n 1 "${PHASE2_MARKER}")"
+    AUTO_START_REASON="failed step marker"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/slope_pct.tif" ]]; then
+    AUTO_START_AT="longestflowpath.py"
+    AUTO_START_REASON="existing slope output"
   elif [[ -f "${ROOT}/${SITE}/outputs/clipped/cn.tif" ]]; then
-    START_AT="zonal_cn.py"
-    printf 'Auto-resuming Phase 2 after existing CN raster: %s\n' "${START_AT}"
+    AUTO_START_AT="zonal_cn.py"
+    AUTO_START_REASON="existing CN raster"
   elif [[ -f "${ROOT}/${SITE}/outputs/clipped/landcover_aligned.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_aligned.tif" ]]; then
-    START_AT="buildcnraster.py"
-    printf 'Auto-resuming Phase 2 after existing aligned CN grids: %s\n' "${START_AT}"
+    AUTO_START_AT="buildcnraster.py"
+    AUTO_START_REASON="existing aligned CN grids"
   elif [[ -f "${ROOT}/${SITE}/outputs/clipped/nlcd_${NLCD_YEAR}_${SITE}_wsclip.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_wsclip.tif" ]]; then
-    START_AT="prepcngrid.py"
-    printf 'Auto-resuming Phase 2 after existing clipped CN inputs: %s\n' "${START_AT}"
+    AUTO_START_AT="prepcngrid.py"
+    AUTO_START_REASON="existing clipped CN inputs"
   elif [[ -f "${ROOT}/${SITE}/landcover/nlcd_${NLCD_YEAR}_${SITE}.tif" && -f "${ROOT}/${SITE}/soils/hsg.tif" ]]; then
-    START_AT="load_cn_inputs.py"
-    printf 'Auto-resuming Phase 2 from materialized CN inputs: %s\n' "${START_AT}"
+    AUTO_START_AT="load_cn_inputs.py"
+    AUTO_START_REASON="materialized CN inputs"
+  fi
+
+  if [[ -n "${AUTO_START_AT}" ]]; then
+    requested_index="$(phase2_step_index "${REQUESTED_START_AT}")"
+    auto_index="$(phase2_step_index "${AUTO_START_AT}")"
+    if [[ -z "${REQUESTED_START_AT}" || "${auto_index}" -gt "${requested_index}" ]]; then
+      START_AT="${AUTO_START_AT}"
+      if [[ -n "${REQUESTED_START_AT}" ]]; then
+        printf 'Auto-advancing Phase 2 resume from requested %s to %s (%s).\n' "${REQUESTED_START_AT}" "${START_AT}" "${AUTO_START_REASON}"
+      else
+        printf 'Auto-resuming Phase 2 from %s: %s\n' "${AUTO_START_REASON}" "${START_AT}"
+      fi
+    fi
   fi
 fi
 
