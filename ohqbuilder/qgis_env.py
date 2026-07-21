@@ -56,6 +56,8 @@ def ensure_processing_available() -> bool:
 GRASS_PROVIDER_CLASSES = (
     ("grassprovider.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
     ("grassprovider.GrassProvider", "GrassProvider"),
+    ("processing.algs.grass7.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
+    ("processing.algs.grass.GrassAlgorithmProvider", "GrassAlgorithmProvider"),
 )
 
 
@@ -121,7 +123,11 @@ def register_grass_provider() -> bool:
             continue
         module = importlib.import_module(module_name)
         provider_class = getattr(module, class_name)
-        registry.addProvider(provider_class())
+        provider = provider_class()
+        load = getattr(provider, "load", None)
+        if load is not None:
+            load()
+        registry.addProvider(provider)
         if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
             return True
     return False

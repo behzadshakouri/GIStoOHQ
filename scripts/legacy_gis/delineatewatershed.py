@@ -53,13 +53,19 @@ def _register_grass_provider():
     provider_specs = (
         ("grassprovider.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
         ("grassprovider.GrassProvider", "GrassProvider"),
+        ("processing.algs.grass7.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
+        ("processing.algs.grass.GrassAlgorithmProvider", "GrassAlgorithmProvider"),
     )
     for module_name, class_name in provider_specs:
         if not _module_spec_available(module_name):
             continue
         module = importlib.import_module(module_name)
         provider_class = getattr(module, class_name)
-        registry.addProvider(provider_class())
+        provider = provider_class()
+        load = getattr(provider, "load", None)
+        if load is not None:
+            load()
+        registry.addProvider(provider)
         if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
             return
 

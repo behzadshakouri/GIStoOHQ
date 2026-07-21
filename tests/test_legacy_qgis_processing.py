@@ -13,3 +13,4 @@ def test_legacy_qgis_scripts_do_not_require_processing_core_import():
         assert "from processing.core.Processing import Processing" not in source
         assert "def initialize_processing" in source
         assert "Grass7AlgorithmProvider" in source
+        assert "processing.algs.grass7.Grass7AlgorithmProvider" in source
