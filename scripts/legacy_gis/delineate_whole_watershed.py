@@ -172,11 +172,29 @@ def grass_id(name):
     from qgis.core import QgsApplication
 
     registry = QgsApplication.processingRegistry()
-    for prefix in ("grass7:", "grass:"):
+    for prefix in ("grass:", "grass7:"):
         algorithm_id = prefix + name
         if registry.algorithmById(algorithm_id):
+            print("Using GRASS algorithm:", algorithm_id)
             return algorithm_id
-    return "grass7:" + name
+
+    print("Available watershed/GRASS algorithms:")
+    for algorithm in registry.algorithms():
+        algorithm_id = algorithm.id()
+        lowered = algorithm_id.lower()
+        if (
+            "watershed" in lowered
+            or "water.outlet" in lowered
+            or "grass" in lowered
+        ):
+            print("  ", algorithm_id)
+
+    if registry.algorithmById("grass:r.watershed"):
+        fallback = "grass:" + name
+    else:
+        fallback = "grass7:" + name
+    print("WARNING: GRASS algorithm was not listed; trying:", fallback)
+    return fallback
 
 
 def wipe_temp_dir(temp_dir):
