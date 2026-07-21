@@ -214,6 +214,45 @@ TEXTURE_CMD=(
   --pixel-size "${SOIL_PIXEL_SIZE}"
   --top-depth "${SOIL_TOP_DEPTH}"
 )
+
+SOILS_DIR="${ROOT}/${SITE}/soils"
+HSG_VECTOR="${SOILS_DIR}/hydrologic_soil_groups.gpkg"
+HSG_RASTER="${SOILS_DIR}/hsg.tif"
+TEXTURE_VECTOR="${SOILS_DIR}/soil_texture.gpkg"
+TEXTURE_RASTERS=(
+  "${SOILS_DIR}/texture_code.tif"
+  "${SOILS_DIR}/sand_pct.tif"
+  "${SOILS_DIR}/silt_pct.tif"
+  "${SOILS_DIR}/clay_pct.tif"
+)
+
+hsg_outputs_exist() {
+  [[ -f "${HSG_VECTOR}" && -f "${HSG_RASTER}" ]]
+}
+
+texture_outputs_exist() {
+  [[ -f "${TEXTURE_VECTOR}" ]] || return 1
+  local raster
+  for raster in "${TEXTURE_RASTERS[@]}"; do
+    [[ -f "${raster}" ]] || return 1
+  done
+}
+
+run_hsg_if_needed() {
+  if [[ "${RUN_MODE}" == "resume-phase2" ]] && hsg_outputs_exist; then
+    printf 'Reusing existing HSG outputs: %s and %s\n' "${HSG_VECTOR}" "${HSG_RASTER}"
+    return 0
+  fi
+  "${HSG_CMD[@]}"
+}
+
+run_texture_if_needed() {
+  if [[ "${RUN_MODE}" == "resume-phase2" ]] && texture_outputs_exist; then
+    printf 'Reusing existing soil texture outputs under: %s\n' "${SOILS_DIR}"
+    return 0
+  fi
+  "${TEXTURE_CMD[@]}"
+}
 if [[ -z "${MATERIALIZE_CLIP_BOUNDS}" && "${DRY_RUN:-0}" != "1" && "${MATERIALIZE_BOUNDS_SOURCE}" != "buffer" && -n "${LAT}" && -n "${LON}" ]]; then
   if RESOLVED_BOUNDS="$(${PYTHON_BIN} -m ohqbuilder.cli watershed-bounds --lat "${LAT}" --lon "${LON}" --buffer "${BUFFER}" --safety-scale "${MATERIALIZE_SAFETY_MARGIN}" 2>/dev/null)"; then
     MATERIALIZE_CLIP_BOUNDS="${RESOLVED_BOUNDS}"
@@ -309,8 +348,16 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
   elif [[ "${RUN_MODE}" == "resume-phase2" ]]; then
     printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
-    printf '  %q' "${HSG_CMD[@]}"; printf '\n'
-    printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
+    if hsg_outputs_exist; then
+      printf '  # reuse existing HSG outputs: %s %s\n' "${HSG_VECTOR}" "${HSG_RASTER}"
+    else
+      printf '  %q' "${HSG_CMD[@]}"; printf '\n'
+    fi
+    if texture_outputs_exist; then
+      printf '  # reuse existing soil texture outputs under: %s\n' "${SOILS_DIR}"
+    else
+      printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
+    fi
     printf '  %q' "${PREPARE_PHASE2_CMD[@]}"; printf '\n'
     printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
   else
@@ -354,8 +401,8 @@ PY
   "${BUILD_CMD[@]}"
 elif [[ "${RUN_MODE}" == "resume-phase2" ]]; then
   "${MATERIALIZE_CMD[@]}"
-  "${HSG_CMD[@]}"
-  "${TEXTURE_CMD[@]}"
+  run_hsg_if_needed
+  run_texture_if_needed
   "${PREPARE_PHASE2_CMD[@]}"
   "${BUILD_CMD[@]}"
 else
