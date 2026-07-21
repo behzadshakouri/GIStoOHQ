@@ -2,6 +2,8 @@
 # Delineate one watershed per pour point, using a single flow-direction raster.
 # =============================================================================
 
+import importlib
+import importlib.util
 import os
 import sys
 import numpy as np
@@ -31,6 +33,47 @@ def initialize_processing():
         pass
 
 
+def _module_spec_available(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def _register_grass_provider():
+    registry = QgsApplication.processingRegistry()
+    if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+        return
+    for plugin_path in (
+        "/usr/share/qgis/python/plugins",
+        os.path.join(sys.prefix, "share", "qgis", "python", "plugins"),
+    ):
+        if os.path.isdir(plugin_path) and plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+    provider_specs = (
+        ("grassprovider.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
+        ("grassprovider.GrassProvider", "GrassProvider"),
+    )
+    for module_name, class_name in provider_specs:
+        if not _module_spec_available(module_name):
+            continue
+        module = importlib.import_module(module_name)
+        provider_class = getattr(module, class_name)
+        registry.addProvider(provider_class())
+        if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+            return
+
+def initialize_processing():
+    processing_class = getattr(processing, "Processing", None)
+    initialize = getattr(processing_class, "initialize", None)
+    if initialize is not None:
+        try:
+            initialize()
+        except Exception:
+            pass
+    _register_grass_provider()
+
+
 def qgis_run(alg_id, params):
     initialize_processing()
     processing_class = getattr(processing, "Processing", None)
@@ -42,9 +85,6 @@ def qgis_run(alg_id, params):
     if result is None:
         raise Exception("Processing algorithm failed: " + alg_id)
     return result
-
-
-initialize_processing()
 
 
 from qgis.core import (  # noqa: E402
@@ -62,6 +102,8 @@ from qgis.core import (  # noqa: E402
     QgsCoordinateTransformContext,
 )
 from qgis.PyQt.QtCore import QVariant  # noqa: E402
+
+initialize_processing()
 
 try:
     ROOT
