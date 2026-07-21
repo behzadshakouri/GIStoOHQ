@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from ohqbuilder.legacy_inputs import LegacyInputWorkflowError, run_legacy_input_workflow
+from ohqbuilder.legacy_inputs import LegacyInputWorkflowError, LegacyWorkflowOptions, run_legacy_input_workflow
 from ohqbuilder.outlet_creator import OutletCreationResult
 
 
@@ -141,6 +141,42 @@ def test_prepare_inputs_passes_configurable_paths_to_phase_script(tmp_path, monk
         "False",
         "True",
     ]
+
+
+
+def test_prepare_inputs_passes_start_at_to_phase_script(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "qgis", types.ModuleType("qgis"))
+    monkeypatch.setitem(sys.modules, "qgis.core", types.ModuleType("qgis.core"))
+    monkeypatch.setitem(sys.modules, "processing", types.ModuleType("processing"))
+
+    outputs = tmp_path / "root" / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    for suffix in (".shp", ".shx", ".dbf"):
+        (outputs / f"outlet{suffix}").write_text("", encoding="utf-8")
+    (outputs / "NHDFlowline_clip.gpkg").write_text("", encoding="utf-8")
+    (outputs / "flow_dir.tif").write_text("", encoding="utf-8")
+    (outputs / "flow_acc.tif").write_text("", encoding="utf-8")
+    dem = tmp_path / "root" / "SITE_A" / "demlr"
+    dem.mkdir()
+    (dem / "cliped_utm.tif").write_text("", encoding="utf-8")
+
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    marker = tmp_path / "start-at.txt"
+    (script_dir / "run_phase1.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text(START_AT)\n",
+        encoding="utf-8",
+    )
+
+    run_legacy_input_workflow(
+        tmp_path / "root",
+        "SITE_A",
+        script_dir,
+        phase="phase1",
+        options=LegacyWorkflowOptions(start_at="extract_reaches.py"),
+    )
+
+    assert marker.read_text(encoding="utf-8") == "extract_reaches.py"
 
 
 def test_prepare_inputs_reports_missing_phase1_inputs(tmp_path, monkeypatch):

@@ -43,6 +43,7 @@ class LegacyWorkflowOptions:
     child_options: dict[str, object] | None = None
     auto_pour_points: bool = True
     auto_outlet: bool = True
+    start_at: str | None = None
 
 
 class LegacyInputWorkflowError(RuntimeError):
@@ -235,6 +236,8 @@ def _namespace_for_phase(root: Path, site: str, script_dir: Path, options: Legac
         "FORCE": options.force,
         "DRY_RUN": options.dry_run,
     }
+    if options.start_at:
+        namespace["START_AT"] = options.start_at
     if options.target_epsg is not None:
         namespace["TARGET_EPSG"] = int(options.target_epsg)
     if options.child_options:
