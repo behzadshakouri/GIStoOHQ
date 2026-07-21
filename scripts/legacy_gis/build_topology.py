@@ -21,7 +21,9 @@
 #       is blank or incorrectly marked as outlet, recover the outgoing reach
 #       spatially from a reach whose UP endpoint lies at the junction. This
 #       prevents valid headwater/confluence junctions from being sent directly
-#       to Sink merely because junction metadata is incomplete.
+#       to Sink merely because junction metadata is incomplete. True terminal
+#       junction catchments are attached to their nearest feeder reach so the
+#       OHQ writer can create a channel inflow without creating a graph cycle.
 #
 # PRUNE (internal headwater reaches)
 #   A reach is INTERNAL (drop) if NOTHING drains into its UP end:
@@ -81,6 +83,8 @@ POURPTS_NAME = "pour_points.shp"
 PIXEL_M = 9.336
 SNAP_PX = 1.5                 # ONLY for "is an endpoint AT a junction" tests,
 SNAP_TOL = SNAP_PX * PIXEL_M  # NOT for subbasin->junction (that is nearest-wins)
+# Wider tolerance used only as a final recovery for slightly displaced endpoints.
+RECOVERY_TOL_M = max(4.0 * PIXEL_M, 50.0)
 FAR_MATCH_M = 60.0            # flag (do not reject) subbasin matches beyond this
 SINK_NAME = "Outlet"
 RELOAD_IN_PROJECT = True
@@ -151,7 +155,7 @@ for f in reaches.getFeatures():
         swap = False
     up_pt, dn_pt = (lp, fp) if swap else (fp, lp)
     R[rid] = {
-        "up": up_pt, "dn": dn_pt,
+        "up": up_pt, "dn": dn_pt, "geom": f.geometry(),
         "ds_type": f["ds_type"],
         "ds_reach_id": iid(f["ds_reach_id"]),
         "ds_junction_id": iid(f["ds_junction_id"]) if has_dsj else None,
@@ -333,18 +337,35 @@ def junction_outflow_reach(jid):
     """Resolve the physical outgoing reach for a junction.
 
     Priority:
-      1. valid recorded ``ds_reach_id``;
-      2. surviving reach beginning at the junction;
-      3. any reach beginning at the junction (it may need collapsed-reach
-         chasing through ``resolve_reach``).
+      1. valid junction ``ds_reach_id``;
+      2. a downstream-reach reference carried by a reach entering the junction;
+      3. a surviving reach whose UP endpoint is at the junction;
+      4. any reach whose UP endpoint is at the junction;
+      5. nearest UP endpoint within RECOVERY_TOL_M, excluding obvious incoming
+         reaches whose DOWN endpoint is closer to the junction.
 
-    This spatial recovery is intentionally attempted before accepting an
-    ``outlet`` flag, because some terminal-looking junction records are located
-    at the upstream end of a valid stream reach.
+    ``ds_junction_id`` is intentionally NOT reversed to find an outflow: it
+    identifies reaches entering a junction, not the reach leaving it.
     """
     recorded = J[jid].get("ds_reach_id")
     if recorded in R:
         return recorded, "recorded"
+
+    # Metadata recovery: an incoming reach may explicitly identify the next
+    # downstream reach even when junctions.gpkg omitted ds_reach_id.
+    metadata_candidates = []
+    for in_rid in junc_rin.get(jid, []):
+        nxt = R[in_rid].get("ds_reach_id")
+        if nxt in R and nxt != in_rid:
+            metadata_candidates.append(nxt)
+    metadata_candidates = sorted(set(metadata_candidates))
+    if metadata_candidates:
+        alive_meta = [rid for rid in metadata_candidates if rid in alive]
+        chosen = (alive_meta or metadata_candidates)[0]
+        if len(metadata_candidates) > 1:
+            print("WARNING: Junction_%s has multiple metadata outflows %s; "
+                  "using Reach_%s" % (jid, metadata_candidates, chosen))
+        return chosen, "reach-metadata"
 
     alive_candidates = outgoing_reaches_at_junction(jid, alive_only=True)
     if alive_candidates:
@@ -362,7 +383,51 @@ def junction_outflow_reach(jid):
                   % (jid, all_candidates, all_candidates[0]))
         return all_candidates[0], "spatial-dropped"
 
+    # Last-resort endpoint recovery for small offsets introduced by clipping,
+    # raster/vector conversion, or provider precision. Never select an obvious
+    # incoming reach as the outflow.
+    jp = J[jid]["pt"]
+    near = []
+    for rid, rd in R.items():
+        du = rd["up"].distance(jp)
+        dd = rd["dn"].distance(jp)
+        if du <= RECOVERY_TOL_M and du + 0.01 < dd:
+            near.append((0 if rid in alive else 1, du, rid))
+    near.sort()
+    if near:
+        _, dist, chosen = near[0]
+        print("WARNING: Junction_%s outflow recovered by nearest UP endpoint: "
+              "Reach_%s at %.2f m" % (jid, chosen, dist))
+        return chosen, "nearest-up-endpoint"
+
     return None, "none"
+
+
+def terminal_feeder_reach(jid, sid=None):
+    """Choose a surviving reach entering a terminal junction.
+
+    A subbasin whose pour point is assigned to a true terminal junction has no
+    downstream channel after that junction. OpenHydroQual still needs the
+    catchment attached to a channel block, so the catchment is attached to the
+    nearest surviving feeder reach and that reach continues to the terminal
+    junction/sink. This does not reverse the reach and does not create a cycle.
+    """
+    candidates = [rid for rid in junc_rin.get(jid, []) if rid in alive]
+    if not candidates:
+        return None
+    p = PP.get(sid) if sid is not None else None
+    if p is None:
+        return sorted(candidates)[0]
+    pg = QgsGeometry.fromPointXY(p)
+    ranked = []
+    for rid in candidates:
+        try:
+            d = R[rid]["geom"].distance(pg)
+        except Exception:
+            d = R[rid]["dn"].distance(p)
+        ranked.append((d, rid))
+    ranked.sort()
+    return ranked[0][1]
 
 
 def resolve_junction(jid, seen=None):
@@ -451,7 +516,25 @@ for sid in sorted(SUB):
     if jid is None:
         sub_ds[sid] = ("sink", None, "no junction"); continue
     if jid in keep_junc:
-        sub_ds[sid] = ("junction", jid, note)
+        out_rid, _out_source = junction_outflow_reach(jid)
+        if out_rid is not None:
+            # Normal confluence: preserve the explicit subbasin -> junction ->
+            # downstream-reach chain.
+            sub_ds[sid] = ("junction", jid, note)
+        else:
+            # True terminal junction. Attach the catchment to the nearest
+            # feeder channel so the OHQ writer can create a Catchment_link,
+            # while the feeder reach still routes to this junction and Sink.
+            feeder = terminal_feeder_reach(jid, sid)
+            if feeder is not None:
+                extra = "terminal J%d via feeder Reach_%d" % (jid, feeder)
+                sub_ds[sid] = (
+                    "reach", feeder,
+                    (note + " " + extra).strip()
+                )
+            else:
+                sub_ds[sid] = ("junction", jid,
+                               (note + " terminal junction").strip())
     else:
         kind, tgt = resolve_junction(jid)
         sub_ds[sid] = (kind, tgt, (note + " via collapsed J%d" % jid).strip())
