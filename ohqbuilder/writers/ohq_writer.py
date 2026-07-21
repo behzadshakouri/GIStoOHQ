@@ -265,10 +265,24 @@ class OHQWriter:
         routing_edges = list(reach_endpoints.values()) + [
             (source, target) for source, target, _ in direct_routing_edges
         ]
+
+        # Emit only routing blocks that actually participate in the generated
+        # network.  Previously every GIS junction was created even when it had
+        # no emitted incoming or outgoing link, leaving isolated Catch basin
+        # blocks in the OHQ canvas.
+        connected_routing_nodes: set[str] = {outlet_name}
+        for source, target in routing_edges:
+            connected_routing_nodes.add(source)
+            connected_routing_nodes.add(target)
+
         routing_nodes = [
-            *junction_by_name.keys(),
-            *synthetic_inlets.values(),
-            outlet_name,
+            name
+            for name in [
+                *junction_by_name.keys(),
+                *synthetic_inlets.values(),
+                outlet_name,
+            ]
+            if name in connected_routing_nodes
         ]
         levels = _layout_levels(routing_nodes, routing_edges, outlet_name)
 
@@ -398,6 +412,8 @@ class OHQWriter:
             writer.comment("Junction routing blocks")
 
         for name, junction in junction_by_name.items():
+            if name not in connected_routing_nodes:
+                continue
             elevation = _finite(
                 getattr(junction, "elevation_m", None),
                 _finite(getattr(junction, "z_m", None), 0.0),
@@ -421,7 +437,10 @@ class OHQWriter:
             writer.comment("Synthetic headwater inlet blocks")
 
         for reach_name, inlet_name in synthetic_inlets.items():
-            if reach_name not in reach_endpoints:
+            if (
+                reach_name not in reach_endpoints
+                or inlet_name not in connected_routing_nodes
+            ):
                 continue
             reach = reach_by_name[reach_name]
             elevation = _finite(getattr(reach, "z_up_m", None), 0.0)
@@ -522,6 +541,15 @@ class OHQWriter:
             for name in inactive_reaches:
                 writer.comment(
                     f"Skipped GIS reach absent from explicit topology: {name}"
+                )
+            unused_junctions = [
+                name
+                for name in junction_by_name
+                if name not in connected_routing_nodes
+            ]
+            for name in unused_junctions:
+                writer.comment(
+                    f"Skipped isolated GIS junction with no emitted links: {name}"
                 )
 
         writer.line()
