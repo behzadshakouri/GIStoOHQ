@@ -69,8 +69,19 @@ def _register_grass_provider():
         if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
             return
 
-def initialize_processing():
+def _processing_class():
     processing_class = getattr(processing, "Processing", None)
+    if processing_class is not None:
+        return processing_class
+    module_name = "processing.core.Processing"
+    if not _module_spec_available(module_name):
+        return None
+    module = importlib.import_module(module_name)
+    return getattr(module, "Processing", None)
+
+
+def initialize_processing():
+    processing_class = _processing_class()
     initialize = getattr(processing_class, "initialize", None)
     if initialize is not None:
         try:
@@ -82,7 +93,7 @@ def initialize_processing():
 
 def qgis_run(alg_id, params):
     initialize_processing()
-    processing_class = getattr(processing, "Processing", None)
+    processing_class = _processing_class()
     run_algorithm = getattr(processing_class, "runAlgorithm", None)
     if run_algorithm is not None:
         result = run_algorithm(alg_id, params)

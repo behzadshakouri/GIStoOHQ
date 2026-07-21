@@ -81,14 +81,25 @@ def ensure_qgis_application() -> bool:
     return True
 
 
+def _processing_class():
+    import processing
+
+    processing_class = getattr(processing, "Processing", None)
+    if processing_class is not None:
+        return processing_class
+    module_name = "processing.core.Processing"
+    if not _module_spec_available(module_name):
+        return None
+    module = importlib.import_module(module_name)
+    return getattr(module, "Processing", None)
+
+
 def initialize_processing() -> bool:
     """Initialize QGIS Processing when the loaded processing module exposes it."""
 
     if not ensure_qgis_application() or not ensure_processing_available():
         return False
-    import processing
-
-    processing_class = getattr(processing, "Processing", None)
+    processing_class = _processing_class()
     initialize = getattr(processing_class, "initialize", None)
     if initialize is not None:
         try:
