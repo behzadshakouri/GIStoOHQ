@@ -136,10 +136,36 @@ def _module_spec_available(name: str) -> bool:
         return False
 
 
-def _registered_algorithm_ids() -> set[str]:
+def _current_algorithm_ids() -> set[str]:
     from qgis.core import QgsApplication
 
     return {algorithm.id() for algorithm in QgsApplication.processingRegistry().algorithms()}
+
+
+def registered_algorithm_ids() -> set[str]:
+    """Return all registered QGIS Processing algorithm IDs after initialization."""
+
+    if not ensure_qgis_application() or not initialize_processing():
+        return set()
+    register_native_provider()
+    register_grass_provider()
+    return _current_algorithm_ids()
+
+
+def registered_provider_ids() -> list[str]:
+    """Return registered QGIS Processing provider IDs after initialization."""
+
+    if not ensure_qgis_application() or not initialize_processing():
+        return []
+    register_native_provider()
+    register_grass_provider()
+    from qgis.core import QgsApplication
+
+    return sorted(provider.id() for provider in QgsApplication.processingRegistry().providers())
+
+
+def _registered_algorithm_ids() -> set[str]:
+    return _current_algorithm_ids()
 
 
 def _has_grass_watershed_algorithm() -> bool:
