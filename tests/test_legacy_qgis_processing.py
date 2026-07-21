@@ -14,3 +14,9 @@ def test_legacy_qgis_scripts_do_not_require_processing_core_import():
         assert "def initialize_processing" in source
         assert "Grass7AlgorithmProvider" in source
         assert "processing.algs.grass7.Grass7AlgorithmProvider" in source
+
+
+def test_phase1_support_module_is_packaged():
+    source = Path("scripts/legacy_gis/ws3io.py").read_text(encoding="utf-8")
+    assert "def release_and_delete" in source
+    assert "QgsProject" in source
