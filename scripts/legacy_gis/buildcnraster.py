@@ -26,6 +26,7 @@
 # =============================================================================
 import os
 import csv
+import struct
 from osgeo import gdal
 from qgis.core import QgsProject, QgsRasterLayer
 gdal.UseExceptions()
@@ -72,10 +73,27 @@ for p in (lc_path, hsg_path, CN_CSV):
         raise Exception("not found: " + p)
 
 # --- load lookup: (nlcd_class, hsg_letter) -> CN for the chosen condition ----
+# Supports both the original wide table:
+#   nlcd_class, cn_poor_A, cn_poor_B, ...
+# and the packaged long table:
+#   nlcd, hsg, condition, cn
 lut = {}
 with open(CN_CSV, newline="") as f:
     rdr = csv.DictReader(f)
     for row in rdr:
+        if {"nlcd", "hsg", "condition", "cn"}.issubset(row.keys()):
+            if row.get("condition", "").strip().lower() != cond:
+                continue
+            try:
+                cls = int(row["nlcd"])
+                letter = row["hsg"].strip().upper()
+                value = row["cn"].strip()
+            except (KeyError, ValueError):
+                continue
+            if letter in ("A", "B", "C", "D") and value != "":
+                lut[(cls, letter)] = int(round(float(value)))
+            continue
+
         try:
             cls = int(row["nlcd_class"])
         except (KeyError, ValueError):
@@ -109,7 +127,6 @@ out_b = out_ds.GetRasterBand(1)
 out_b.SetNoDataValue(NODATA)
 
 # --- process row by row (no numpy dependency) -------------------------------
-import struct
 combo_counts = {}      # (cls,letter) -> cell count, for the audit summary
 unmatched = {}         # (cls,hsg_code) -> count, pairs missing from the table
 nd_cells = 0
@@ -122,7 +139,9 @@ for r in range(ny):
         lv, hv = lc_row[c], hsg_row[c]
         if (lc_nd is not None and lv == lc_nd) or (hsg_nd is not None and hv == hsg_nd) \
            or lv == 0 or hv == 0:
-            out_row[c] = NODATA; nd_cells += 1; continue
+            out_row[c] = NODATA
+            nd_cells += 1
+            continue
         letter = HSG_LETTER.get(hv)
         cn = lut.get((lv, letter)) if letter else None
         if cn is None:

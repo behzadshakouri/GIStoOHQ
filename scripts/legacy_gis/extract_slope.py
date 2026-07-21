@@ -34,7 +34,7 @@
 import os
 import processing
 from osgeo import gdal
-from qgis.core import QgsProject, QgsVectorLayer
+from qgis.core import QgsField, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QVariant
 gdal.UseExceptions()
 
@@ -55,6 +55,25 @@ SLOPE_FIELD = "slope_pct"          # average basin slope, percent
 CX_FIELD    = "centroid_x"         # point-on-surface easting  (layer CRS, m)
 CY_FIELD    = "centroid_y"         # point-on-surface northing (layer CRS, m)
 RELOAD_IN_PROJECT = True
+# ---------------------------------------------------------------------------
+
+
+def value_or_none(value):
+    """Convert QGIS NULL/QVariant values to Python None for formatting/math."""
+
+    if value is None:
+        return None
+    is_null = getattr(value, "isNull", None)
+    if callable(is_null) and is_null():
+        return None
+    return value
+
+
+def format_number(value, pattern, null_text="-"):
+    value = value_or_none(value)
+    if value is None:
+        return null_text
+    return pattern % float(value)
 # ---------------------------------------------------------------------------
 
 site_path = os.path.join(ROOT, SITE_DIR)
@@ -107,7 +126,6 @@ for ft in zonal.getFeatures():
 
 # --- write slope_pct + centroid coords back into the gpkg in place ---------
 layer.startEditing()
-from qgis.core import QgsField
 existing = [f.name() for f in layer.fields()]
 to_add = [(SLOPE_FIELD, QVariant.Double),
           (CX_FIELD,    QVariant.Double),
@@ -149,11 +167,11 @@ for ft in sorted(layer2.getFeatures(), key=lambda f: (f["id"] is None, f["id"]))
     cy = ft[CY_FIELD]
     print("  %-4s  %9s  %5s   %7s   %12s  %12s" % (
         ft["id"],
-        ("%.4f" % ft["area_km2"]) if ft["area_km2"] is not None else "-",
-        ("%.1f" % cn) if cn is not None else "-",
-        ("%.3f" % sp) if sp is not None else "NULL",
-        ("%.2f" % cx) if cx is not None else "NULL",
-        ("%.2f" % cy) if cy is not None else "NULL"))
+        format_number(ft["area_km2"], "%.4f"),
+        format_number(cn, "%.1f"),
+        format_number(sp, "%.3f", "NULL"),
+        format_number(cx, "%.2f", "NULL"),
+        format_number(cy, "%.2f", "NULL")))
 
 if RELOAD_IN_PROJECT:
     QgsProject.instance().addMapLayer(layer2)

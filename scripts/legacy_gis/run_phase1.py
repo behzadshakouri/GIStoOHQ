@@ -104,6 +104,12 @@ PHASE1_STEPS = list(globals().get("PHASE1_STEPS", [
     "materialize_junctions.py",
 ]))
 
+START_AT = globals().get("START_AT", None)
+if START_AT:
+    if START_AT not in PHASE1_STEPS:
+        raise Exception("START_AT step not found: %s" % START_AT)
+    PHASE1_STEPS = PHASE1_STEPS[PHASE1_STEPS.index(START_AT):]
+
 
 # =============================================================================
 # PATH RESOLUTION

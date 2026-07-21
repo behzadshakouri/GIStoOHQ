@@ -101,6 +101,12 @@ PHASE2_STEPS = list(globals().get("PHASE2_STEPS", [
     "write_hms_project.py",
 ]))
 
+START_AT = globals().get("START_AT", None)
+if START_AT:
+    if START_AT not in PHASE2_STEPS:
+        raise Exception("START_AT step not found: %s" % START_AT)
+    PHASE2_STEPS = PHASE2_STEPS[PHASE2_STEPS.index(START_AT):]
+
 
 # =============================================================================
 # PATH RESOLUTION
@@ -127,6 +133,7 @@ else:
     OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
 
 os.makedirs(OUT_DIR, exist_ok=True)
+FAILED_STEP_MARKER = os.path.join(OUT_DIR, ".phase2_failed_step")
 
 POUR_POINTS_PATH = globals().get(
     "POUR_POINTS_PATH",
@@ -461,6 +468,16 @@ else:
 # EXECUTION
 # =============================================================================
 
+def remember_failed_step(script):
+    with open(FAILED_STEP_MARKER, "w", encoding="utf-8") as handle:
+        handle.write(script + "\n")
+
+
+def clear_failed_step_marker():
+    if os.path.exists(FAILED_STEP_MARKER):
+        os.remove(FAILED_STEP_MARKER)
+
+
 def run_step(index, script):
     path = os.path.join(SCRIPT_DIR, script)
 
@@ -493,10 +510,19 @@ def run_step(index, script):
         print("ERROR TYPE : SystemExit")
         print("ERROR      :", exc)
         print("!" * 78)
+        remember_failed_step(script)
         raise Exception(
             "Phase 2 stopped at step %d (%s)."
             % (index, script)
         ) from exc
+
+    except KeyboardInterrupt:
+        print("\n" + "!" * 78)
+        print("STEP INTERRUPTED:", script)
+        print("ERROR TYPE : KeyboardInterrupt")
+        print("!" * 78)
+        remember_failed_step(script)
+        raise
 
     except Exception as exc:
         print("\n" + "!" * 78)
@@ -505,6 +531,7 @@ def run_step(index, script):
         print("ERROR      :", exc)
         print("!" * 78)
         traceback.print_exc()
+        remember_failed_step(script)
 
         raise Exception(
             "Phase 2 stopped at step %d (%s). See the traceback above."
@@ -517,6 +544,7 @@ def run_step(index, script):
 if not DRY_RUN:
     for step_index, step_script in enumerate(PHASE2_STEPS, start=1):
         run_step(step_index, step_script)
+    clear_failed_step_marker()
 
 
 # =============================================================================
