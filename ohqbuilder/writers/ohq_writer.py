@@ -286,29 +286,76 @@ class OHQWriter:
         ]
         levels = _layout_levels(routing_nodes, routing_edges, outlet_name)
 
-        # Arrange blocks by topological column, then by name inside each column.
+        # Arrange routing blocks as a compact left-to-right drainage tree.
+        # Nodes within each level are ordered by their upstream catchments and
+        # predecessor positions. This substantially reduces crossed links.
         nodes_by_level: dict[int, list[str]] = defaultdict(list)
         for name in routing_nodes:
             nodes_by_level[levels.get(name, 0)].append(name)
-        for names in nodes_by_level.values():
-            names.sort()
+
+        subbasin_order = {
+            name: index for index, name in enumerate(subbasin_by_name.keys())
+        }
+
+        def upstream_catchment_rank(start: str) -> float:
+            queue = deque([start])
+            visited: set[str] = set()
+            ranks: list[int] = []
+            while queue:
+                current = queue.popleft()
+                if current in visited:
+                    continue
+                visited.add(current)
+                for parent in upstream.get(current, []):
+                    if parent in subbasin_order:
+                        ranks.append(subbasin_order[parent])
+                    elif parent in reach_names or parent in junction_names:
+                        queue.append(parent)
+            if ranks:
+                return sum(ranks) / len(ranks)
+            return float("inf")
+
+        routing_predecessors: dict[str, list[str]] = defaultdict(list)
+        for source, target in routing_edges:
+            routing_predecessors[target].append(source)
 
         routing_positions: dict[str, tuple[int, int]] = {}
+        routing_order: dict[str, float] = {}
 
-        # Generous spacing is important because the OHQ canvas renders block
-        # captions and link labels outside the nominal block rectangle.  The
-        # previous 520 x 230 layout caused captions, blocks, and links to
-        # overlap.  These values can be adjusted without editing this file.
-        x_spacing = int(os.environ.get("OHQ_LAYOUT_X_SPACING", "900"))
-        y_spacing = int(os.environ.get("OHQ_LAYOUT_Y_SPACING", "420"))
+        # Compact defaults keep the complete model readable at normal zoom.
+        # They remain configurable for unusually large networks.
+        x_spacing = int(os.environ.get("OHQ_LAYOUT_X_SPACING", "460"))
+        y_spacing = int(os.environ.get("OHQ_LAYOUT_Y_SPACING", "260"))
 
         for level_value in sorted(nodes_by_level):
             names = nodes_by_level[level_value]
+
+            def ordering_key(name: str) -> tuple[float, float, str]:
+                predecessors = [
+                    routing_order[parent]
+                    for parent in routing_predecessors.get(name, [])
+                    if parent in routing_order
+                ]
+                predecessor_rank = (
+                    sum(predecessors) / len(predecessors)
+                    if predecessors
+                    else upstream_catchment_rank(name)
+                )
+                return (
+                    predecessor_rank,
+                    upstream_catchment_rank(name),
+                    name,
+                )
+
+            names.sort(key=ordering_key)
             center_offset = (len(names) - 1) * y_spacing / 2.0
             for index, name in enumerate(names):
-                x = level_value * x_spacing
-                y = int(index * y_spacing - center_offset)
-                routing_positions[name] = (x, y)
+                order_value = float(index)
+                routing_order[name] = order_value
+                routing_positions[name] = (
+                    level_value * x_spacing,
+                    int(index * y_spacing - center_offset),
+                )
 
         # Resolve each catchment to a routing block. A catchment assigned to a
         # reach drains to that reach's upstream endpoint.
@@ -338,36 +385,57 @@ class OHQWriter:
 
         catchment_positions: dict[str, tuple[int, int]] = {}
         catchment_x_offset = int(
-            os.environ.get("OHQ_LAYOUT_CATCHMENT_X_OFFSET", "650")
+            os.environ.get("OHQ_LAYOUT_CATCHMENT_X_OFFSET", "430")
         )
         catchment_y_spacing = int(
-            os.environ.get("OHQ_LAYOUT_CATCHMENT_Y_SPACING", "300")
+            os.environ.get("OHQ_LAYOUT_CATCHMENT_Y_SPACING", "220")
         )
 
-        for target, names in catchments_by_target.items():
-            target_x, target_y = routing_positions.get(target, (0, 0))
-            center_offset = (len(names) - 1) * catchment_y_spacing / 2.0
-            for index, name in enumerate(names):
-                catchment_positions[name] = (
-                    target_x - catchment_x_offset,
-                    int(
-                        target_y
-                        + index * catchment_y_spacing
-                        - center_offset
-                    ),
-                )
+        # Keep all catchments in one clean left-hand column, ordered by the
+        # vertical position of the routing block they drain to. This produces
+        # the conventional watershed schematic: catchments -> local routing
+        # nodes -> downstream trunk -> outlet.
+        leftmost_routing_x = min(
+            (x for x, _ in routing_positions.values()),
+            default=0,
+        )
+        catchment_column_x = leftmost_routing_x - catchment_x_offset
 
-        # Unresolved catchments remain visible in a separate far-left column,
-        # with enough clearance from level-zero routing blocks.
-        unresolved_catchments = [
-            name for name in subbasin_by_name if name not in catchment_positions
-        ]
-        unresolved_x = -2 * catchment_x_offset
-        for index, name in enumerate(sorted(unresolved_catchments)):
+        resolved_catchments = sorted(
+            catchment_targets,
+            key=lambda name: (
+                routing_positions.get(catchment_targets[name], (0, 0))[1],
+                name,
+            ),
+        )
+        resolved_center = (
+            (len(resolved_catchments) - 1) * catchment_y_spacing / 2.0
+        )
+        for index, name in enumerate(resolved_catchments):
             catchment_positions[name] = (
-                unresolved_x,
-                index * catchment_y_spacing,
+                catchment_column_x,
+                int(index * catchment_y_spacing - resolved_center),
             )
+
+        # Unresolved catchments are appended below the resolved catchments,
+        # still in the same left-hand column.
+        unresolved_catchments = sorted(
+            name for name in subbasin_by_name if name not in catchment_positions
+        )
+        unresolved_start_y = int(
+            (len(resolved_catchments) + 1) * catchment_y_spacing
+            - resolved_center
+        )
+        for index, name in enumerate(unresolved_catchments):
+            catchment_positions[name] = (
+                catchment_column_x,
+                unresolved_start_y + index * catchment_y_spacing,
+            )
+
+        block_width = int(os.environ.get("OHQ_LAYOUT_BLOCK_WIDTH", "300"))
+        block_height = int(os.environ.get("OHQ_LAYOUT_BLOCK_HEIGHT", "180"))
+        outlet_width = int(os.environ.get("OHQ_LAYOUT_OUTLET_WIDTH", "260"))
+        outlet_height = int(os.environ.get("OHQ_LAYOUT_OUTLET_HEIGHT", "160"))
 
         if self.include_comments:
             writer.comment("Generated by GIStoOHQ using native OpenHydroQual grammar")
@@ -425,8 +493,8 @@ class OHQWriter:
                     ("loss_coefficient", "0[1/day]"),
                     ("x", x),
                     ("y", y),
-                    ("_width", 220),
-                    ("_height", 140),
+                    ("_width", block_width),
+                    ("_height", block_height),
                 ],
             )
 
@@ -450,8 +518,8 @@ class OHQWriter:
                     ("inflow", ""),
                     ("x", x),
                     ("y", y),
-                    ("_width", 220),
-                    ("_height", 140),
+                    ("_width", block_width),
+                    ("_height", block_height),
                 ],
             )
 
@@ -476,8 +544,8 @@ class OHQWriter:
                     ("inflow", ""),
                     ("x", x),
                     ("y", y),
-                    ("_width", 220),
-                    ("_height", 140),
+                    ("_width", block_width),
+                    ("_height", block_height),
                 ],
             )
 
@@ -490,8 +558,8 @@ class OHQWriter:
                 ("Storage", "1000000000[m~^3]"),
                 ("x", outlet_x),
                 ("y", outlet_y),
-                ("_width", 190),
-                ("_height", 120),
+                ("_width", outlet_width),
+                ("_height", outlet_height),
             ],
         )
         writer.line()
