@@ -138,6 +138,28 @@ def test_prepare_inputs_cli_returns_error_when_legacy_workflow_fails(monkeypatch
 
 
 
+
+def test_watershed_bounds_cli_prints_bounds(monkeypatch, capsys):
+    from ohqbuilder.watershed_bounds import WatershedBoundsResult
+
+    monkeypatch.setattr(
+        "ohqbuilder.cli.resolve_materialization_bounds",
+        lambda **kwargs: WatershedBoundsResult((-77.1, 39.0, -77.0, 39.1), "nldi", "url"),
+    )
+
+    status = main([
+        "watershed-bounds",
+        "--lat",
+        "39.0",
+        "--lon",
+        "-77.0",
+        "--buffer",
+        "20000",
+    ])
+
+    assert status == 0
+    assert capsys.readouterr().out.strip() == "-77.1,39.0,-77.0,39.1"
+
 def test_prepare_hydrology_parser_accepts_legacy_paths():
     args = build_parser().parse_args([
         "prepare-hydrology",

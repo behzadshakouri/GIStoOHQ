@@ -135,7 +135,8 @@ def grass_id(name):
             print("  ", aid)
 
     raise Exception(
-        "Could not find GRASS algorithm for %s. Expected grass:%s or grass7:%s."
+        "Could not find GRASS algorithm for %s. Expected grass:%s or grass7:%s. "
+        "Install/enable the QGIS GRASS Processing provider (for example qgis-plugin-grass)."
         % (name, name, name)
     )
 

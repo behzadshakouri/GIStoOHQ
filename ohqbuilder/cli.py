@@ -24,6 +24,7 @@ from .settings import BuilderSettings
 from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
+from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -196,6 +197,18 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
     materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
     materialize.add_argument("--clip-buffer-scale", type=float, default=1.1, help="Safety scale applied to --clip-buffer; default 1.1.")
+
+    bounds = sub.add_parser(
+        "watershed-bounds",
+        help="Resolve web watershed bounds from USGS NLDI, with coordinate-buffer fallback.",
+    )
+    bounds.add_argument("--lat", type=float, required=True)
+    bounds.add_argument("--lon", type=float, required=True)
+    bounds.add_argument("--buffer", type=float, default=20000.0)
+    bounds.add_argument("--safety-scale", type=float, default=1.1)
+    bounds.add_argument("--timeout", type=float, default=20.0)
+    bounds.add_argument("--no-web", action="store_true", help="Skip NLDI and use coordinate-buffer bounds.")
+    bounds.add_argument("--json", action="store_true")
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -487,6 +500,25 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM: {result.dem.output_path}")
         print(f"Wrote flowlines: {result.hydro.output_path}")
+        return 0
+    if args.command == "watershed-bounds":
+        try:
+            result = resolve_materialization_bounds(
+                lon=args.lon,
+                lat=args.lat,
+                buffer_m=args.buffer,
+                safety_scale=args.safety_scale,
+                prefer_web=not args.no_web,
+                timeout=args.timeout,
+            )
+        except WatershedBoundsError as exc:
+            print(f"watershed-bounds failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        if args.json:
+            print(json.dumps({"bounds": result.bounds, "source": result.source, "url": result.url}))
+        else:
+            print(f"{minx},{miny},{maxx},{maxy}")
         return 0
     if args.command == "download-texture":
         try:

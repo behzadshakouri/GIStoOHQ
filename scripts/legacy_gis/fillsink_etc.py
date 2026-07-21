@@ -116,7 +116,8 @@ def grass_id(name):
 
     raise Exception(
         "Could not find GRASS watershed algorithm. "
-        "Expected grass:r.watershed or grass7:r.watershed."
+        "Expected grass:r.watershed or grass7:r.watershed. "
+        "Install/enable the QGIS GRASS Processing provider (for example qgis-plugin-grass)."
     )
 
 

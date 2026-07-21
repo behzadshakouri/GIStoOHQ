@@ -40,6 +40,7 @@ NLCD_YEAR="${NLCD_YEAR:-2023}"
 MATERIALIZE_CLIP_BOUNDS="${MATERIALIZE_CLIP_BOUNDS:-}"
 MATERIALIZE_CLIP_BOUNDS_CRS="${MATERIALIZE_CLIP_BOUNDS_CRS:-EPSG:4326}"
 MATERIALIZE_SAFETY_MARGIN="${MATERIALIZE_SAFETY_MARGIN:-1.1}"
+MATERIALIZE_BOUNDS_SOURCE="${MATERIALIZE_BOUNDS_SOURCE:-web-or-buffer}"
 
 mkdir -p "${ROOT}/${SITE}"
 RUN_CSV_PATH="${CSV_PATH}"
@@ -153,6 +154,17 @@ TEXTURE_CMD=(
   --pixel-size "${SOIL_PIXEL_SIZE}"
   --top-depth "${SOIL_TOP_DEPTH}"
 )
+if [[ -z "${MATERIALIZE_CLIP_BOUNDS}" && "${DRY_RUN:-0}" != "1" && "${MATERIALIZE_BOUNDS_SOURCE}" != "buffer" && -n "${LAT}" && -n "${LON}" ]]; then
+  if RESOLVED_BOUNDS="$(${PYTHON_BIN} -m ohqbuilder.cli watershed-bounds --lat "${LAT}" --lon "${LON}" --buffer "${BUFFER}" --safety-scale "${MATERIALIZE_SAFETY_MARGIN}" 2>/dev/null)"; then
+    MATERIALIZE_CLIP_BOUNDS="${RESOLVED_BOUNDS}"
+    printf 'Resolved watershed materialization bounds: %s
+' "${MATERIALIZE_CLIP_BOUNDS}"
+  else
+    printf 'WARNING: web watershed-boundary lookup failed; falling back to coordinate buffer.
+' >&2
+  fi
+fi
+
 MATERIALIZE_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli materialize-inputs
   --root "${ROOT}"
