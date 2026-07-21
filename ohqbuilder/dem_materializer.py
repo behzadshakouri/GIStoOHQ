@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -72,6 +73,39 @@ def utm_epsg_from_lonlat(lon: float, lat: float) -> int:
     return (32600 if lat >= 0 else 32700) + zone
 
 
+def bounds_from_lonlat_buffer(
+    lon: float,
+    lat: float,
+    buffer_m: float,
+    *,
+    scale: float = 1.1,
+) -> tuple[float, float, float, float]:
+    """Return EPSG:4326 bounds around a point using a meter buffer plus safety scale."""
+
+    radius_m = max(float(buffer_m), 0.0) * max(float(scale), 0.0)
+    lat_delta = radius_m / 111_320.0
+    cos_lat = max(math.cos(math.radians(lat)), 1.0e-6)
+    lon_delta = radius_m / (111_320.0 * cos_lat)
+    return (lon - lon_delta, lat - lat_delta, lon + lon_delta, lat + lat_delta)
+
+
+def parse_bounds(value: str | tuple[float, float, float, float] | None) -> tuple[float, float, float, float] | None:
+    """Parse minx,miny,maxx,maxy bounds supplied by users or shell scripts."""
+
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        parts = value
+    else:
+        parts = tuple(float(part.strip()) for part in value.split(","))
+    if len(parts) != 4:
+        raise DemMaterializeError("Bounds must be minx,miny,maxx,maxy.")
+    minx, miny, maxx, maxy = (float(part) for part in parts)
+    if minx >= maxx or miny >= maxy:
+        raise DemMaterializeError("Bounds must satisfy minx < maxx and miny < maxy.")
+    return minx, miny, maxx, maxy
+
+
 def _infer_dst_crs(first_raster: Path) -> str:
     from rasterio.warp import transform
 
@@ -98,13 +132,15 @@ def materialize_dem(
     source_dir: str | Path | None = None,
     output_path: str | Path | None = None,
     dst_crs: str | None = None,
+    clip_bounds: str | tuple[float, float, float, float] | None = None,
+    clip_bounds_crs: str = "EPSG:4326",
 ) -> DemMaterializeResult:
     """Mosaic/reproject downloaded DEM rasters into the legacy DEM filename."""
 
     _require_rasterio()
     import rasterio
     from rasterio.merge import merge
-    from rasterio.warp import Resampling, calculate_default_transform, reproject
+    from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
 
     root_path = Path(root).expanduser().resolve()
     site_path = root_path / site
@@ -120,9 +156,18 @@ def materialize_dem(
         if not rasters:
             raise DemMaterializeError(f"No DEM rasters found after expanding sources under: {source_path}")
         selected_crs = dst_crs or _infer_dst_crs(rasters[0])
+        requested_bounds = parse_bounds(clip_bounds)
         datasets = [rasterio.open(path) for path in rasters]
         try:
-            mosaic, transform = merge(datasets)
+            merge_bounds = None
+            if requested_bounds is not None:
+                merge_bounds = transform_bounds(
+                    clip_bounds_crs,
+                    datasets[0].crs,
+                    *requested_bounds,
+                    densify_pts=21,
+                )
+            mosaic, transform = merge(datasets, bounds=merge_bounds)
             profile = datasets[0].profile.copy()
         finally:
             for dataset in datasets:

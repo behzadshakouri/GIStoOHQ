@@ -31,7 +31,7 @@ def test_download_all_inputs_runs_source_downloaders_from_coordinate(monkeypatch
 
     assert result.download_dir == phase1.download_dir
     assert [name for name, _ in calls] == ["phase1", "hsg", "texture"]
-    assert calls[0][1]["products"] == "all"
+    assert calls[0][1]["products"] == "demlr,hydro,roads,landcover,atlas14"
     assert calls[1][1]["center"] == (-111.2, 35.1)
     assert calls[2][1]["top_depth"] == 20
 
