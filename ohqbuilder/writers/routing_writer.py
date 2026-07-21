@@ -15,15 +15,11 @@ def _number(value: Any, default: float) -> float:
 
 
 def routing_lines(reach: Reach) -> list[str]:
-    """Return native OHQ properties for a reach represented as a routing node.
+    """Return legacy routing-node properties for compatibility.
 
-    GIStoOHQ presently represents every GIS reach as a small ``Catch basin``
-    routing block, and connects those nodes with ``Sewer_pipe`` links.  This
-    uses component names available in OpenHydroQual's Sewer_system template
-    and avoids the fictitious ``TrapezoidalChannel`` pseudo-type formerly
-    emitted by the project.
-
-    The function is retained for API compatibility with the previous writer.
+    The current OHQ writer represents GIS reaches as ``Sewer_pipe`` links, not
+    as ``Catch basin`` blocks.  This function is retained because other code may
+    still import it.
     """
 
     z_up = _number(getattr(reach, "z_up_m", None), 0.0)
@@ -39,7 +35,7 @@ def routing_lines(reach: Reach) -> list[str]:
 
 
 def sewer_pipe_properties(reach: Reach) -> list[tuple[str, str]]:
-    """Return conservative Sewer_pipe properties derived from a GIS reach."""
+    """Return ``Sewer_pipe`` properties derived from one GIS reach."""
 
     length = max(_number(getattr(reach, "length_m", None), 1.0), 0.01)
     z_up = _number(getattr(reach, "z_up_m", None), 0.0)
@@ -49,9 +45,8 @@ def sewer_pipe_properties(reach: Reach) -> list[tuple[str, str]]:
     width = _number(getattr(reach, "base_width_m", None), 1.0)
     diameter = min(max(width, 0.1), 10.0)
 
-    # Keep a tiny downhill drop when GIS attributes are flat or reversed.  The
-    # original values remain available in the GIS products for later hydraulic
-    # refinement.
+    # OpenHydroQual requires a downhill pipe. Preserve GIS values when they are
+    # valid; otherwise impose only a very small fall.
     if z_dn >= z_up:
         z_dn = z_up - max(0.001, 0.0001 * length)
 
@@ -61,4 +56,16 @@ def sewer_pipe_properties(reach: Reach) -> list[tuple[str, str]]:
         ("length", f"{length:.12g}[m]"),
         ("start_elevation", f"{z_up:.12g}[m]"),
         ("end_elevation", f"{z_dn:.12g}[m]"),
+    ]
+
+
+def default_pipe_properties() -> list[tuple[str, str]]:
+    """Return conservative properties for a routing connection without a reach."""
+
+    return [
+        ("ManningCoeff", "0.035"),
+        ("diameter", "1[m]"),
+        ("length", "1[m]"),
+        ("start_elevation", "0.001[m]"),
+        ("end_elevation", "0[m]"),
     ]

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import math
 import os
+from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from ..model.watershed import Watershed
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
-from .routing_writer import routing_lines, sewer_pipe_properties
+from .routing_writer import default_pipe_properties, sewer_pipe_properties
 
 
 def _safe_name(value: Any, fallback: str) -> str:
@@ -32,12 +33,6 @@ def _positive(value: Any, default: float) -> float:
 
 
 def _resource_path(filename: str) -> str:
-    """Resolve an OpenHydroQual resource path without hard-coding a machine.
-
-    Export ``OPENHYDROQUAL_RESOURCES`` to the local OpenHydroQual resources
-    directory.  The default matches the Linux layout used by this project.
-    """
-
     root = os.environ.get(
         "OPENHYDROQUAL_RESOURCES",
         "/mnt/3rd900/Projects/OpenHydroQual/resources",
@@ -45,27 +40,73 @@ def _resource_path(filename: str) -> str:
     return str(Path(root) / filename)
 
 
+def _ordered_unique(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+def _layout_levels(
+    nodes: Iterable[str],
+    edges: Iterable[tuple[str, str]],
+    outlet_name: str,
+) -> dict[str, int]:
+    """Assign left-to-right topological levels to routing blocks."""
+
+    node_list = _ordered_unique(nodes)
+    outgoing: dict[str, list[str]] = defaultdict(list)
+    indegree = {name: 0 for name in node_list}
+
+    for source, target in edges:
+        if source not in indegree or target not in indegree or source == target:
+            continue
+        if target not in outgoing[source]:
+            outgoing[source].append(target)
+            indegree[target] += 1
+
+    queue = deque(name for name in node_list if indegree[name] == 0)
+    level = {name: 0 for name in node_list}
+    visited: set[str] = set()
+
+    while queue:
+        source = queue.popleft()
+        visited.add(source)
+        for target in outgoing.get(source, []):
+            level[target] = max(level[target], level[source] + 1)
+            indegree[target] -= 1
+            if indegree[target] == 0:
+                queue.append(target)
+
+    # Keep cyclic or disconnected objects visible instead of failing generation.
+    for name in node_list:
+        if name not in visited:
+            level[name] = max(level.values(), default=0) + 1
+
+    # The outlet must always be the right-most routing block.
+    if outlet_name in level:
+        level[outlet_name] = max(level.values(), default=0) + 1
+
+    return level
+
 
 class OHQWriter:
-    """Write a native OpenHydroQual command-script model.
+    """Write a native OpenHydroQual command-script watershed model.
 
-    This writer follows the grammar used by working OpenHydroQual ``.ohq``
-    files: ``loadtemplate``, ``addtemplate``, ``create source``,
-    ``create block``, ``create link``, and ``setvalue``.
+    Representation
+    --------------
+    * GIS subbasins become ``Catchment`` blocks.
+    * GIS junctions become ``Catch basin`` routing blocks.
+    * GIS reaches become ``Sewer_pipe`` links.
+    * A synthetic inlet block is created only for a headwater reach that has no
+      upstream junction.
+    * The watershed outlet becomes one ``fixed_head`` block.
 
-    Current watershed representation
-    --------------------------------
-    * GIS subbasins -> OpenHydroQual ``Catchment`` blocks.
-    * GIS reaches   -> small ``Catch basin`` routing blocks.
-    * GIS junctions -> ``Catch basin`` routing blocks.
-    * Watershed outlet -> ``fixed_head`` block.
-    * Catchment runoff links -> ``Catchment_link``.
-    * Reach/junction routing links -> ``Sewer_pipe``.
-
-    The reach-as-routing-node mapping is intentionally conservative.  It is a
-    valid OHQ component mapping, but it is not a claim that a sewer pipe is the
-    final calibrated representation of a natural stream.  Channel-specific
-    plug-ins can replace this mapping later without changing GIS ingestion.
+    The writer collapses the former reach-as-block graph.  It follows explicit
+    topology only and never force-connects unresolved objects to the outlet.
     """
 
     def __init__(self, include_comments: bool = True):
@@ -90,33 +131,216 @@ class OHQWriter:
         junctions = list(getattr(watershed, "junctions", []) or [])
         topology = list(getattr(watershed, "topology", []) or [])
 
-        subbasin_names = {
-            _safe_name(getattr(item, "name", None), f"Subbasin {index + 1}")
+        subbasin_by_name = {
+            _safe_name(getattr(item, "name", None), f"Subbasin {index + 1}"): item
             for index, item in enumerate(subbasins)
         }
         reach_by_name = {
             _safe_name(getattr(item, "name", None), f"Reach {index + 1}"): item
             for index, item in enumerate(reaches)
         }
-        junction_names = {
-            _safe_name(getattr(item, "name", None), f"Junction {index + 1}")
+        junction_by_name = {
+            _safe_name(getattr(item, "name", None), f"Junction {index + 1}"): item
             for index, item in enumerate(junctions)
         }
 
-        all_object_names = set(subbasin_names)
-        all_object_names.update(reach_by_name)
-        all_object_names.update(junction_names)
-        all_object_names.add(outlet_name)
+        subbasin_names = set(subbasin_by_name)
+        reach_names = set(reach_by_name)
+        junction_names = set(junction_by_name)
+        known_names = subbasin_names | reach_names | junction_names | {outlet_name}
+
+        # Normalize and validate the explicit topology once.
+        topology_rows: list[tuple[str, str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        skipped_comments: list[str] = []
+
+        for index, link in enumerate(topology):
+            source = _safe_name(
+                getattr(link, "name", None),
+                f"Topology source {index + 1}",
+            )
+            target_raw = getattr(link, "ds_name", None)
+            target = _safe_name(target_raw, "") if target_raw else ""
+            link_name = _safe_name(
+                getattr(link, "link_name", None),
+                f"{source} to {target}",
+            )
+
+            if not source or not target:
+                skipped_comments.append(
+                    f"Skipped topology row {index + 1}: blank source or downstream."
+                )
+                continue
+            if source == target:
+                skipped_comments.append(f"Skipped invalid self-link: {source} -> {target}")
+                continue
+            if source not in known_names or target not in known_names:
+                skipped_comments.append(
+                    f"Skipped unresolved topology link: {source} -> {target}"
+                )
+                continue
+            if (source, target) in seen_pairs:
+                continue
+
+            seen_pairs.add((source, target))
+            topology_rows.append((source, target, link_name))
+
+        downstream: dict[str, list[str]] = defaultdict(list)
+        upstream: dict[str, list[str]] = defaultdict(list)
+        link_name_by_pair: dict[tuple[str, str], str] = {}
+        for source, target, link_name in topology_rows:
+            downstream[source].append(target)
+            upstream[target].append(source)
+            link_name_by_pair[(source, target)] = link_name
+
+        def first_downstream_routing(start: str) -> str | None:
+            """Follow reach chains to the first junction or outlet."""
+
+            queue = deque(downstream.get(start, []))
+            visited = {start}
+            while queue:
+                name = queue.popleft()
+                if name in visited:
+                    continue
+                visited.add(name)
+                if name in junction_names or name == outlet_name:
+                    return name
+                if name in reach_names:
+                    queue.extend(downstream.get(name, []))
+            return None
+
+        def first_upstream_junction(start: str) -> str | None:
+            """Walk upstream through reach chains to the nearest junction."""
+
+            queue = deque(upstream.get(start, []))
+            visited = {start}
+            while queue:
+                name = queue.popleft()
+                if name in visited:
+                    continue
+                visited.add(name)
+                if name in junction_names:
+                    return name
+                if name in reach_names:
+                    queue.extend(upstream.get(name, []))
+            return None
+
+        # Only reaches that actually participate in explicit topology are emitted.
+        active_reaches = [
+            name
+            for name in reach_by_name
+            if name in downstream or name in upstream
+        ]
+
+        reach_endpoints: dict[str, tuple[str, str]] = {}
+        synthetic_inlets: dict[str, str] = {}
+
+        for reach_name in active_reaches:
+            target = first_downstream_routing(reach_name)
+            if target is None:
+                skipped_comments.append(
+                    f"Skipped reach without downstream routing target: {reach_name}"
+                )
+                continue
+
+            source = first_upstream_junction(reach_name)
+            if source is None:
+                source = _safe_name(f"{reach_name} Inlet", f"{reach_name} Inlet")
+                synthetic_inlets[reach_name] = source
+
+            if source == target:
+                skipped_comments.append(
+                    f"Skipped collapsed self-link for reach: {reach_name} ({source})"
+                )
+                continue
+
+            reach_endpoints[reach_name] = (source, target)
+
+        # Direct routing links are topology rows not already represented by a reach.
+        direct_routing_edges: list[tuple[str, str, str]] = []
+        for source, target, link_name in topology_rows:
+            if source in junction_names and (target in junction_names or target == outlet_name):
+                direct_routing_edges.append((source, target, link_name))
+
+        routing_edges = list(reach_endpoints.values()) + [
+            (source, target) for source, target, _ in direct_routing_edges
+        ]
+        routing_nodes = [
+            *junction_by_name.keys(),
+            *synthetic_inlets.values(),
+            outlet_name,
+        ]
+        levels = _layout_levels(routing_nodes, routing_edges, outlet_name)
+
+        # Arrange blocks by topological column, then by name inside each column.
+        nodes_by_level: dict[int, list[str]] = defaultdict(list)
+        for name in routing_nodes:
+            nodes_by_level[levels.get(name, 0)].append(name)
+        for names in nodes_by_level.values():
+            names.sort()
+
+        routing_positions: dict[str, tuple[int, int]] = {}
+        x_spacing = 520
+        y_spacing = 230
+        for level_value in sorted(nodes_by_level):
+            names = nodes_by_level[level_value]
+            center_offset = (len(names) - 1) * y_spacing / 2.0
+            for index, name in enumerate(names):
+                x = level_value * x_spacing
+                y = int(index * y_spacing - center_offset)
+                routing_positions[name] = (x, y)
+
+        # Resolve each catchment to a routing block. A catchment assigned to a
+        # reach drains to that reach's upstream endpoint.
+        catchment_targets: dict[str, str] = {}
+        for subbasin_name in subbasin_by_name:
+            candidates = downstream.get(subbasin_name, [])
+            target: str | None = None
+            for candidate in candidates:
+                if candidate in junction_names or candidate == outlet_name:
+                    target = candidate
+                    break
+                if candidate in reach_endpoints:
+                    target = reach_endpoints[candidate][0]
+                    break
+            if target is not None:
+                catchment_targets[subbasin_name] = target
+            else:
+                skipped_comments.append(
+                    f"Catchment retained without resolved routing target: {subbasin_name}"
+                )
+
+        catchments_by_target: dict[str, list[str]] = defaultdict(list)
+        for name, target in catchment_targets.items():
+            catchments_by_target[target].append(name)
+        for names in catchments_by_target.values():
+            names.sort()
+
+        catchment_positions: dict[str, tuple[int, int]] = {}
+        for target, names in catchments_by_target.items():
+            target_x, target_y = routing_positions.get(target, (0, 0))
+            center_offset = (len(names) - 1) * 170 / 2.0
+            for index, name in enumerate(names):
+                catchment_positions[name] = (
+                    target_x - 420,
+                    int(target_y + index * 170 - center_offset),
+                )
+
+        # Unresolved catchments remain visible in a separate far-left column.
+        unresolved_catchments = [
+            name for name in subbasin_by_name if name not in catchment_positions
+        ]
+        for index, name in enumerate(sorted(unresolved_catchments)):
+            catchment_positions[name] = (-520, index * 190)
 
         if self.include_comments:
             writer.comment("Generated by GIStoOHQ using native OpenHydroQual grammar")
+            writer.comment("GIS reaches are represented as Sewer_pipe links.")
             writer.comment(
-                "GIS reaches are represented as Catch basin routing nodes connected "
-                "with Sewer_pipe links."
+                "Only junctions and necessary headwater inlet nodes are routing blocks."
             )
             writer.comment(
-                "Set OPENHYDROQUAL_RESOURCES and OHQ_RAINFALL_FILE when local paths "
-                "differ from the defaults."
+                "Set OPENHYDROQUAL_RESOURCES and OHQ_RAINFALL_FILE when local paths differ."
             )
 
         writer.loadtemplate(_resource_path("main_components.json"))
@@ -130,41 +354,22 @@ class OHQWriter:
             writer.line(line)
         writer.line()
 
-        # Place blocks in readable columns in the OHQ GUI.
-        sub_x = -700
-        reach_x = -150
-        junction_x = 400
-        outlet_x = 900
-        vertical_spacing = 190
-
         if self.include_comments:
             writer.comment("Catchment runoff-generation blocks")
 
-        for index, subbasin in enumerate(subbasins):
-            name = _safe_name(
-                getattr(subbasin, "name", None),
-                f"Subbasin {index + 1}",
-            )
+        for name, subbasin in subbasin_by_name.items():
             area_km2 = _positive(getattr(subbasin, "area_km2", None), 1.0e-6)
             area_m2 = area_km2 * 1_000_000.0
-
             slope_pct = _finite(getattr(subbasin, "slope_pct", None), 1.0)
             slope = max(slope_pct / 100.0, 1.0e-6)
-
-            curve_number = _finite(
-                getattr(subbasin, "curve_number", None),
-                75.0,
-            )
-            # OpenHydroQual's standard Catchment block uses Runoff_coeff rather
-            # than SCS Curve Number.  This bounded mapping is an explicit first
-            # approximation and should be calibrated or replaced as needed.
+            curve_number = _finite(getattr(subbasin, "curve_number", None), 75.0)
             runoff_coeff = min(max(curve_number / 100.0, 0.01), 1.0)
-
             width = max(math.sqrt(area_m2), 1.0)
             elevation = _finite(
                 getattr(subbasin, "elevation_m", None),
                 _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
             )
+            x, y = catchment_positions[name]
 
             writer.create_block(
                 "Catchment",
@@ -182,45 +387,22 @@ class OHQWriter:
                     ("elevation", f"{elevation:.12g}[m]"),
                     ("depression_storage", "0.005[m]"),
                     ("loss_coefficient", "0[1/day]"),
-                    ("x", sub_x),
-                    ("y", index * vertical_spacing),
-                    ("_width", 180),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", 190),
                     ("_height", 120),
                 ],
             )
 
         if self.include_comments:
-            writer.comment("Reach routing nodes")
+            writer.comment("Junction routing blocks")
 
-        for index, (name, reach) in enumerate(reach_by_name.items()):
-            properties: list[tuple[str, Any]] = []
-            for item in routing_lines(reach):
-                if "=" in item:
-                    key, value = item.split("=", 1)
-                    if key != "type":
-                        properties.append((key, value))
-            properties.extend(
-                [
-                    ("x", reach_x),
-                    ("y", index * vertical_spacing),
-                    ("_width", 180),
-                    ("_height", 120),
-                ]
-            )
-            writer.create_block("Catch basin", name=name, properties=properties)
-
-        if self.include_comments:
-            writer.comment("Junction routing nodes")
-
-        for index, junction in enumerate(junctions):
-            name = _safe_name(
-                getattr(junction, "name", None),
-                f"Junction {index + 1}",
-            )
+        for name, junction in junction_by_name.items():
             elevation = _finite(
                 getattr(junction, "elevation_m", None),
                 _finite(getattr(junction, "z_m", None), 0.0),
             )
+            x, y = routing_positions.get(name, (0, 0))
             writer.create_block(
                 "Catch basin",
                 name=name,
@@ -228,13 +410,37 @@ class OHQWriter:
                     ("area", "1[m~^2]"),
                     ("bottom_elevation", f"{elevation:.12g}[m]"),
                     ("inflow", ""),
-                    ("x", junction_x),
-                    ("y", index * vertical_spacing),
-                    ("_width", 180),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", 190),
                     ("_height", 120),
                 ],
             )
 
+        if self.include_comments and synthetic_inlets:
+            writer.comment("Synthetic headwater inlet blocks")
+
+        for reach_name, inlet_name in synthetic_inlets.items():
+            if reach_name not in reach_endpoints:
+                continue
+            reach = reach_by_name[reach_name]
+            elevation = _finite(getattr(reach, "z_up_m", None), 0.0)
+            x, y = routing_positions.get(inlet_name, (0, 0))
+            writer.create_block(
+                "Catch basin",
+                name=inlet_name,
+                properties=[
+                    ("area", "1[m~^2]"),
+                    ("bottom_elevation", f"{elevation:.12g}[m]"),
+                    ("inflow", ""),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", 190),
+                    ("_height", 120),
+                ],
+            )
+
+        outlet_x, outlet_y = routing_positions.get(outlet_name, (1040, 0))
         writer.create_block(
             "fixed_head",
             name=outlet_name,
@@ -242,97 +448,80 @@ class OHQWriter:
                 ("head", "0[m]"),
                 ("Storage", "1000000000[m~^3]"),
                 ("x", outlet_x),
-                ("y", 0),
-                ("_width", 180),
+                ("y", outlet_y),
+                ("_width", 190),
                 ("_height", 120),
             ],
         )
         writer.line()
 
         if self.include_comments:
-            writer.comment("Explicit topology links")
+            writer.comment("Catchment runoff links")
 
-        emitted_pairs: set[tuple[str, str]] = set()
-
-        for index, link in enumerate(topology):
-            source = _safe_name(
-                getattr(link, "name", None),
-                f"Topology source {index + 1}",
-            )
-            target_raw = getattr(link, "ds_name", None)
-            target = _safe_name(target_raw, "") if target_raw else ""
-
-            if not source or not target:
-                if self.include_comments:
-                    writer.comment(
-                        f"Skipped topology row {index + 1}: blank source or downstream."
-                    )
+        emitted_links: set[tuple[str, str, str]] = set()
+        for source, target in catchment_targets.items():
+            key = (source, target, "Catchment_link")
+            if key in emitted_links:
                 continue
-            if source == target:
-                if self.include_comments:
-                    writer.comment(
-                        f"Skipped invalid self-link: {source} -> {target}"
-                    )
-                continue
-            if source not in all_object_names or target not in all_object_names:
-                if self.include_comments:
-                    writer.comment(
-                        f"Skipped unresolved topology link: {source} -> {target}"
-                    )
-                continue
-            if (source, target) in emitted_pairs:
-                continue
-
-            emitted_pairs.add((source, target))
-
-            link_name = _safe_name(
-                getattr(link, "link_name", None),
+            emitted_links.add(key)
+            original_target = downstream.get(source, [target])[0]
+            link_name = link_name_by_pair.get(
+                (source, original_target),
                 f"{source} to {target}",
             )
+            writer.create_link(
+                "Catchment_link",
+                name=link_name,
+                source=source,
+                target=target,
+            )
 
-            if source in subbasin_names:
-                writer.create_link(
-                    "Catchment_link",
-                    name=link_name,
-                    source=source,
-                    target=target,
-                )
-            else:
-                reach = reach_by_name.get(source)
-                properties = (
-                    sewer_pipe_properties(reach)
-                    if reach is not None
-                    else [
-                        ("ManningCoeff", "0.035"),
-                        ("diameter", "1[m]"),
-                        ("length", "1[m]"),
-                        ("start_elevation", "0.001[m]"),
-                        ("end_elevation", "0[m]"),
-                    ]
-                )
-                writer.create_link(
-                    "Sewer_pipe",
-                    name=link_name,
-                    source=source,
-                    target=target,
-                    properties=properties,
-                )
-
-        # Do not force-connect topology leaves to the outlet.  A routing object
-        # is connected to the fixed-head outlet only when that connection is
-        # explicitly present in ``watershed.topology``.  This prevents the
-        # artificial fan of parallel links previously produced for every
-        # unresolved or isolated reach/junction.
-        linked_sources = {source for source, _ in emitted_pairs}
-        unresolved_routing = [
-            name
-            for name in [*reach_by_name.keys(), *sorted(junction_names)]
-            if name not in linked_sources
-        ]
         if self.include_comments:
-            for name in unresolved_routing:
+            writer.comment("GIS reaches represented as Sewer_pipe links")
+
+        for reach_name, (source, target) in reach_endpoints.items():
+            key = (source, target, "Sewer_pipe")
+            if key in emitted_links:
+                if self.include_comments:
+                    writer.comment(
+                        f"Skipped duplicate collapsed reach connection: {reach_name}"
+                    )
+                continue
+            emitted_links.add(key)
+            writer.create_link(
+                "Sewer_pipe",
+                name=reach_name,
+                source=source,
+                target=target,
+                properties=sewer_pipe_properties(reach_by_name[reach_name]),
+            )
+
+        if self.include_comments and direct_routing_edges:
+            writer.comment("Direct junction/outlet routing links")
+
+        for source, target, link_name in direct_routing_edges:
+            key = (source, target, "Sewer_pipe")
+            if key in emitted_links:
+                continue
+            emitted_links.add(key)
+            writer.create_link(
+                "Sewer_pipe",
+                name=link_name,
+                source=source,
+                target=target,
+                properties=default_pipe_properties(),
+            )
+
+        if self.include_comments:
+            writer.comment("Topology diagnostics")
+            for comment in skipped_comments:
+                writer.comment(comment)
+            inactive_reaches = [
+                name for name in reach_by_name if name not in active_reaches
+            ]
+            for name in inactive_reaches:
                 writer.comment(
-                    f"Unconnected routing object retained without forced outlet link: {name}"
+                    f"Skipped GIS reach absent from explicit topology: {name}"
                 )
 
         writer.line()
