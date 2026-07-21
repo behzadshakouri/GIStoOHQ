@@ -190,6 +190,12 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--site", required=True)
     materialize.add_argument("--source-dir", default=None)
     materialize.add_argument("--target-crs", default=None)
+    materialize.add_argument("--clip-bounds", default=None, help="Optional minx,miny,maxx,maxy materialization bounds.")
+    materialize.add_argument("--clip-bounds-crs", default="EPSG:4326", help="CRS for --clip-bounds; defaults to EPSG:4326.")
+    materialize.add_argument("--clip-center-lat", type=float, default=None, help="Latitude for auto materialization bounds.")
+    materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
+    materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
+    materialize.add_argument("--clip-buffer-scale", type=float, default=1.1, help="Safety scale applied to --clip-buffer; default 1.1.")
 
     init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
     init.add_argument("--root", required=True)
@@ -469,6 +475,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.site,
                 source_dir=args.source_dir,
                 target_crs=args.target_crs,
+                clip_bounds=args.clip_bounds,
+                clip_bounds_crs=args.clip_bounds_crs,
+                clip_center_lon=args.clip_center_lon,
+                clip_center_lat=args.clip_center_lat,
+                clip_buffer_m=args.clip_buffer,
+                clip_buffer_scale=args.clip_buffer_scale,
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"materialize-inputs failed: {exc}")

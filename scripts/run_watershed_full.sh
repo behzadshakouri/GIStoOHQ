@@ -37,6 +37,9 @@ DOWNLOAD_SUMMARY="${DOWNLOAD_SUMMARY:-${ROOT}/${SITE}/source_downloads_summary.c
 POINTS_DIR="${POINTS_DIR:-${RAW_DOWNLOAD_DIR}}"
 TIGER_YEAR="${TIGER_YEAR:-2025}"
 NLCD_YEAR="${NLCD_YEAR:-2023}"
+MATERIALIZE_CLIP_BOUNDS="${MATERIALIZE_CLIP_BOUNDS:-}"
+MATERIALIZE_CLIP_BOUNDS_CRS="${MATERIALIZE_CLIP_BOUNDS_CRS:-EPSG:4326}"
+MATERIALIZE_SAFETY_MARGIN="${MATERIALIZE_SAFETY_MARGIN:-1.1}"
 
 mkdir -p "${ROOT}/${SITE}"
 RUN_CSV_PATH="${CSV_PATH}"
@@ -157,6 +160,19 @@ MATERIALIZE_CMD=(
   --source-dir "${RAW_DOWNLOAD_DIR}"
   --target-crs "${TARGET_CRS}"
 )
+if [[ -n "${MATERIALIZE_CLIP_BOUNDS}" ]]; then
+  MATERIALIZE_CMD+=(
+    --clip-bounds "${MATERIALIZE_CLIP_BOUNDS}"
+    --clip-bounds-crs "${MATERIALIZE_CLIP_BOUNDS_CRS}"
+  )
+elif [[ -n "${LAT}" && -n "${LON}" ]]; then
+  MATERIALIZE_CMD+=(
+    --clip-center-lat "${LAT}"
+    --clip-center-lon "${LON}"
+    --clip-buffer "${BUFFER}"
+    --clip-buffer-scale "${MATERIALIZE_SAFETY_MARGIN}"
+  )
+fi
 HYDROLOGY_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli prepare-hydrology
   --root "${ROOT}"
