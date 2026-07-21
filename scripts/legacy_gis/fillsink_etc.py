@@ -26,12 +26,64 @@
 # Run from: QGIS -> Plugins -> Python Console.
 # =============================================================================
 
+import importlib
+import importlib.util
 import os
+import sys
+
 import processing
 import numpy as np
 from osgeo import gdal, ogr, osr
 from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer
-from processing.core.Processing import Processing
+
+
+
+
+def _module_spec_available(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def _register_grass_provider():
+    registry = QgsApplication.processingRegistry()
+    if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+        return
+    for plugin_path in (
+        "/usr/share/qgis/python/plugins",
+        os.path.join(sys.prefix, "share", "qgis", "python", "plugins"),
+    ):
+        if os.path.isdir(plugin_path) and plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+    provider_specs = (
+        ("grassprovider.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
+        ("grassprovider.GrassProvider", "GrassProvider"),
+        ("processing.algs.grass7.Grass7AlgorithmProvider", "Grass7AlgorithmProvider"),
+        ("processing.algs.grass.GrassAlgorithmProvider", "GrassAlgorithmProvider"),
+    )
+    for module_name, class_name in provider_specs:
+        if not _module_spec_available(module_name):
+            continue
+        module = importlib.import_module(module_name)
+        provider_class = getattr(module, class_name)
+        provider = provider_class()
+        load = getattr(provider, "load", None)
+        if load is not None:
+            load()
+        registry.addProvider(provider)
+        if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+            return
+
+def initialize_processing():
+    processing_class = getattr(processing, "Processing", None)
+    initialize = getattr(processing_class, "initialize", None)
+    if initialize is not None:
+        try:
+            initialize()
+        except Exception:
+            pass
+    _register_grass_provider()
 
 ROOT = globals().get(
     "ROOT",
@@ -88,10 +140,7 @@ flow_utm = os.path.join(TEMP_DIR, "flowlines_utm.gpkg")
 
 
 def grass_id(name):
-    try:
-        Processing.initialize()
-    except Exception:
-        pass
+    initialize_processing()
 
     reg = QgsApplication.processingRegistry()
 
@@ -109,7 +158,8 @@ def grass_id(name):
 
     raise Exception(
         "Could not find GRASS watershed algorithm. "
-        "Expected grass:r.watershed or grass7:r.watershed."
+        "Expected grass:r.watershed or grass7:r.watershed. "
+        "Install/enable the QGIS GRASS Processing provider (for example qgis-plugin-grass)."
     )
 
 

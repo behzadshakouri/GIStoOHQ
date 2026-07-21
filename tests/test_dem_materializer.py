@@ -1,12 +1,24 @@
 import zipfile
 
 from ohqbuilder.cli import main
-from ohqbuilder.dem_materializer import discover_dem_sources, utm_epsg_from_lonlat
+from ohqbuilder.dem_materializer import bounds_from_lonlat_buffer, discover_dem_sources, parse_bounds, utm_epsg_from_lonlat
 
 
 def test_utm_epsg_from_lonlat():
     assert utm_epsg_from_lonlat(-111.2, 35.1) == 32612
     assert utm_epsg_from_lonlat(151.2, -33.8) == 32756
+
+
+def test_bounds_from_lonlat_buffer_applies_safety_margin():
+    minx, miny, maxx, maxy = bounds_from_lonlat_buffer(-77.0, 39.0, 10_000, scale=1.1)
+
+    assert minx < -77.0 < maxx
+    assert miny < 39.0 < maxy
+    assert round(maxy - 39.0, 3) == 0.099
+
+
+def test_parse_bounds_accepts_csv_string():
+    assert parse_bounds("-77.2,38.9,-76.8,39.2") == (-77.2, 38.9, -76.8, 39.2)
 
 
 def test_discover_dem_sources_finds_rasters_and_archives(tmp_path):
