@@ -6,6 +6,7 @@ import pytest
 from ohqbuilder.soil_retrieval import (
     SoilRetrievalError,
     SoilRetrievalResult,
+    _query_spatial_rows,
     _resolve_hsg,
     _topsoil_by_mukey,
     _validate_positive,
@@ -48,6 +49,22 @@ def test_hydrologic_soil_groups_delegates_to_soil_groups(monkeypatch, tmp_path):
 
     assert retrieve_hydrologic_soil_groups(tmp_path, "SITE_A", buffer=123.0, pixel_size=0.5) == expected
     assert calls == [(tmp_path, "SITE_A", {"buffer": 123.0, "pixel_size": 0.5})]
+
+
+
+def test_query_spatial_rows_tiles_after_whole_query_failure():
+    calls = []
+
+    def fake_query(wkt):
+        calls.append(wkt)
+        if len(calls) == 1:
+            raise RuntimeError("HTTP Error 400: Bad Request")
+        return [{"mukey": "1", "geom_wkt": "same"}]
+
+    rows = _query_spatial_rows((0.0, 0.0, 0.2, 0.2), fake_query, ("mukey", "geom_wkt"))
+
+    assert rows == [{"mukey": "1", "geom_wkt": "same"}]
+    assert len(calls) == 5
 
 
 def test_resolve_hsg_uses_conservative_dual_group_member():

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
+import shutil
 
 from .dem_materializer import DemMaterializeResult, materialize_dem, bounds_from_lonlat_buffer, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
@@ -11,6 +13,7 @@ from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
 class SourceMaterializeResult:
     dem: DemMaterializeResult
     hydro: HydroMaterializeResult
+    landcover: Path | None = None
 
 
 def find_product_dir(source_dir: str | Path, product: str) -> Path:
@@ -25,6 +28,29 @@ def find_product_dir(source_dir: str | Path, product: str) -> Path:
         raise ValueError(f"Multiple downloaded {product} directories found: {names}")
     return matches[0]
 
+
+
+def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | None:
+    """Copy a downloaded NLCD raster into the legacy Phase 2 expected path."""
+
+    try:
+        landcover_dir = find_product_dir(source_dir, "landcover")
+    except FileNotFoundError:
+        return None
+    sources = sorted(landcover_dir.glob("nlcd_*.tif"))
+    if not sources:
+        return None
+    source = sources[0]
+    match = re.match(r"nlcd_(\d{4})_", source.name)
+    year = match.group(1) if match else "2023"
+    target_dir = root / site / "landcover"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"nlcd_{year}_{site}.tif"
+    shutil.copyfile(source, target)
+    aux = source.with_name(source.name + ".aux.xml")
+    if aux.exists():
+        shutil.copyfile(aux, target.with_name(target.name + ".aux.xml"))
+    return target
 
 def materialize_source_inputs(
     root: str | Path,
@@ -71,4 +97,5 @@ def materialize_source_inputs(
         source_dir=find_product_dir(downloads, "hydro"),
         dem_path=dem.output_path,
     )
-    return SourceMaterializeResult(dem, hydro)
+    landcover = materialize_landcover(root_path, site, downloads)
+    return SourceMaterializeResult(dem, hydro, landcover)
