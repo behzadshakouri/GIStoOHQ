@@ -37,6 +37,8 @@
 # Run from: QGIS -> Plugins -> Python Console.
 # =============================================================================
 
+import importlib
+import importlib.util
 import os
 import processing
 import numpy as np
@@ -44,6 +46,27 @@ from osgeo import gdal
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsRasterLayer, QgsApplication
 )
+
+
+def _module_spec_available(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def _register_native_provider():
+    registry = QgsApplication.processingRegistry()
+    if registry.providerById("native") is not None:
+        return
+    if not _module_spec_available("qgis.analysis"):
+        return
+    module = importlib.import_module("qgis.analysis")
+    provider_class = getattr(module, "QgsNativeAlgorithms")
+    registry.addProvider(provider_class())
+
+
+_register_native_provider()
 
 # --- settings (set ROOT + SITE_DIR ONCE) -----------------------------------
 try:
@@ -100,9 +123,13 @@ print("Outputs  :", OUT_DIR)
 
 def grass_id(name):
     reg = QgsApplication.processingRegistry()
-    for prefix in ("grass7:", "grass:"):
-        if reg.algorithmById(prefix + name):
-            return prefix + name
+    for prefix in ("grass:", "grass7:"):
+        alg_id = prefix + name
+        if reg.algorithmById(alg_id):
+            print("Using GRASS algorithm:", alg_id)
+            return alg_id
+    if reg.algorithmById("grass:r.watershed"):
+        return "grass:" + name
     return "grass7:" + name
 
 # --- read cell size + CRS from the DEM (CRS source of truth) ---------------
