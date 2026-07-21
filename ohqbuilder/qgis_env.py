@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import sys
 from pathlib import Path
+
+_QGIS_APP = None
 
 
 def module_available(name: str) -> bool:
@@ -15,6 +18,10 @@ def module_available(name: str) -> bool:
         return False
 
 
+def _qgis_prefix() -> Path:
+    return Path(os.environ.get("QGIS_PREFIX_PATH", "/usr"))
+
+
 def qgis_plugin_paths() -> list[Path]:
     paths: list[Path] = []
     try:
@@ -22,6 +29,8 @@ def qgis_plugin_paths() -> list[Path]:
     except ImportError:
         return paths
 
+    if not QgsApplication.prefixPath():
+        QgsApplication.setPrefixPath(str(_qgis_prefix()), True)
     prefix = Path(QgsApplication.prefixPath()) if QgsApplication.prefixPath() else None
     if prefix:
         paths.extend([
@@ -50,10 +59,30 @@ GRASS_PROVIDER_CLASSES = (
 )
 
 
+def ensure_qgis_application() -> bool:
+    """Create a minimal QgsApplication for standalone CLI checks when needed."""
+
+    global _QGIS_APP
+    if not module_available("qgis.core"):
+        return False
+    try:
+        from qgis.core import QgsApplication
+    except ImportError:
+        return False
+
+    if QgsApplication.instance() is not None:
+        return True
+    if not QgsApplication.prefixPath():
+        QgsApplication.setPrefixPath(str(_qgis_prefix()), True)
+    _QGIS_APP = QgsApplication([], False)
+    _QGIS_APP.initQgis()
+    return True
+
+
 def initialize_processing() -> bool:
     """Initialize QGIS Processing when the loaded processing module exposes it."""
 
-    if not ensure_processing_available():
+    if not ensure_qgis_application() or not ensure_processing_available():
         return False
     import processing
 
@@ -77,7 +106,7 @@ def _module_spec_available(name: str) -> bool:
 def register_grass_provider() -> bool:
     """Explicitly register the QGIS GRASS provider in standalone Python runs."""
 
-    if not module_available("qgis.core") or not initialize_processing():
+    if not ensure_qgis_application() or not initialize_processing():
         return False
     from qgis.core import QgsApplication
 
@@ -101,7 +130,7 @@ def register_grass_provider() -> bool:
 def processing_algorithm_available(*algorithm_ids: str) -> bool:
     """Return True when QGIS Processing has at least one requested algorithm."""
 
-    if not module_available("qgis.core") or not initialize_processing():
+    if not ensure_qgis_application() or not initialize_processing():
         return False
     from qgis.core import QgsApplication
 
