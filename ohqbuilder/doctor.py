@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .legacy_inputs import default_script_dir
-from .qgis_env import ensure_processing_available, module_available
+from .qgis_env import ensure_processing_available, module_available, processing_algorithm_available
 
 
 @dataclass
@@ -97,6 +97,15 @@ def run_doctor(script_dir: str | Path | None = None, strict_gis: bool = False) -
     )
 
     resolved_script_dir = Path(script_dir).expanduser().resolve() if script_dir else default_script_dir()
+    report.checks.append(
+        DoctorCheck(
+            name="qgis grass provider",
+            ok=processing_algorithm_available("grass:r.watershed", "grass7:r.watershed"),
+            detail="needed by prepare-hydrology for r.watershed; install/enable QGIS GRASS provider",
+            required=strict_gis,
+        )
+    )
+
     report.checks.append(
         DoctorCheck(
             name="legacy script directory",
