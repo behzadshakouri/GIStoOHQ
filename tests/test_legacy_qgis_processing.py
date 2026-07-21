@@ -29,3 +29,9 @@ def test_legacy_grass_helpers_prefer_current_grass_prefix():
     ):
         source = script.read_text(encoding="utf-8")
         assert 'for prefix in ("grass:", "grass7:")' in source
+
+
+def test_whole_watershed_has_python_water_outlet_fallback():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(encoding="utf-8")
+    assert "def delineate_watershed_with_flowdir" in source
+    assert "GRASS r.water.outlet failed; using Python D8 fallback" in source

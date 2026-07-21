@@ -30,6 +30,7 @@ import importlib.util
 import os
 import sys
 import time
+from collections import deque
 
 import numpy as np
 import processing
@@ -196,6 +197,85 @@ def grass_id(name):
     print("WARNING: GRASS algorithm was not listed; trying:", fallback)
     return fallback
 
+
+
+def delineate_watershed_with_flowdir(flowdir_path, outlet_x, outlet_y, output_path):
+    """Fallback watershed mask from a GRASS D8 flow-direction raster.
+
+    GRASS r.watershed directions are 1-8 counter-clockwise from east. Negative
+    values can mark drainage through depressions, so this uses absolute values.
+    The output matches r.water.outlet's useful convention for the next step:
+    watershed cells are 1 and background is 0.
+    """
+
+    source = gdal.Open(flowdir_path)
+    if source is None:
+        raise Exception("Could not open flow-direction raster: " + flowdir_path)
+
+    band = source.GetRasterBand(1)
+    flow = np.abs(band.ReadAsArray()).astype("uint8", copy=False)
+    transform = source.GetGeoTransform()
+    projection = source.GetProjection()
+    rows, cols = flow.shape
+
+    origin_x, pixel_width, _, origin_y, _, pixel_height = transform
+    col = int((outlet_x - origin_x) / pixel_width)
+    row = int((outlet_y - origin_y) / pixel_height)
+    if row < 0 or row >= rows or col < 0 or col >= cols:
+        raise Exception(
+            "Outlet is outside flow-direction raster extent: %.3f, %.3f"
+            % (outlet_x, outlet_y)
+        )
+
+    # Direction code -> downstream (drow, dcol). Rows increase southward.
+    direction_offsets = {
+        1: (0, 1),
+        2: (-1, 1),
+        3: (-1, 0),
+        4: (-1, -1),
+        5: (0, -1),
+        6: (1, -1),
+        7: (1, 0),
+        8: (1, 1),
+    }
+    upstream_checks = [
+        (-downstream_row, -downstream_col, code)
+        for code, (downstream_row, downstream_col) in direction_offsets.items()
+    ]
+
+    mask = np.zeros((rows, cols), dtype="uint8")
+    queue = deque([(row, col)])
+    mask[row, col] = 1
+
+    while queue:
+        current_row, current_col = queue.popleft()
+        for row_delta, col_delta, required_code in upstream_checks:
+            neighbor_row = current_row + row_delta
+            neighbor_col = current_col + col_delta
+            if (
+                neighbor_row < 0
+                or neighbor_row >= rows
+                or neighbor_col < 0
+                or neighbor_col >= cols
+                or mask[neighbor_row, neighbor_col]
+            ):
+                continue
+            if flow[neighbor_row, neighbor_col] == required_code:
+                mask[neighbor_row, neighbor_col] = 1
+                queue.append((neighbor_row, neighbor_col))
+
+    release_and_delete(output_path)
+    driver = gdal.GetDriverByName("GTiff")
+    output = driver.Create(output_path, cols, rows, 1, gdal.GDT_Byte)
+    output.SetGeoTransform(transform)
+    output.SetProjection(projection)
+    output_band = output.GetRasterBand(1)
+    output_band.SetNoDataValue(0)
+    output_band.WriteArray(mask)
+    output.FlushCache()
+    output = None
+    source = None
+    print("Fallback delineation cells:", int(mask.sum()))
 
 def wipe_temp_dir(temp_dir):
     """Clear scratch files from temp/ after releasing loaded QGIS layers."""
@@ -461,18 +541,22 @@ wat_ras = os.path.join(TEMP_DIR, "whole_wshed.tif")
 wat_vec = os.path.join(TEMP_DIR, "whole_wshed.gpkg")
 
 print("\nDelineating whole watershed at %.2f, %.2f ..." % (x, y))
-processing.run(
-    grass_id("r.water.outlet"),
-    {
-        "input": FLOWDIR_PATH,
-        "coordinates": "%f,%f" % (x, y),
-        "output": wat_ras,
-        "GRASS_REGION_PARAMETER": None,
-        "GRASS_REGION_CELLSIZE_PARAMETER": 0,
-        "GRASS_RASTER_FORMAT_OPT": "",
-        "GRASS_RASTER_FORMAT_META": "",
-    },
-)
+try:
+    processing.run(
+        grass_id("r.water.outlet"),
+        {
+            "input": FLOWDIR_PATH,
+            "coordinates": "%f,%f" % (x, y),
+            "output": wat_ras,
+            "GRASS_REGION_PARAMETER": None,
+            "GRASS_REGION_CELLSIZE_PARAMETER": 0,
+            "GRASS_RASTER_FORMAT_OPT": "",
+            "GRASS_RASTER_FORMAT_META": "",
+        },
+    )
+except Exception as exc:
+    print("GRASS r.water.outlet failed; using Python D8 fallback:", exc)
+    delineate_watershed_with_flowdir(FLOWDIR_PATH, x, y, wat_ras)
 
 # The gdal:polygonize processing wrapper can silently fail on some installs, so
 # call gdal.Polygonize() directly and write the GPKG via OGR.
