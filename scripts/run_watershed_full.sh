@@ -31,6 +31,7 @@ SOIL_PIXEL_SIZE="${SOIL_PIXEL_SIZE:-0.0003}"
 SOIL_TOP_DEPTH="${SOIL_TOP_DEPTH:-30.0}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 RUN_MODE="${RUN_MODE:-download-then-three-step}"
+START_AT="${START_AT:-}"
 PRODUCTS="${PRODUCTS:-demlr,hydro,roads,landcover,atlas14}"
 RAW_DOWNLOAD_DIR="${RAW_DOWNLOAD_DIR:-${ROOT}/${SITE}/source_downloads}"
 DOWNLOAD_SUMMARY="${DOWNLOAD_SUMMARY:-${ROOT}/${SITE}/source_downloads_summary.csv}"
@@ -39,7 +40,7 @@ TIGER_YEAR="${TIGER_YEAR:-2025}"
 NLCD_YEAR="${NLCD_YEAR:-2023}"
 MATERIALIZE_CLIP_BOUNDS="${MATERIALIZE_CLIP_BOUNDS:-}"
 MATERIALIZE_CLIP_BOUNDS_CRS="${MATERIALIZE_CLIP_BOUNDS_CRS:-EPSG:4326}"
-MATERIALIZE_SAFETY_MARGIN="${MATERIALIZE_SAFETY_MARGIN:-1.1}"
+MATERIALIZE_SAFETY_MARGIN="${MATERIALIZE_SAFETY_MARGIN:-1.2}"
 MATERIALIZE_BOUNDS_SOURCE="${MATERIALIZE_BOUNDS_SOURCE:-web-or-buffer}"
 
 mkdir -p "${ROOT}/${SITE}"
@@ -118,6 +119,26 @@ PY
 fi
 
 cd "${REPO_ROOT}"
+
+if [[ "${RUN_MODE}" == "resume-phase2" && -z "${START_AT}" ]]; then
+  PHASE2_MARKER="${ROOT}/${SITE}/outputs/.phase2_failed_step"
+  if [[ -s "${PHASE2_MARKER}" ]]; then
+    START_AT="$(head -n 1 "${PHASE2_MARKER}")"
+    printf 'Auto-resuming Phase 2 from failed step marker: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/cn.tif" ]]; then
+    START_AT="zonal_cn.py"
+    printf 'Auto-resuming Phase 2 after existing CN raster: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/landcover_aligned.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_aligned.tif" ]]; then
+    START_AT="buildcnraster.py"
+    printf 'Auto-resuming Phase 2 after existing aligned CN grids: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/nlcd_${NLCD_YEAR}_${SITE}_wsclip.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_wsclip.tif" ]]; then
+    START_AT="prepcngrid.py"
+    printf 'Auto-resuming Phase 2 after existing clipped CN inputs: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/landcover/nlcd_${NLCD_YEAR}_${SITE}.tif" && -f "${ROOT}/${SITE}/soils/hsg.tif" ]]; then
+    START_AT="load_cn_inputs.py"
+    printf 'Auto-resuming Phase 2 from materialized CN inputs: %s\n' "${START_AT}"
+  fi
+fi
 
 DOCTOR_CMD=("${PYTHON_BIN}" -m ohqbuilder.cli doctor --strict-gis)
 DOWNLOAD_CMD=(
@@ -202,6 +223,10 @@ PREPARE_PHASE2_CMD=(
   --site "${SITE}"
   --phase phase2
 )
+if [[ -n "${START_AT}" ]]; then
+  PREPARE_PHASE1_CMD+=(--start-at "${START_AT}")
+  PREPARE_PHASE2_CMD+=(--start-at "${START_AT}")
+fi
 BUILD_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli build
   --root "${ROOT}"
@@ -243,6 +268,12 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
     printf '  %q' "${PREPARE_PHASE2_CMD[@]}"; printf '\n'
     printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
+  elif [[ "${RUN_MODE}" == "resume-phase2" ]]; then
+    printf '  %q' "${MATERIALIZE_CMD[@]}"; printf '\n'
+    printf '  %q' "${HSG_CMD[@]}"; printf '\n'
+    printf '  %q' "${TEXTURE_CMD[@]}"; printf '\n'
+    printf '  %q' "${PREPARE_PHASE2_CMD[@]}"; printf '\n'
+    printf '  %q' "${BUILD_CMD[@]}"; printf '\n'
   else
     printf 'Unknown RUN_MODE: %s\n' "${RUN_MODE}" >&2
     exit 2
@@ -278,6 +309,12 @@ PY
   "${MATERIALIZE_CMD[@]}"
   "${HYDROLOGY_CMD[@]}"
   "${PREPARE_PHASE1_CMD[@]}"
+  "${HSG_CMD[@]}"
+  "${TEXTURE_CMD[@]}"
+  "${PREPARE_PHASE2_CMD[@]}"
+  "${BUILD_CMD[@]}"
+elif [[ "${RUN_MODE}" == "resume-phase2" ]]; then
+  "${MATERIALIZE_CMD[@]}"
   "${HSG_CMD[@]}"
   "${TEXTURE_CMD[@]}"
   "${PREPARE_PHASE2_CMD[@]}"
