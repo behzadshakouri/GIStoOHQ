@@ -106,50 +106,412 @@ SIM_START_HMS = "1 January 2000, 00:00"
 SIM_START_DSS = "01Jan2000"        # DSS D-part -- must match pydsstools output exactly
 
 # ---------------------------------------------------------------------------
-# --- read Atlas 14 table ---------------------------------------------------
+# --- obtain/read Atlas 14 table --------------------------------------------
 # ---------------------------------------------------------------------------
 
-if not os.path.isfile(PF_CSV):
-    raise Exception("atlas14_pf.csv not found:\n  %s" % PF_CSV)
+def _site_coordinate():
+    """
+    Resolve the point used for the NOAA Atlas 14 query.
 
-pf = {}
-with open(PF_CSV, newline="") as fh:
-    reader = csv.DictReader(fh)
-    for row in reader:
-        dur = row["duration"].strip()
-        pf[dur] = {}
-        for k, v in row.items():
-            if k == "duration":
+    Priority:
+      1. Explicit QGIS-runner globals:
+         ATLAS14_LAT/ATLAS14_LON, WATERSHED_LAT/WATERSHED_LON,
+         SITE_LAT/SITE_LON, LAT/LON
+      2. Environment variables ATLAS14_LAT and ATLAS14_LON
+      3. Known Sligo Creek mouth coordinate
+      4. Centroid of watershed_boundary.gpkg
+      5. outputs/outlet.shp or outputs/outlet.gpkg
+    """
+    candidate_global_names = [
+        ("ATLAS14_LAT", "ATLAS14_LON"),
+        ("WATERSHED_LAT", "WATERSHED_LON"),
+        ("SITE_LAT", "SITE_LON"),
+        ("LAT", "LON"),
+    ]
+
+    namespace = globals()
+    for lat_name, lon_name in candidate_global_names:
+        if lat_name in namespace and lon_name in namespace:
+            try:
+                return (
+                    float(namespace[lat_name]),
+                    float(namespace[lon_name]),
+                    "%s/%s" % (lat_name, lon_name),
+                )
+            except (TypeError, ValueError):
+                pass
+
+    try:
+        env_lat = os.environ.get("ATLAS14_LAT")
+        env_lon = os.environ.get("ATLAS14_LON")
+        if env_lat not in (None, "") and env_lon not in (None, ""):
+            return float(env_lat), float(env_lon), "environment"
+    except (TypeError, ValueError):
+        pass
+
+    # The project runner resolves this same coordinate for Sligo Creek.
+    if BASIN_NAME.lower().replace("_", "").replace("-", "") == "sligocreek":
+        return 39.000215, -77.010810, "Sligo Creek watershed coordinate"
+
+    try:
+        from qgis.core import (
+            QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
+            QgsProject,
+            QgsVectorLayer,
+        )
+
+        vector_candidates = [
+            (
+                os.path.join(OUT_DIR, "watershed_boundary.gpkg"),
+                "watershed_boundary",
+            ),
+            (os.path.join(OUT_DIR, "outlet.shp"), None),
+            (os.path.join(OUT_DIR, "outlet.gpkg"), None),
+        ]
+
+        for vector_path, layer_name in vector_candidates:
+            if not os.path.isfile(vector_path):
+                continue
+
+            uri = vector_path
+            if layer_name:
+                uri += "|layername=" + layer_name
+
+            layer = QgsVectorLayer(uri, "atlas14_location", "ogr")
+            if not layer.isValid():
+                continue
+
+            feature = next(layer.getFeatures(), None)
+            if feature is None or feature.geometry().isEmpty():
+                continue
+
+            point = feature.geometry().centroid().asPoint()
+            source_crs = layer.crs()
+            target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+
+            if source_crs.isValid() and source_crs != target_crs:
+                transform = QgsCoordinateTransform(
+                    source_crs,
+                    target_crs,
+                    QgsProject.instance(),
+                )
+                point = transform.transform(point)
+
+            latitude = float(point.y())
+            longitude = float(point.x())
+
+            if -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0:
+                return latitude, longitude, vector_path
+    except Exception as exc:
+        print("WARNING: could not derive Atlas 14 coordinate from GIS: %s" % exc)
+
+    raise Exception(
+        "Could not determine the Atlas 14 query coordinate. Set "
+        "ATLAS14_LAT and ATLAS14_LON in the runner."
+    )
+
+
+def _normalize_noaa_duration(value):
+    text = str(value).strip().lower()
+    text = text.rstrip(":").replace(" ", "")
+    text = text.replace("-", "")
+
+    aliases = {
+        "5min": "5min",
+        "10min": "10min",
+        "15min": "15min",
+        "30min": "30min",
+        "60min": "60min",
+        "2hr": "2hr",
+        "3hr": "3hr",
+        "6hr": "6hr",
+        "12hr": "12hr",
+        "24hr": "24hr",
+        "2day": "2day",
+        "3day": "3day",
+        "4day": "4day",
+        "7day": "7day",
+        "10day": "10day",
+        "20day": "20day",
+        "30day": "30day",
+        "45day": "45day",
+        "60day": "60day",
+    }
+    return aliases.get(text)
+
+
+def _download_atlas14_pf_csv(csv_path):
+    """
+    Query NOAA's machine-readable PFDS point endpoint.
+
+    This endpoint returns the point estimates, upper confidence bounds, and
+    lower confidence bounds as CSV-like text. Only the point-estimate section
+    is written to atlas14_pf.csv.
+    """
+    import json
+    import time
+    from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
+
+    latitude, longitude, coordinate_source = _site_coordinate()
+
+    query = urlencode(
+        {
+            "lat": "%.6f" % latitude,
+            "lon": "%.6f" % longitude,
+            "type": "pf",
+            "data": "depth",
+            "units": "english",
+            "series": "pds",
+        }
+    )
+
+    # Current official endpoint. The older /cgi-bin/hdsc/new path is retained
+    # as a fallback because NOAA has used both paths.
+    endpoint_urls = [
+        "https://hdsc.nws.noaa.gov/cgi-bin/new/fe_text.csv?" + query,
+        "https://hdsc.nws.noaa.gov/cgi-bin/hdsc/new/fe_text.csv?" + query,
+    ]
+
+    print("atlas14_pf.csv is missing; downloading NOAA Atlas 14 data.")
+    print(
+        "  Coordinate: %.6f, %.6f (%s)"
+        % (latitude, longitude, coordinate_source)
+    )
+
+    response_text = None
+    source_url = None
+    errors = []
+
+    for endpoint_url in endpoint_urls:
+        print("  PFDS endpoint:", endpoint_url)
+
+        for attempt in range(1, 4):
+            try:
+                request = Request(
+                    endpoint_url,
+                    headers={
+                        "User-Agent": (
+                            "GIStoOHQ/0.1 "
+                            "(NOAA Atlas 14 design-storm preparation)"
+                        ),
+                        "Accept": "text/csv,text/plain,*/*",
+                    },
+                )
+
+                with urlopen(request, timeout=90) as response:
+                    raw = response.read()
+
+                # NOAA normally returns UTF-8/ASCII, but latin-1 keeps parsing
+                # deterministic if a metadata character is present.
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+
+                if "PRECIPITATION FREQUENCY ESTIMATES" not in text.upper():
+                    raise Exception(
+                        "response does not contain a precipitation-frequency "
+                        "estimate section"
+                    )
+
+                response_text = text
+                source_url = endpoint_url
+                break
+
+            except Exception as exc:
+                errors.append("%s attempt %d: %s" %
+                              (endpoint_url, attempt, exc))
+                print("    attempt %d/3 failed: %s" % (attempt, exc))
+                if attempt < 3:
+                    time.sleep(2 * attempt)
+
+        if response_text is not None:
+            break
+
+    if response_text is None:
+        raise Exception(
+            "Could not download NOAA Atlas 14 point estimates.\n"
+            + "\n".join(errors)
+        )
+
+    debug_dir = os.path.dirname(csv_path)
+    os.makedirs(debug_dir, exist_ok=True)
+
+    raw_path = os.path.join(debug_dir, "atlas14_pfds_response.csv")
+    with open(raw_path, "w", encoding="utf-8", newline="") as raw_file:
+        raw_file.write(response_text)
+
+    return_periods = [
+        "1", "2", "5", "10", "25",
+        "50", "100", "200", "500", "1000",
+    ]
+
+    required_durations = [
+        "5min", "10min", "15min", "30min", "60min",
+        "2hr", "3hr", "6hr", "12hr", "24hr",
+    ]
+
+    estimates = {}
+    in_mean_section = False
+
+    for raw_line in response_text.splitlines():
+        line = raw_line.strip()
+        upper = line.upper()
+
+        # NOAA writes the point-estimate heading and the ARI header on
+        # separate lines. Start at the first plain estimate heading, but do
+        # not enter the upper/lower confidence-bound sections.
+        if (
+            upper.startswith("PRECIPITATION FREQUENCY ESTIMATES")
+            and "UPPER BOUND" not in upper
+            and "LOWER BOUND" not in upper
+        ):
+            in_mean_section = True
+            continue
+
+        if in_mean_section and (
+            "PRECIPITATION FREQUENCY ESTIMATES AT UPPER BOUND" in upper
+            or "PRECIPITATION FREQUENCY ESTIMATES AT LOWER BOUND" in upper
+        ):
+            break
+
+        if not in_mean_section or "," not in line:
+            continue
+
+        fields = next(csv.reader([line]))
+        if not fields:
+            continue
+
+        duration = _normalize_noaa_duration(fields[0])
+        if duration is None:
+            continue
+
+        numeric_values = []
+        for value in fields[1:]:
+            value = str(value).strip()
+            if not value:
                 continue
             try:
-                pf[dur][k.strip()] = float(v)
+                numeric_values.append(float(value))
+            except ValueError:
+                continue
+
+        if len(numeric_values) >= len(return_periods):
+            estimates[duration] = dict(
+                zip(return_periods, numeric_values[:len(return_periods)])
+            )
+
+    missing = [
+        duration
+        for duration in required_durations
+        if duration not in estimates or "100" not in estimates[duration]
+    ]
+
+    if missing:
+        raise Exception(
+            "NOAA returned data, but these required durations were not "
+            "parsed: %s\nRaw response saved at:\n  %s"
+            % (", ".join(missing), raw_path)
+        )
+
+    fieldnames = ["duration"] + [
+        return_period + "yr" for return_period in return_periods
+    ]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for duration in required_durations:
+            output_row = {"duration": duration}
+            for return_period in return_periods:
+                value = estimates[duration].get(return_period)
+                if value is not None:
+                    output_row[return_period + "yr"] = value
+            writer.writerow(output_row)
+
+    metadata = {
+        "source": "NOAA Atlas 14 Precipitation Frequency Data Server",
+        "endpoint": source_url,
+        "latitude": latitude,
+        "longitude": longitude,
+        "coordinate_source": coordinate_source,
+        "data": "precipitation depth",
+        "series": "partial duration series",
+        "units": "inches",
+        "downloaded": datetime.now().isoformat(timespec="seconds"),
+        "raw_response": raw_path,
+    }
+
+    metadata_path = os.path.join(
+        os.path.dirname(csv_path),
+        "atlas14_metadata.json",
+    )
+    with open(metadata_path, "w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
+
+    print("  Wrote Atlas 14 table:", csv_path)
+    print("  Wrote raw response  :", raw_path)
+    print("  Wrote metadata      :", metadata_path)
+
+
+if not os.path.isfile(PF_CSV) or os.path.getsize(PF_CSV) == 0:
+    _download_atlas14_pf_csv(PF_CSV)
+else:
+    print("Reusing Atlas 14 table:", PF_CSV)
+
+pf = {}
+with open(PF_CSV, newline="", encoding="utf-8-sig") as fh:
+    reader = csv.DictReader(fh)
+
+    if not reader.fieldnames or "duration" not in reader.fieldnames:
+        raise Exception(
+            "Invalid atlas14_pf.csv; expected a 'duration' column:\n  %s"
+            % PF_CSV
+        )
+
+    for row in reader:
+        dur = str(row.get("duration", "")).strip()
+        if not dur:
+            continue
+
+        pf[dur] = {}
+        for key, value in row.items():
+            if key is None or key == "duration":
+                continue
+
+            try:
+                pf[dur][str(key).strip()] = float(value)
             except (ValueError, TypeError):
                 pass
 
+if not pf:
+    raise Exception("No precipitation-frequency rows found in:\n  %s" % PF_CSV)
+
 rp_key = "%dyr" % RETURN_PERIOD
 
-# Auto-detect the actual return period key format in the CSV.
-# atlas14_pf.csv written by Atlas14Client uses "2yr","5yr",...,"100yr".
-# Verify the key exists; if not, try without "yr" suffix.
-sample_dur = list(pf.keys())[0] if pf else None
-if sample_dur:
-    available_rp_keys = list(pf[sample_dur].keys())
-    print("  CSV return period keys: %s" % available_rp_keys)
-    if rp_key not in available_rp_keys:
-        # Try bare number
-        alt_key = str(RETURN_PERIOD)
-        if alt_key in available_rp_keys:
-            rp_key = alt_key
-            print("  Using return period key: '%s'" % rp_key)
-        else:
-            raise Exception(
-                "Return period key '%s' not found in atlas14_pf.csv.\n"
-                "Available keys: %s" % (rp_key, available_rp_keys))
+sample_dur = next(iter(pf))
+available_rp_keys = list(pf[sample_dur].keys())
+print("  CSV return period keys: %s" % available_rp_keys)
+
+if rp_key not in available_rp_keys:
+    alternate_key = str(RETURN_PERIOD)
+    if alternate_key in available_rp_keys:
+        rp_key = alternate_key
     else:
-        print("  Using return period key: '%s'" % rp_key)
+        raise Exception(
+            "Return period key '%s' not found in atlas14_pf.csv.\n"
+            "Available keys: %s"
+            % (rp_key, available_rp_keys)
+        )
+
+print("  Using return period key: '%s'" % rp_key)
+
 
 def get_depth(dur, rp=rp_key):
-    return pf.get(dur, {}).get(rp, None)
+    return pf.get(dur, {}).get(rp)
 
 # ---------------------------------------------------------------------------
 # --- read subbasin names ---------------------------------------------------
