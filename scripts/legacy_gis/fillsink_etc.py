@@ -31,10 +31,17 @@ import importlib.util
 import os
 import sys
 
-import processing
-import numpy as np
-from osgeo import gdal, ogr, osr
-from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer
+for plugin_path in (
+    "/usr/share/qgis/python/plugins",
+    os.path.join(sys.prefix, "share", "qgis", "python", "plugins"),
+):
+    if os.path.isdir(plugin_path) and plugin_path not in sys.path:
+        sys.path.insert(0, plugin_path)
+
+import processing  # noqa: E402
+import numpy as np  # noqa: E402
+from osgeo import gdal, ogr, osr  # noqa: E402
+from qgis.core import QgsApplication, QgsProject, QgsRasterLayer, QgsVectorLayer  # noqa: E402
 
 
 

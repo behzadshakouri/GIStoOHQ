@@ -42,15 +42,15 @@ def qgis_plugin_paths() -> list[Path]:
     return paths
 
 
-def ensure_processing_available() -> bool:
-    if module_available("processing"):
-        return True
-    for path in qgis_plugin_paths():
+def add_qgis_plugin_paths() -> None:
+    for path in reversed(qgis_plugin_paths()):
         if path.is_dir() and str(path) not in sys.path:
-            sys.path.append(str(path))
-        if module_available("processing"):
-            return True
-    return False
+            sys.path.insert(0, str(path))
+
+
+def ensure_processing_available() -> bool:
+    add_qgis_plugin_paths()
+    return module_available("processing")
 
 
 GRASS_PROVIDER_CLASSES = (
@@ -136,9 +136,7 @@ def register_grass_provider() -> bool:
     registry = QgsApplication.processingRegistry()
     if _has_grass_watershed_algorithm():
         return True
-    for path in qgis_plugin_paths():
-        if path.is_dir() and str(path) not in sys.path:
-            sys.path.insert(0, str(path))
+    add_qgis_plugin_paths()
     for module_name, class_name in GRASS_PROVIDER_CLASSES:
         if not _module_spec_available(module_name):
             continue
