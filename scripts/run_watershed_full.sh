@@ -120,6 +120,26 @@ fi
 
 cd "${REPO_ROOT}"
 
+if [[ "${RUN_MODE}" == "resume-phase2" && -z "${START_AT}" ]]; then
+  PHASE2_MARKER="${ROOT}/${SITE}/outputs/.phase2_failed_step"
+  if [[ -s "${PHASE2_MARKER}" ]]; then
+    START_AT="$(head -n 1 "${PHASE2_MARKER}")"
+    printf 'Auto-resuming Phase 2 from failed step marker: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/cn.tif" ]]; then
+    START_AT="zonal_cn.py"
+    printf 'Auto-resuming Phase 2 after existing CN raster: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/landcover_aligned.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_aligned.tif" ]]; then
+    START_AT="buildcnraster.py"
+    printf 'Auto-resuming Phase 2 after existing aligned CN grids: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/outputs/clipped/nlcd_${NLCD_YEAR}_${SITE}_wsclip.tif" && -f "${ROOT}/${SITE}/outputs/clipped/hsg_wsclip.tif" ]]; then
+    START_AT="prepcngrid.py"
+    printf 'Auto-resuming Phase 2 after existing clipped CN inputs: %s\n' "${START_AT}"
+  elif [[ -f "${ROOT}/${SITE}/landcover/nlcd_${NLCD_YEAR}_${SITE}.tif" && -f "${ROOT}/${SITE}/soils/hsg.tif" ]]; then
+    START_AT="load_cn_inputs.py"
+    printf 'Auto-resuming Phase 2 from materialized CN inputs: %s\n' "${START_AT}"
+  fi
+fi
+
 DOCTOR_CMD=("${PYTHON_BIN}" -m ohqbuilder.cli doctor --strict-gis)
 DOWNLOAD_CMD=(
   "${PYTHON_BIN}" -m ohqbuilder.cli download-data
