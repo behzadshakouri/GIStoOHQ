@@ -116,6 +116,16 @@ def _module_spec_available(name: str) -> bool:
         return False
 
 
+def _registered_algorithm_ids() -> set[str]:
+    from qgis.core import QgsApplication
+
+    return {algorithm.id() for algorithm in QgsApplication.processingRegistry().algorithms()}
+
+
+def _has_grass_watershed_algorithm() -> bool:
+    return bool({"grass:r.watershed", "grass7:r.watershed"} & _registered_algorithm_ids())
+
+
 def register_grass_provider() -> bool:
     """Explicitly register the QGIS GRASS provider in standalone Python runs."""
 
@@ -124,7 +134,7 @@ def register_grass_provider() -> bool:
     from qgis.core import QgsApplication
 
     registry = QgsApplication.processingRegistry()
-    if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+    if _has_grass_watershed_algorithm():
         return True
     for path in qgis_plugin_paths():
         if path.is_dir() and str(path) not in sys.path:
@@ -139,7 +149,7 @@ def register_grass_provider() -> bool:
         if load is not None:
             load()
         registry.addProvider(provider)
-        if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
+        if _has_grass_watershed_algorithm():
             return True
     return False
 
@@ -149,8 +159,6 @@ def processing_algorithm_available(*algorithm_ids: str) -> bool:
 
     if not ensure_qgis_application() or not initialize_processing():
         return False
-    from qgis.core import QgsApplication
-
     register_grass_provider()
-    registry = QgsApplication.processingRegistry()
-    return any(registry.algorithmById(algorithm_id) for algorithm_id in algorithm_ids)
+    registered = _registered_algorithm_ids()
+    return any(algorithm_id in registered for algorithm_id in algorithm_ids)
