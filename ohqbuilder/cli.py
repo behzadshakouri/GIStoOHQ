@@ -197,7 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--clip-center-lat", type=float, default=None, help="Latitude for auto materialization bounds.")
     materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
     materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
-    materialize.add_argument("--clip-buffer-scale", type=float, default=1.1, help="Safety scale applied to --clip-buffer; default 1.1.")
+    materialize.add_argument("--clip-buffer-scale", type=float, default=1.2, help="Safety scale applied to --clip-buffer; default 1.2.")
 
     bounds = sub.add_parser(
         "watershed-bounds",
@@ -206,7 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     bounds.add_argument("--lat", type=float, required=True)
     bounds.add_argument("--lon", type=float, required=True)
     bounds.add_argument("--buffer", type=float, default=20000.0)
-    bounds.add_argument("--safety-scale", type=float, default=1.1)
+    bounds.add_argument("--safety-scale", type=float, default=1.2)
     bounds.add_argument("--timeout", type=float, default=20.0)
     bounds.add_argument("--no-web", action="store_true", help="Skip NLDI and use coordinate-buffer bounds.")
     bounds.add_argument("--json", action="store_true")

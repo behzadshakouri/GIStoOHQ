@@ -63,7 +63,7 @@ def materialize_source_inputs(
     clip_center_lon: float | None = None,
     clip_center_lat: float | None = None,
     clip_buffer_m: float | None = None,
-    clip_buffer_scale: float = 1.1,
+    clip_buffer_scale: float = 1.2,
 ) -> SourceMaterializeResult:
     """Merge/project the DEM and extract/clip hydrography in one stage."""
 
