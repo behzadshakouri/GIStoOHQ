@@ -14,58 +14,109 @@ def _number(value: Any, default: float) -> float:
     return parsed if math.isfinite(parsed) else default
 
 
-def routing_lines(reach: Reach) -> list[str]:
-    """Return legacy routing-node properties for compatibility.
+def trapezoidal_channel_properties(reach: Reach) -> list[tuple[str, str]]:
+    """Return OpenHydroQual properties for one trapezoidal stream reach.
 
-    The current OHQ writer represents GIS reaches as ``Sewer_pipe`` links, not
-    as ``Catch basin`` blocks.  This function is retained because other code may
-    still import it.
+    GIS reaches are represented as ``Trapezoidal Channel Segment`` blocks from
+    ``open_channel.json``.  Attribute names are intentionally permissive so the
+    writer can use values produced by different GIS extraction workflows.
+
+    Recognized reach attributes
+    ---------------------------
+    length_m
+        Channel-segment length.
+    base_width_m or width_m
+        Bottom width of the trapezoidal section.
+    side_slope or side_slope_hv
+        Horizontal-to-vertical bank slope, e.g. 2 for 2H:1V.
+    manning_n
+        Manning roughness coefficient.
+    z_up_m, z_dn_m, elevation_m, or z_m
+        Channel-bottom elevations.
+    initial_depth_m or depth_m
+        Initial water depth.
     """
 
-    z_up = _number(getattr(reach, "z_up_m", None), 0.0)
-    z_dn = _number(getattr(reach, "z_dn_m", None), z_up)
-    bottom = min(z_up, z_dn)
-
-    return [
-        "type=Catch basin",
-        "area=1[m~^2]",
-        f"bottom_elevation={bottom:.12g}[m]",
-        "inflow=",
-    ]
-
-
-def sewer_pipe_properties(reach: Reach) -> list[tuple[str, str]]:
-    """Return ``Sewer_pipe`` properties derived from one GIS reach."""
-
     length = max(_number(getattr(reach, "length_m", None), 1.0), 0.01)
-    z_up = _number(getattr(reach, "z_up_m", None), 0.0)
-    z_dn = _number(getattr(reach, "z_dn_m", None), z_up - 0.001)
-    manning = max(_number(getattr(reach, "manning_n", None), 0.035), 1.0e-6)
 
-    width = _number(getattr(reach, "base_width_m", None), 1.0)
-    diameter = min(max(width, 0.1), 10.0)
+    base_width = _number(
+        getattr(reach, "base_width_m", None),
+        _number(getattr(reach, "width_m", None), 1.0),
+    )
+    base_width = max(base_width, 0.05)
 
-    # OpenHydroQual requires a downhill pipe. Preserve GIS values when they are
-    # valid; otherwise impose only a very small fall.
-    if z_dn >= z_up:
-        z_dn = z_up - max(0.001, 0.0001 * length)
+    side_slope = _number(
+        getattr(reach, "side_slope", None),
+        _number(getattr(reach, "side_slope_hv", None), 2.0),
+    )
+    side_slope = max(side_slope, 0.01)
+
+    manning = max(
+        _number(getattr(reach, "manning_n", None), 0.035),
+        1.0e-6,
+    )
+
+    z_up = _number(
+        getattr(reach, "z_up_m", None),
+        _number(
+            getattr(reach, "elevation_m", None),
+            _number(getattr(reach, "z_m", None), 0.0),
+        ),
+    )
+    z_dn = _number(getattr(reach, "z_dn_m", None), z_up)
+
+    # The block represents the reach as a storage segment.  Use the lower end
+    # as its bottom elevation so the downstream hydraulic gradient is not
+    # artificially reversed.
+    bottom_elevation = min(z_up, z_dn)
+
+    initial_depth = _number(
+        getattr(reach, "initial_depth_m", None),
+        _number(getattr(reach, "depth_m", None), 0.01),
+    )
+    initial_depth = max(initial_depth, 0.0)
 
     return [
+        ("base_width", f"{base_width:.12g}[m]"),
+        ("side_slope", f"{side_slope:.12g}"),
         ("ManningCoeff", f"{manning:.12g}"),
-        ("diameter", f"{diameter:.12g}[m]"),
+        ("bottom_elevation", f"{bottom_elevation:.12g}[m]"),
+        ("depth", f"{initial_depth:.12g}[m]"),
         ("length", f"{length:.12g}[m]"),
-        ("start_elevation", f"{z_up:.12g}[m]"),
-        ("end_elevation", f"{z_dn:.12g}[m]"),
+        ("inflow", ""),
+        ("ag_area", "0[m~^2]"),
+        ("non_ag_area", "0[m~^2]"),
+        ("ag_withdrawal_per_unit_area", ""),
+        ("non_ag_withdrawal_per_unit_area", ""),
+        ("dam_height", "0[m]"),
     ]
 
 
-def default_pipe_properties() -> list[tuple[str, str]]:
-    """Return conservative properties for a routing connection without a reach."""
+# Backward-compatible alias for code that imported the old helper name.
+def sewer_pipe_properties(reach: Reach) -> list[tuple[str, str]]:
+    return trapezoidal_channel_properties(reach)
+
+
+def default_channel_properties() -> list[tuple[str, str]]:
+    """Return conservative defaults for a synthetic channel segment."""
 
     return [
+        ("base_width", "1[m]"),
+        ("side_slope", "2"),
         ("ManningCoeff", "0.035"),
-        ("diameter", "1[m]"),
+        ("bottom_elevation", "0[m]"),
+        ("depth", "0.01[m]"),
         ("length", "1[m]"),
-        ("start_elevation", "0.001[m]"),
-        ("end_elevation", "0[m]"),
+        ("inflow", ""),
+        ("ag_area", "0[m~^2]"),
+        ("non_ag_area", "0[m~^2]"),
+        ("ag_withdrawal_per_unit_area", ""),
+        ("non_ag_withdrawal_per_unit_area", ""),
+        ("dam_height", "0[m]"),
     ]
+
+
+# Retained only so older imports do not fail. Open-channel connectors obtain
+# their hydraulic properties from the connected channel blocks.
+def default_pipe_properties() -> list[tuple[str, str]]:
+    return []
