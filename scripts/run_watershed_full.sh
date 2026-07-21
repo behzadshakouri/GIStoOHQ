@@ -174,8 +174,8 @@ MATERIALIZE_CMD=(
 )
 if [[ -n "${MATERIALIZE_CLIP_BOUNDS}" ]]; then
   MATERIALIZE_CMD+=(
-    --clip-bounds "${MATERIALIZE_CLIP_BOUNDS}"
-    --clip-bounds-crs "${MATERIALIZE_CLIP_BOUNDS_CRS}"
+    "--clip-bounds=${MATERIALIZE_CLIP_BOUNDS}"
+    "--clip-bounds-crs=${MATERIALIZE_CLIP_BOUNDS_CRS}"
   )
 elif [[ -n "${LAT}" && -n "${LON}" ]]; then
   MATERIALIZE_CMD+=(
