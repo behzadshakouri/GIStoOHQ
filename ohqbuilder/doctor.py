@@ -99,6 +99,14 @@ def run_doctor(script_dir: str | Path | None = None, strict_gis: bool = False) -
     resolved_script_dir = Path(script_dir).expanduser().resolve() if script_dir else default_script_dir()
     report.checks.append(
         DoctorCheck(
+            name="qgis native provider",
+            ok=processing_algorithm_available("native:extractbyexpression"),
+            detail="needed by retained QGIS scripts for native algorithms such as extractbyexpression",
+            required=strict_gis,
+        )
+    )
+    report.checks.append(
+        DoctorCheck(
             name="qgis grass provider",
             ok=processing_algorithm_available("grass:r.watershed", "grass7:r.watershed"),
             detail="needed by prepare-hydrology for r.watershed; install/enable QGIS GRASS provider",

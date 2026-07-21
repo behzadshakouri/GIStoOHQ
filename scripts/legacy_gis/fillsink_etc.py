@@ -53,6 +53,18 @@ def _module_spec_available(name):
         return False
 
 
+
+def _register_native_provider():
+    registry = QgsApplication.processingRegistry()
+    if registry.providerById("native") is not None:
+        return
+    if not _module_spec_available("qgis.analysis"):
+        return
+    module = importlib.import_module("qgis.analysis")
+    provider_class = getattr(module, "QgsNativeAlgorithms")
+    registry.addProvider(provider_class())
+
+
 def _register_grass_provider():
     registry = QgsApplication.processingRegistry()
     if registry.algorithmById("grass:r.watershed") or registry.algorithmById("grass7:r.watershed"):
@@ -101,6 +113,7 @@ def initialize_processing():
             initialize()
         except Exception:
             pass
+    _register_native_provider()
     _register_grass_provider()
 
 ROOT = globals().get(

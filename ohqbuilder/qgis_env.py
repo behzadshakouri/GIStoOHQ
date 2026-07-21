@@ -81,6 +81,25 @@ def ensure_qgis_application() -> bool:
     return True
 
 
+
+
+def register_native_provider() -> bool:
+    """Explicitly register QGIS Native algorithms in standalone Python runs."""
+
+    if not ensure_qgis_application():
+        return False
+    if not _module_spec_available("qgis.analysis"):
+        return False
+    from qgis.analysis import QgsNativeAlgorithms
+    from qgis.core import QgsApplication
+
+    registry = QgsApplication.processingRegistry()
+    if registry.providerById("native") is not None:
+        return True
+    registry.addProvider(QgsNativeAlgorithms())
+    return registry.providerById("native") is not None
+
+
 def _processing_class():
     import processing
 
@@ -106,6 +125,7 @@ def initialize_processing() -> bool:
             initialize()
         except Exception:
             pass
+    register_native_provider()
     return True
 
 
@@ -157,6 +177,7 @@ def processing_algorithm_available(*algorithm_ids: str) -> bool:
 
     if not ensure_qgis_application() or not initialize_processing():
         return False
+    register_native_provider()
     register_grass_provider()
     registered = _registered_algorithm_ids()
     return any(algorithm_id in registered for algorithm_id in algorithm_ids)

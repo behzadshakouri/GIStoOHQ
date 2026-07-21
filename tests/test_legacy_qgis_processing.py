@@ -35,3 +35,15 @@ def test_whole_watershed_has_python_water_outlet_fallback():
     source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(encoding="utf-8")
     assert "def delineate_watershed_with_flowdir" in source
     assert "GRASS r.water.outlet failed; using Python D8 fallback" in source
+
+
+def test_legacy_scripts_register_native_provider():
+    for script in (
+        Path("scripts/legacy_gis/delineate_whole_watershed.py"),
+        Path("scripts/legacy_gis/delineatewatershed.py"),
+        Path("scripts/legacy_gis/extract_reaches.py"),
+        Path("scripts/legacy_gis/fillsink_etc.py"),
+    ):
+        source = script.read_text(encoding="utf-8")
+        assert "QgsNativeAlgorithms" in source
+        assert 'providerById("native")' in source
