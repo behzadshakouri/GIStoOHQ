@@ -26,6 +26,7 @@ TEXTURE_CODE = {
 }
 NODATA_PCT = -9999.0
 MUKEY_CHUNK = 500
+SDA_TILE_DEGREES = 0.15
 
 
 class SoilRetrievalError(RuntimeError):
@@ -200,6 +201,55 @@ def _usda_texture(sand: float, silt: float, clay: float) -> str:
     return ""
 
 
+
+def _iter_bbox_tiles(
+    bounds: tuple[float, float, float, float],
+    max_span: float = SDA_TILE_DEGREES,
+):
+    minx, miny, maxx, maxy = bounds
+    y = miny
+    while y < maxy:
+        next_y = min(y + max_span, maxy)
+        x = minx
+        while x < maxx:
+            next_x = min(x + max_span, maxx)
+            yield (x, y, next_x, next_y)
+            x = next_x
+        y = next_y
+
+
+def _dedupe_rows(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    seen = set()
+    unique: list[dict[str, Any]] = []
+    for row in rows:
+        marker = tuple(row.get(key) for key in keys)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append(row)
+    return unique
+
+
+def _query_spatial_rows(
+    bounds: tuple[float, float, float, float],
+    query_func,
+    dedupe_keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    wkt = bbox_wkt(bounds)
+    try:
+        return query_func(wkt)
+    except RuntimeError as exc:
+        print(
+            "USDA SDA whole-bounds query failed; retrying with tiled queries:",
+            exc,
+        )
+
+    rows: list[dict[str, Any]] = []
+    for tile in _iter_bbox_tiles(bounds):
+        rows.extend(query_func(bbox_wkt(tile)))
+    return _dedupe_rows(rows, dedupe_keys)
+
+
 def _query_hsg_polygons(wkt: str) -> list[dict[str, Any]]:
     sql = f"""
     SELECT mu.mukey, mag.hydgrpdcd, mu.mupolygongeo.STAsText() AS geom_wkt
@@ -316,8 +366,8 @@ def retrieve_soil_groups(
     _validate_positive("pixel_size", pixel_size)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
-    wkt = bbox_wkt(_query_bounds(root_path, site, buffer, center))
-    rows = _query_hsg_polygons(wkt)
+    bounds = _query_bounds(root_path, site, buffer, center)
+    rows = _query_spatial_rows(bounds, _query_hsg_polygons, ("mukey", "geom_wkt"))
     vector = soils_dir / "hydrologic_soil_groups.gpkg"
     raster = soils_dir / "hsg.tif"
     _write_vector(vector, "hsg", rows)
@@ -352,8 +402,8 @@ def retrieve_soil_texture(
     _validate_positive("top_depth", top_depth)
     root_path = Path(root).expanduser().resolve()
     soils_dir = site_soils_dir(root_path, site)
-    wkt = bbox_wkt(_query_bounds(root_path, site, buffer, center))
-    polygon_rows = _query_soil_polygons(wkt)
+    bounds = _query_bounds(root_path, site, buffer, center)
+    polygon_rows = _query_spatial_rows(bounds, _query_soil_polygons, ("mukey", "geom_wkt"))
     mukeys = sorted({str(row["mukey"]) for row in polygon_rows if row.get("mukey") is not None})
     topsoil: dict[str, dict[str, Any]] = {}
     for index in range(0, len(mukeys), MUKEY_CHUNK):
