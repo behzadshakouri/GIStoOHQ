@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ..model.watershed import Watershed
 from .block_writer import BlockWriter
@@ -44,15 +44,6 @@ def _resource_path(filename: str) -> str:
     )
     return str(Path(root) / filename)
 
-
-def _ordered_unique(items: Iterable[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        if item and item not in seen:
-            result.append(item)
-            seen.add(item)
-    return result
 
 
 class OHQWriter:
@@ -262,8 +253,6 @@ class OHQWriter:
             writer.comment("Explicit topology links")
 
         emitted_pairs: set[tuple[str, str]] = set()
-        terminal_candidates = set(all_object_names)
-        terminal_candidates.discard(outlet_name)
 
         for index, link in enumerate(topology):
             source = _safe_name(
@@ -295,7 +284,6 @@ class OHQWriter:
                 continue
 
             emitted_pairs.add((source, target))
-            terminal_candidates.discard(source)
 
             link_name = _safe_name(
                 getattr(link, "link_name", None),
@@ -330,31 +318,22 @@ class OHQWriter:
                     properties=properties,
                 )
 
-        # Attach unresolved terminal routing nodes to the outlet so the result
-        # has a single sink.  Catchments are not force-connected here because a
-        # missing catchment downstream assignment should remain visible.
-        for source in _ordered_unique(
+        # Do not force-connect topology leaves to the outlet.  A routing object
+        # is connected to the fixed-head outlet only when that connection is
+        # explicitly present in ``watershed.topology``.  This prevents the
+        # artificial fan of parallel links previously produced for every
+        # unresolved or isolated reach/junction.
+        linked_sources = {source for source, _ in emitted_pairs}
+        unresolved_routing = [
             name
-            for name in terminal_candidates
-            if name in reach_by_name or name in junction_names
-        ):
-            pair = (source, outlet_name)
-            if pair in emitted_pairs or source == outlet_name:
-                continue
-            writer.create_link(
-                "Sewer_pipe",
-                name=f"{source} to {outlet_name}",
-                source=source,
-                target=outlet_name,
-                properties=[
-                    ("ManningCoeff", "0.035"),
-                    ("diameter", "1[m]"),
-                    ("length", "1[m]"),
-                    ("start_elevation", "0.001[m]"),
-                    ("end_elevation", "0[m]"),
-                ],
-            )
-            emitted_pairs.add(pair)
+            for name in [*reach_by_name.keys(), *sorted(junction_names)]
+            if name not in linked_sources
+        ]
+        if self.include_comments:
+            for name in unresolved_routing:
+                writer.comment(
+                    f"Unconnected routing object retained without forced outlet link: {name}"
+                )
 
         writer.line()
         writer.setvalue("system", "simulation_start_time", "0")
