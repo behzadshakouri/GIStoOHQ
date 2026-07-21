@@ -14,6 +14,7 @@ class SourceMaterializeResult:
     dem: DemMaterializeResult
     hydro: HydroMaterializeResult
     landcover: Path | None = None
+    cn_lookup: Path | None = None
 
 
 def find_product_dir(source_dir: str | Path, product: str) -> Path:
@@ -28,6 +29,24 @@ def find_product_dir(source_dir: str | Path, product: str) -> Path:
         raise ValueError(f"Multiple downloaded {product} directories found: {names}")
     return matches[0]
 
+
+
+def bundled_cn_lookup_path() -> Path:
+    """Return the repository-bundled curve-number lookup table path."""
+
+    return Path(__file__).resolve().parent.parent / "cn_lookup.csv"
+
+
+def materialize_cn_lookup(root: Path, source: Path | None = None) -> Path:
+    """Copy the bundled curve-number lookup table to the legacy ROOT path."""
+
+    source_path = source or bundled_cn_lookup_path()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Bundled curve-number lookup table not found: {source_path}")
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / "cn_lookup.csv"
+    shutil.copyfile(source_path, target)
+    return target
 
 
 def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | None:
@@ -98,4 +117,5 @@ def materialize_source_inputs(
         dem_path=dem.output_path,
     )
     landcover = materialize_landcover(root_path, site, downloads)
-    return SourceMaterializeResult(dem, hydro, landcover)
+    cn_lookup = materialize_cn_lookup(root_path)
+    return SourceMaterializeResult(dem, hydro, landcover, cn_lookup)

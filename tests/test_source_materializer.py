@@ -4,7 +4,12 @@ from types import SimpleNamespace
 import pytest
 
 from ohqbuilder.cli import main
-from ohqbuilder.source_materializer import find_product_dir, materialize_landcover, materialize_source_inputs
+from ohqbuilder.source_materializer import (
+    find_product_dir,
+    materialize_cn_lookup,
+    materialize_landcover,
+    materialize_source_inputs,
+)
 
 
 def test_materialize_source_inputs_combines_dem_and_hydro(monkeypatch, tmp_path):
@@ -61,6 +66,18 @@ def test_materialize_source_inputs_copies_nlcd_to_legacy_name(monkeypatch, tmp_p
     expected = tmp_path / "SligoCreek" / "landcover" / "nlcd_2023_SligoCreek.tif"
     assert result.landcover == expected
     assert expected.read_bytes() == b"nlcd"
+    assert result.cn_lookup == tmp_path / "cn_lookup.csv"
+    assert result.cn_lookup.is_file()
+
+
+def test_materialize_cn_lookup_copies_table_to_legacy_root(tmp_path):
+    source = tmp_path / "source_cn_lookup.csv"
+    source.write_text("nlcd_class,cn_poor_A\n11,77\n", encoding="utf-8")
+
+    result = materialize_cn_lookup(tmp_path / "runs", source)
+
+    assert result == tmp_path / "runs" / "cn_lookup.csv"
+    assert result.read_text(encoding="utf-8") == "nlcd_class,cn_poor_A\n11,77\n"
 
 
 def test_materialize_landcover_is_optional(tmp_path):

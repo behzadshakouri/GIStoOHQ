@@ -506,6 +506,9 @@ def main(argv: list[str] | None = None) -> int:
         landcover = getattr(result, "landcover", None)
         if landcover is not None:
             print(f"Wrote landcover: {landcover}")
+        cn_lookup = getattr(result, "cn_lookup", None)
+        if cn_lookup is not None:
+            print(f"Wrote CN lookup: {cn_lookup}")
         return 0
     if args.command == "watershed-bounds":
         try:
