@@ -25,7 +25,12 @@
 # =============================================================================
 
 import os
+
+import fiona
 import processing
+import rasterio
+from rasterio.mask import mask as rasterio_mask
+from rasterio.warp import transform_geom
 
 from qgis.core import (
     QgsProject,
@@ -33,6 +38,64 @@ from qgis.core import (
     QgsVectorLayer,
     QgsCoordinateReferenceSystem,
 )
+
+
+
+def clip_raster_with_rasterio(input_path, mask_path, output_path, nodata, options, layer_name=None):
+    """Clip a raster by a vector mask without requiring QGIS' GDAL provider."""
+
+    creation_options = {}
+    for item in str(options or "").split("|"):
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        creation_options[key.lower()] = value
+
+    with rasterio.open(input_path) as src:
+        mask_layer = layer_name
+        if mask_layer is None:
+            try:
+                layers = fiona.listlayers(mask_path)
+            except Exception:
+                layers = []
+            if layers:
+                mask_layer = layers[0]
+
+        with fiona.open(mask_path, layer=mask_layer) as vector_src:
+            geometries = []
+            vector_crs = vector_src.crs_wkt or vector_src.crs
+            for feature in vector_src:
+                geom = feature.get("geometry")
+                if not geom:
+                    continue
+                if vector_crs and src.crs and vector_crs != src.crs:
+                    geom = transform_geom(vector_crs, src.crs, geom)
+                geometries.append(geom)
+
+        if not geometries:
+            raise Exception("Mask contains no geometries: " + mask_path)
+
+        out_image, out_transform = rasterio_mask(
+            src,
+            geometries,
+            crop=True,
+            nodata=nodata,
+            filled=True,
+        )
+        out_meta = src.meta.copy()
+        out_meta.update(
+            {
+                "driver": "GTiff",
+                "height": out_image.shape[1],
+                "width": out_image.shape[2],
+                "transform": out_transform,
+                "nodata": nodata,
+            }
+        )
+        out_meta.update(creation_options)
+
+        with rasterio.open(output_path, "w", **out_meta) as dst:
+            dst.write(out_image)
 
 
 # =============================================================================
@@ -202,28 +265,39 @@ if os.path.exists(OUT_PATH):
 if FORCE or not os.path.exists(OUT_PATH):
     print("\nClipping real-elevation DEM to watershed boundary...")
 
-    processing.run(
-        "gdal:cliprasterbymasklayer",
-        {
-            "INPUT": DEM_PATH,
-            "MASK": BOUNDARY_PATH,
-            "SOURCE_CRS": dem_crs,
-            "TARGET_CRS": dem_crs,
-            "TARGET_EXTENT": None,
-            "NODATA": NODATA,
-            "ALPHA_BAND": False,
-            "CROP_TO_CUTLINE": True,
-            "KEEP_RESOLUTION": True,
-            "SET_RESOLUTION": False,
-            "X_RESOLUTION": None,
-            "Y_RESOLUTION": None,
-            "MULTITHREADING": True,
-            "OPTIONS": GTIFF_OPTIONS,
-            "DATA_TYPE": 0,
-            "EXTRA": "",
-            "OUTPUT": OUT_PATH,
-        },
-    )
+    try:
+        processing.run(
+            "gdal:cliprasterbymasklayer",
+            {
+                "INPUT": DEM_PATH,
+                "MASK": BOUNDARY_PATH,
+                "SOURCE_CRS": dem_crs,
+                "TARGET_CRS": dem_crs,
+                "TARGET_EXTENT": None,
+                "NODATA": NODATA,
+                "ALPHA_BAND": False,
+                "CROP_TO_CUTLINE": True,
+                "KEEP_RESOLUTION": True,
+                "SET_RESOLUTION": False,
+                "X_RESOLUTION": None,
+                "Y_RESOLUTION": None,
+                "MULTITHREADING": True,
+                "OPTIONS": GTIFF_OPTIONS,
+                "DATA_TYPE": 0,
+                "EXTRA": "",
+                "OUTPUT": OUT_PATH,
+            },
+        )
+    except Exception as exc:
+        print("QGIS GDAL clip failed; using rasterio fallback:", exc)
+        clip_raster_with_rasterio(
+            DEM_PATH,
+            BOUNDARY_PATH,
+            OUT_PATH,
+            NODATA,
+            GTIFF_OPTIONS,
+            layer_name="watershed_boundary",
+        )
 
 
 # =============================================================================

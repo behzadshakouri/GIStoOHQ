@@ -101,6 +101,12 @@ PHASE2_STEPS = list(globals().get("PHASE2_STEPS", [
     "write_hms_project.py",
 ]))
 
+START_AT = globals().get("START_AT", None)
+if START_AT:
+    if START_AT not in PHASE2_STEPS:
+        raise Exception("START_AT step not found: %s" % START_AT)
+    PHASE2_STEPS = PHASE2_STEPS[PHASE2_STEPS.index(START_AT):]
+
 
 # =============================================================================
 # PATH RESOLUTION

@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
     prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
     prep.add_argument("--dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
+    prep.add_argument("--start-at", default=None, help="Resume a phase at the named legacy step script, e.g. load_cn_inputs.py.")
     prep.add_argument("--no-auto-pour-points", action="store_true", help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.")
     prep.add_argument("--no-auto-outlet", action="store_true", help="Require an existing outlet.shp instead of deriving it from flow_acc.tif.")
 
@@ -241,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
     run.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
     run.add_argument("--prepare-dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
+    run.add_argument("--start-at", default=None, help="Resume prepare phase at the named legacy step script.")
     run.add_argument("--skip-prepare", action="store_true")
     run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
     run.add_argument("--no-auto-pour-points", action="store_true", help="Require manually supplied pour points.")
@@ -310,6 +312,7 @@ def _legacy_options_from_args(args) -> LegacyWorkflowOptions:
         dry_run=getattr(args, "dry_run", False),
         auto_pour_points=not getattr(args, "no_auto_pour_points", False),
         auto_outlet=not getattr(args, "no_auto_outlet", False),
+        start_at=getattr(args, "start_at", None),
     )
 
 
@@ -500,6 +503,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM: {result.dem.output_path}")
         print(f"Wrote flowlines: {result.hydro.output_path}")
+        landcover = getattr(result, "landcover", None)
+        if landcover is not None:
+            print(f"Wrote landcover: {landcover}")
         return 0
     if args.command == "watershed-bounds":
         try:
