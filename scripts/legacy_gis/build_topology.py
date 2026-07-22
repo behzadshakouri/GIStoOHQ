@@ -182,6 +182,53 @@ def sub_name(i):  return "Subbasin_%s" % i
 def rch_name(i):  return "Reach_%s" % i
 def jct_name(i):  return "Junction_%s" % i
 
+
+def finite_number(value):
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result == result and abs(result) != float("inf") else None
+
+
+def geometry_midpoint(geometry):
+    """Return a length-weighted line midpoint for the longest valid part."""
+    if geometry is None or geometry.isEmpty():
+        return None
+    try:
+        length = float(geometry.length())
+        if length > 0:
+            midpoint = geometry.interpolate(length / 2.0)
+            if midpoint is not None and not midpoint.isEmpty():
+                return QgsPointXY(midpoint.asPoint())
+    except Exception:
+        pass
+    first_point, last_point = line_endpoints(geometry)
+    if first_point is None or last_point is None:
+        return None
+    return QgsPointXY(
+        0.5 * (first_point.x() + last_point.x()),
+        0.5 * (first_point.y() + last_point.y()),
+    )
+
+
+def point_on_surface(geometry):
+    if geometry is None or geometry.isEmpty():
+        return None
+    try:
+        point_geometry = geometry.pointOnSurface()
+        if point_geometry is not None and not point_geometry.isEmpty():
+            return QgsPointXY(point_geometry.asPoint())
+    except Exception:
+        pass
+    try:
+        centroid = geometry.centroid()
+        if centroid is not None and not centroid.isEmpty():
+            return QgsPointXY(centroid.asPoint())
+    except Exception:
+        pass
+    return None
+
 # ---------------------------------------------------------------------------
 # load reaches (oriented up/dn), junctions, pour points, subbasins
 # ---------------------------------------------------------------------------
@@ -229,8 +276,12 @@ for f in reaches.getFeatures():
             swap = False
 
     up_pt, dn_pt = (lp, fp) if swap else (fp, lp)
+    reach_geometry = QgsGeometry(f.geometry())
     R[rid] = {
-        "up": up_pt, "dn": dn_pt, "geom": f.geometry(),
+        "up": up_pt,
+        "dn": dn_pt,
+        "mid": geometry_midpoint(reach_geometry),
+        "geom": reach_geometry,
         "ds_type": f["ds_type"],
         "ds_reach_id": iid(f["ds_reach_id"]),
         "ds_junction_id": iid(f["ds_junction_id"]) if has_dsj else None,
@@ -274,11 +325,14 @@ for f in subs.getFeatures():
     sid = iid(f["id"])
     if sid is not None:
         SUB.add(sid)
-        try:
-            cx = float(f["centroid_x"]); cy = float(f["centroid_y"])
+        cx = finite_number(f["centroid_x"]) if "centroid_x" in [fld.name() for fld in subs.fields()] else None
+        cy = finite_number(f["centroid_y"]) if "centroid_y" in [fld.name() for fld in subs.fields()] else None
+        if cx is not None and cy is not None:
             sub_cent[sid] = QgsPointXY(cx, cy)
-        except (TypeError, ValueError):
-            pass
+        else:
+            representative = point_on_surface(f.geometry())
+            if representative is not None:
+                sub_cent[sid] = representative
 print("Subbasins loaded:", len(SUB))
 
 outlet_reaches = [rid for rid, r in R.items() if r["ds_type"] == "outlet"]
@@ -680,6 +734,14 @@ flds.append(QgsField("ds_id",        QVariant.Int))
 flds.append(QgsField("ds_name",      QVariant.String))
 flds.append(QgsField("match_dist_m", QVariant.Double))
 flds.append(QgsField("note",         QVariant.String))
+flds.append(QgsField("x_act",        QVariant.Double))
+flds.append(QgsField("y_act",        QVariant.Double))
+flds.append(QgsField("x_up_act",     QVariant.Double))
+flds.append(QgsField("y_up_act",     QVariant.Double))
+flds.append(QgsField("x_dn_act",     QVariant.Double))
+flds.append(QgsField("y_dn_act",     QVariant.Double))
+flds.append(QgsField("crs_authid",   QVariant.String))
+flds.append(QgsField("layout_source", QVariant.String))
 
 # release lock if loaded
 _proj = QgsProject.instance()
@@ -698,7 +760,22 @@ opts.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteFile
 w = QgsVectorFileWriter.create(topo_p, flds, QgsWkbTypes.NoGeometry,
                                reaches.crs(), QgsCoordinateTransformContext(), opts)
 
-def emit(eid, etype, name, k, t, dist, note):
+crs_authid = reaches.crs().authid() or reaches.crs().description()
+
+
+def emit(
+    eid,
+    etype,
+    name,
+    k,
+    t,
+    dist,
+    note,
+    representative=None,
+    upstream=None,
+    downstream_point=None,
+    layout_source="",
+):
     ft = QgsFeature(flds)
     ft["element_id"]   = int(eid)
     ft["element_type"] = etype
@@ -708,18 +785,77 @@ def emit(eid, etype, name, k, t, dist, note):
     ft["ds_name"]      = ds_name_of(k, t)
     ft["match_dist_m"] = None if dist is None else float(dist)
     ft["note"]         = note or ""
+    ft["x_act"] = None if representative is None else float(representative.x())
+    ft["y_act"] = None if representative is None else float(representative.y())
+    ft["x_up_act"] = None if upstream is None else float(upstream.x())
+    ft["y_up_act"] = None if upstream is None else float(upstream.y())
+    ft["x_dn_act"] = (
+        None if downstream_point is None else float(downstream_point.x())
+    )
+    ft["y_dn_act"] = (
+        None if downstream_point is None else float(downstream_point.y())
+    )
+    ft["crs_authid"] = crs_authid
+    ft["layout_source"] = layout_source
     w.addFeature(ft)
+
 
 for sid in sorted(SUB):
     k, t, note = sub_ds[sid]
-    emit(sid, "subbasin", sub_name(sid), k, t, sub_ds_dist.get(sid), note)
+    emit(
+        sid,
+        "subbasin",
+        sub_name(sid),
+        k,
+        t,
+        sub_ds_dist.get(sid),
+        note,
+        representative=sub_cent.get(sid),
+        layout_source="polygon_point_on_surface",
+    )
+
 for rid in sorted(alive):
     k, t, note = reach_ds[rid]
-    emit(rid, "reach", rch_name(rid), k, t, None, note)
+    emit(
+        rid,
+        "reach",
+        rch_name(rid),
+        k,
+        t,
+        None,
+        note,
+        representative=R[rid].get("mid"),
+        upstream=R[rid].get("up"),
+        downstream_point=R[rid].get("dn"),
+        layout_source="reach_length_midpoint",
+    )
+
 for jid in sorted(keep_junc):
     k, t, note = junc_ds[jid]
-    emit(jid, "junction", jct_name(jid), k, t, None, note)
-emit(0, "sink", SINK_NAME, "sink", None, None, "")
+    emit(
+        jid,
+        "junction",
+        jct_name(jid),
+        k,
+        t,
+        None,
+        note,
+        representative=J[jid]["pt"],
+        layout_source="junction_geometry",
+    )
+
+sink_point = R[outlet_reaches[0]]["dn"] if outlet_reaches else None
+emit(
+    0,
+    "sink",
+    SINK_NAME,
+    "sink",
+    None,
+    None,
+    "",
+    representative=sink_point,
+    layout_source="outlet_reach_downstream_endpoint",
+)
 del w
 print("\nWrote topology ->", topo_p)
 

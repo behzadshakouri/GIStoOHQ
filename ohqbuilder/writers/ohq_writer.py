@@ -32,6 +32,71 @@ def _positive(value: Any, default: float) -> float:
     return number if number > 0.0 else default
 
 
+def _optional_finite(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _first_coordinate(obj: Any, names: Iterable[str]) -> float | None:
+    for name in names:
+        value = _optional_finite(getattr(obj, name, None))
+        if value is not None:
+            return value
+    return None
+
+
+def _actual_xy(obj: Any) -> tuple[float | None, float | None]:
+    """Read a real projected coordinate pair from a watershed model object."""
+    x = _first_coordinate(
+        obj,
+        (
+            "x_act",
+            "centroid_x",
+            "midpoint_x",
+            "mid_x",
+            "x_mid",
+            "x",
+        ),
+    )
+    y = _first_coordinate(
+        obj,
+        (
+            "y_act",
+            "centroid_y",
+            "midpoint_y",
+            "mid_y",
+            "y_mid",
+            "y",
+        ),
+    )
+    return x, y
+
+
+def _reach_actual_xy(reach: Any) -> tuple[float | None, float | None]:
+    x, y = _actual_xy(reach)
+    if x is not None and y is not None:
+        return x, y
+
+    x_up = _first_coordinate(reach, ("x_up_act", "x_up", "up_x"))
+    y_up = _first_coordinate(reach, ("y_up_act", "y_up", "up_y"))
+    x_dn = _first_coordinate(reach, ("x_dn_act", "x_dn", "down_x"))
+    y_dn = _first_coordinate(reach, ("y_dn_act", "y_dn", "down_y"))
+    if None not in (x_up, y_up, x_dn, y_dn):
+        return 0.5 * (x_up + x_dn), 0.5 * (y_up + y_dn)
+    return None, None
+
+
+def _reach_downstream_xy(reach: Any) -> tuple[float | None, float | None]:
+    x = _first_coordinate(reach, ("x_dn_act", "x_dn", "down_x"))
+    y = _first_coordinate(reach, ("y_dn_act", "y_dn", "down_y"))
+    if x is not None and y is not None:
+        return x, y
+    return _reach_actual_xy(reach)
+
+
 def _resource_path(filename: str) -> str:
     root = os.environ.get(
         "OPENHYDROQUAL_RESOURCES",
@@ -300,120 +365,69 @@ class OHQWriter:
         active_reaches = [
             name for name in reach_by_name if name in active_reach_names
         ]
-        levels = _layout_levels(active_reaches, channel_edges)
 
-        # Order stream segments within each topological level by the average
-        # order of catchments draining to them.
-        catchment_order = {
-            name: index for index, name in enumerate(subbasin_by_name)
-        }
-        reach_catchment_ranks: dict[str, list[int]] = defaultdict(list)
-        for catchment, reach_name in catchment_targets.items():
-            reach_catchment_ranks[reach_name].append(catchment_order[catchment])
+        # Real projected GIS coordinates are authoritative. No synthetic
+        # topological grid is generated here.
+        catchment_positions: dict[str, tuple[float, float]] = {}
+        missing_coordinates: list[str] = []
 
-        nodes_by_level: dict[int, list[str]] = defaultdict(list)
+        for name, subbasin in subbasin_by_name.items():
+            x_act, y_act = _actual_xy(subbasin)
+            if x_act is None or y_act is None:
+                missing_coordinates.append(
+                    f"{name}: missing x_act/y_act or centroid_x/centroid_y"
+                )
+            else:
+                catchment_positions[name] = (x_act, y_act)
+
+        reach_positions: dict[str, tuple[float, float]] = {}
         for name in active_reaches:
-            nodes_by_level[levels.get(name, 0)].append(name)
-
-        reach_positions: dict[str, tuple[int, int]] = {}
-        reach_order: dict[str, float] = {}
-        predecessors: dict[str, list[str]] = defaultdict(list)
-
-        for source, target in channel_edges:
-            predecessors[target].append(source)
-
-        x_spacing = int(os.environ.get("OHQ_LAYOUT_X_SPACING", "520"))
-        y_spacing = int(os.environ.get("OHQ_LAYOUT_Y_SPACING", "280"))
-
-        for level_value in sorted(nodes_by_level):
-            names = nodes_by_level[level_value]
-
-            def ordering_key(name: str) -> tuple[float, float, str]:
-                parent_ranks = [
-                    reach_order[parent]
-                    for parent in predecessors.get(name, [])
-                    if parent in reach_order
-                ]
-                local_ranks = reach_catchment_ranks.get(name, [])
-                parent_rank = (
-                    sum(parent_ranks) / len(parent_ranks)
-                    if parent_ranks
-                    else float("inf")
+            x_act, y_act = _reach_actual_xy(reach_by_name[name])
+            if x_act is None or y_act is None:
+                missing_coordinates.append(
+                    f"{name}: missing reach midpoint x_act/y_act and endpoints"
                 )
-                local_rank = (
-                    sum(local_ranks) / len(local_ranks)
-                    if local_ranks
-                    else float("inf")
-                )
-                return parent_rank, local_rank, name
+            else:
+                reach_positions[name] = (x_act, y_act)
 
-            names.sort(key=ordering_key)
-            center_offset = (len(names) - 1) * y_spacing / 2.0
-            for index, name in enumerate(names):
-                reach_order[name] = float(index)
-                reach_positions[name] = (
-                    level_value * x_spacing,
-                    int(index * y_spacing - center_offset),
-                )
+        terminal_reaches = [
+            source
+            for source, target in reach_targets.items()
+            if target == outlet_name
+        ]
 
-        # Catchments are placed in a left-hand column and vertically ordered by
-        # the stream reach receiving their runoff.
-        catchment_x_offset = int(
-            os.environ.get("OHQ_LAYOUT_CATCHMENT_X_OFFSET", "470")
-        )
-        catchment_y_spacing = int(
-            os.environ.get("OHQ_LAYOUT_CATCHMENT_Y_SPACING", "220")
-        )
+        outlet_x, outlet_y = _actual_xy(outlet_obj)
+        if outlet_x is None or outlet_y is None:
+            terminal_points = [
+                _reach_downstream_xy(reach_by_name[name])
+                for name in terminal_reaches
+                if name in reach_by_name
+            ]
+            terminal_points = [
+                point
+                for point in terminal_points
+                if point[0] is not None and point[1] is not None
+            ]
+            if terminal_points:
+                outlet_x = sum(point[0] for point in terminal_points) / len(terminal_points)
+                outlet_y = sum(point[1] for point in terminal_points) / len(terminal_points)
 
-        leftmost_reach_x = min(
-            (x for x, _ in reach_positions.values()),
-            default=0,
-        )
-        catchment_column_x = leftmost_reach_x - catchment_x_offset
-
-        resolved_catchments = sorted(
-            catchment_targets,
-            key=lambda name: (
-                reach_positions.get(catchment_targets[name], (0, 0))[1],
-                name,
-            ),
-        )
-        center = (len(resolved_catchments) - 1) * catchment_y_spacing / 2.0
-
-        catchment_positions: dict[str, tuple[int, int]] = {}
-        for index, name in enumerate(resolved_catchments):
-            catchment_positions[name] = (
-                catchment_column_x,
-                int(index * catchment_y_spacing - center),
+        if outlet_x is None or outlet_y is None:
+            missing_coordinates.append(
+                f"{outlet_name}: missing outlet x_act/y_act and terminal reach endpoint"
             )
 
-        unresolved = sorted(
-            name for name in subbasin_by_name if name not in catchment_positions
-        )
-        unresolved_start_y = int(
-            (len(resolved_catchments) + 1) * catchment_y_spacing - center
-        )
-        for index, name in enumerate(unresolved):
-            catchment_positions[name] = (
-                catchment_column_x,
-                unresolved_start_y + index * catchment_y_spacing,
+        if missing_coordinates:
+            raise ValueError(
+                "Cannot write a spatially referenced OHQ model. "
+                "All emitted blocks require real projected coordinates:\n  "
+                + "\n  ".join(missing_coordinates)
             )
 
         block_width = int(os.environ.get("OHQ_LAYOUT_BLOCK_WIDTH", "320"))
         block_height = int(os.environ.get("OHQ_LAYOUT_BLOCK_HEIGHT", "190"))
         outlet_width = int(os.environ.get("OHQ_LAYOUT_OUTLET_WIDTH", "260"))
         outlet_height = int(os.environ.get("OHQ_LAYOUT_OUTLET_HEIGHT", "160"))
-
-        max_reach_level = max(levels.values(), default=0)
-        outlet_x = (max_reach_level + 1) * x_spacing
-        terminal_reaches = [
-            source for source, target in reach_targets.items()
-            if target == outlet_name
-        ]
-        outlet_y = int(
-            sum(reach_positions.get(name, (0, 0))[1] for name in terminal_reaches)
-            / len(terminal_reaches)
-        ) if terminal_reaches else 0
 
         if self.include_comments:
             writer.comment("Generated by GIStoOHQ using native OpenHydroQual grammar")
@@ -422,6 +436,9 @@ class OHQWriter:
             )
             writer.comment(
                 "Catchments discharge to stream reaches; GIS junctions are topology-only."
+            )
+            writer.comment(
+                "Block x/y values are real projected GIS coordinates, not schematic indices."
             )
             writer.comment(
                 "Set OPENHYDROQUAL_RESOURCES and OHQ_RAINFALL_FILE when local paths differ."
@@ -578,6 +595,14 @@ class OHQWriter:
                 writer.comment(
                     f"GIS junction used as topology-only node: {name}"
                 )
+
+        if self.include_comments:
+            crs_values = _ordered_unique(
+                str(getattr(item, "crs_authid", "") or "")
+                for item in [*subbasins, *reaches, *junctions]
+            )
+            if crs_values:
+                writer.comment("Projected coordinate reference: " + ", ".join(crs_values))
 
         writer.line()
         writer.setvalue("system", "simulation_start_time", "0")

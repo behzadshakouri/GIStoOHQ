@@ -104,6 +104,12 @@ MC_INDEX_FLOW  = 1
 MC_DEPTH_ITERS = 20
 MC_STEP_ITERS  = 30
 LAG_FLOOR_MIN  = 6.0   # do not write a lag below this (matches Tc floor)
+ORIENTATION_REVERSAL_MIN_RISE_M = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_RISE_M", 0.25)
+)
+ORIENTATION_REVERSAL_MIN_SLOPE = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_SLOPE", 0.00010)
+)
 
 # ---------------------------------------------------------------------------
 
@@ -139,6 +145,24 @@ for lyr, nm in ((subs, "subbasins"), (reaches, "reaches"), (juncs, "junctions"))
         raise Exception("invalid layer: " + nm)
 
 src_crs = reaches.crs()
+if not src_crs.isValid():
+    raise Exception("reaches.gpkg has no valid CRS")
+if src_crs.isGeographic():
+    raise Exception(
+        "A projected CRS in metres is required; reaches use %s"
+        % src_crs.authid()
+    )
+for _layer, _name in ((subs, "subbasins"), (juncs, "junctions")):
+    if not _layer.crs().isValid() or _layer.crs() != src_crs:
+        raise Exception(
+            "CRS mismatch: reaches=%s %s=%s"
+            % (
+                src_crs.authid(),
+                _name,
+                _layer.crs().authid() or "NONE",
+            )
+        )
+
 to_wgs  = QgsCoordinateTransform(src_crs,
                QgsCoordinateReferenceSystem("EPSG:4326"), QgsProject.instance())
 
@@ -293,11 +317,48 @@ for f in subs.getFeatures():
 # ---- reaches ----
 
 def line_ends(geom):
-    if geom.isMultipart():
-        pts = [p for part in geom.asMultiPolyline() for p in part]
-    else:
-        pts = geom.asPolyline()
+    if geom is None or geom.isEmpty():
+        raise Exception("empty reach geometry")
+    parts = geom.asMultiPolyline() if geom.isMultipart() else [geom.asPolyline()]
+    valid = [part for part in parts if len(part) >= 2]
+    if not valid:
+        raise Exception("invalid reach line geometry")
+
+    def length_of(part):
+        total = 0.0
+        for index in range(1, len(part)):
+            dx = part[index].x() - part[index - 1].x()
+            dy = part[index].y() - part[index - 1].y()
+            total += (dx * dx + dy * dy) ** 0.5
+        return total
+
+    pts = max(valid, key=length_of)
     return (pts[0].x(), pts[0].y()), (pts[-1].x(), pts[-1].y())
+
+
+def oriented_line_ends(feature):
+    first_xy, last_xy = line_ends(feature.geometry())
+    orient_text = ""
+    if "topo_orient" in rch_flds:
+        try:
+            orient_text = str(feature["topo_orient"] or "").strip().lower()
+        except Exception:
+            orient_text = ""
+
+    swap = orient_text == "strong-elevation-reversal"
+    if not orient_text:
+        z_first = num(feature["z_up_m"]) if "z_up_m" in rch_flds else None
+        z_last = num(feature["z_dn_m"]) if "z_dn_m" in rch_flds else None
+        if z_first is not None and z_last is not None:
+            length_m = max(float(feature.geometry().length()), 0.0)
+            adverse_rise = z_last - z_first
+            adverse_slope = adverse_rise / length_m if length_m > 0 else 0.0
+            swap = (
+                adverse_rise >= ORIENTATION_REVERSAL_MIN_RISE_M
+                and adverse_slope >= ORIENTATION_REVERSAL_MIN_SLOPE
+            )
+
+    return (last_xy, first_xy) if swap else (first_xy, last_xy)
 
 for f in reaches.getFeatures():
     rid = iid(f["reach_id"])
@@ -306,12 +367,7 @@ for f in reaches.getFeatures():
     if rch_name(rid) not in RCH_IN:
         continue
 
-    (x0, y0), (x1, y1) = line_ends(f.geometry())
-    zu, zd = num(f["z_up_m"]), num(f["z_dn_m"])
-    if zu is not None and zd is not None and zd > zu:
-        up_xy, dn_xy = (x1, y1), (x0, y0)
-    else:
-        up_xy, dn_xy = (x0, y0), (x1, y1)
+    up_xy, dn_xy = oriented_line_ends(f)
 
     route   = (f["route_method"] if "route_method" in rch_flds and f["route_method"] else DEF_ROUTE)
     ds_name = ds_of(rch_name(rid))
@@ -397,9 +453,8 @@ for f in reaches.getFeatures():
 if sink_needed:
     sx, sy = 0.0, 0.0
     if outlet_reach is not None:
-        (x0, y0), (x1, y1) = line_ends(outlet_reach.geometry())
-        zu, zd = num(outlet_reach["z_up_m"]), num(outlet_reach["z_dn_m"])
-        sx, sy = (x0, y0) if (zu is not None and zd is not None and zd > zu) else (x1, y1)
+        _out_up, _out_dn = oriented_line_ends(outlet_reach)
+        sx, sy = _out_dn
 
     lines = hdr("Sink: " + SINK_NAME)
     lines += [
@@ -412,16 +467,63 @@ if sink_needed:
 # ---- file footer (Basin Schematic Properties) ----
 # Note: Hms Schematic, Map Visible, Gridlines Visible, Flow Direction Visible
 # were removed -- these fields are deprecated in HMS 4.13 and cause warnings.
+# Dynamic view bounds from the actual projected coordinates.
+_all_x = []
+_all_y = []
+
+for _feature in subs.getFeatures():
+    _sid = iid(_feature["id"])
+    if _sid is None or sub_name(_sid) not in SUB_IN:
+        continue
+    _x = num(_feature["centroid_x"])
+    _y = num(_feature["centroid_y"])
+    if _x is not None and _y is not None:
+        _all_x.append(_x)
+        _all_y.append(_y)
+
+for _feature in reaches.getFeatures():
+    _rid = iid(_feature["reach_id"])
+    if _rid is None:
+        _rid = int(_feature.id())
+    if rch_name(_rid) not in RCH_IN:
+        continue
+    _up, _dn = oriented_line_ends(_feature)
+    for _x, _y in (_up, _dn):
+        _all_x.append(_x)
+        _all_y.append(_y)
+
+for _feature in juncs.getFeatures():
+    _jid = iid(_feature["junction_id"])
+    if _jid is None or jct_name(_jid) not in JCT_IN:
+        continue
+    _x = num(_feature["x"])
+    _y = num(_feature["y"])
+    if _x is not None and _y is not None:
+        _all_x.append(_x)
+        _all_y.append(_y)
+
+if _all_x and _all_y:
+    _west, _east = min(_all_x), max(_all_x)
+    _south, _north = min(_all_y), max(_all_y)
+    _pad_x = max((_east - _west) * 0.05, 10.0)
+    _pad_y = max((_north - _south) * 0.05, 10.0)
+    _west -= _pad_x
+    _east += _pad_x
+    _south -= _pad_y
+    _north += _pad_y
+else:
+    _west, _east, _south, _north = 0.0, 1000.0, 0.0, 1000.0
+
 out.append(blk([
     "Basin Schematic Properties:",
-    "     Last View N: 3993169.516",
-    "     Last View S: 3987721.268",
-    "     Last View W: 596457.304",
-    "     Last View E: 600240.677",
-    "     Maximum View N: 3993169.516",
-    "     Maximum View S: 3987721.268",
-    "     Maximum View W: 596457.304",
-    "     Maximum View E: 600240.677",
+    "     Last View N: %.6f" % _north,
+    "     Last View S: %.6f" % _south,
+    "     Last View W: %.6f" % _west,
+    "     Last View E: %.6f" % _east,
+    "     Maximum View N: %.6f" % _north,
+    "     Maximum View S: %.6f" % _south,
+    "     Maximum View W: %.6f" % _west,
+    "     Maximum View E: %.6f" % _east,
     "     Map: None",
     "End:"]))
 
