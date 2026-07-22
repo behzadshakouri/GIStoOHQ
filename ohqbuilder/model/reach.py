@@ -14,4 +14,12 @@ class Reach:
     z_up_m: float | None = None
     z_dn_m: float | None = None
     downstream: str | None = None
+    x_act: float | None = None
+    y_act: float | None = None
+    x_up_act: float | None = None
+    y_up_act: float | None = None
+    x_dn_act: float | None = None
+    y_dn_act: float | None = None
+    crs_authid: str | None = None
+    layout_source: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)

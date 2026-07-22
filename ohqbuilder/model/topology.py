@@ -11,3 +11,11 @@ class TopologyLink:
     ds_name: str | None
     match_dist_m: float | None = None
     note: str = ""
+    x_act: float | None = None
+    y_act: float | None = None
+    x_up_act: float | None = None
+    y_up_act: float | None = None
+    x_dn_act: float | None = None
+    y_dn_act: float | None = None
+    crs_authid: str | None = None
+    layout_source: str = ""

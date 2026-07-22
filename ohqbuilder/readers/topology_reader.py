@@ -21,5 +21,13 @@ class TopologyReader:
                 ds_name=row_get(row, "ds_name"),
                 match_dist_m=safe_float(row_get(row, "match_dist_m")),
                 note=str(row_get(row, "note", "") or ""),
+                x_act=safe_float(row_get(row, "x_act")),
+                y_act=safe_float(row_get(row, "y_act")),
+                x_up_act=safe_float(row_get(row, "x_up_act")),
+                y_up_act=safe_float(row_get(row, "y_up_act")),
+                x_dn_act=safe_float(row_get(row, "x_dn_act")),
+                y_dn_act=safe_float(row_get(row, "y_dn_act")),
+                crs_authid=(str(row_get(row, "crs_authid", "") or "") or None),
+                layout_source=str(row_get(row, "layout_source", "") or ""),
             ))
         return links
