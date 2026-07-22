@@ -80,14 +80,24 @@ PARAMS_NAME  = "subwatershed_params.gpkg"
 PARAMS_LAYER = "subwatershed_params"
 POURPTS_NAME = "pour_points.shp"
 
-PIXEL_M = 9.336
-SNAP_PX = 1.5                 # ONLY for "is an endpoint AT a junction" tests,
-SNAP_TOL = SNAP_PX * PIXEL_M  # NOT for subbasin->junction (that is nearest-wins)
-# Wider tolerance used only as a final recovery for slightly displaced endpoints.
-RECOVERY_TOL_M = max(4.0 * PIXEL_M, 50.0)
-FAR_MATCH_M = 60.0            # flag (do not reject) subbasin matches beyond this
-SINK_NAME = "Outlet"
-RELOAD_IN_PROJECT = True
+SNAP_PX = float(globals().get("SNAP_PX", 1.5))
+PIXEL_M = globals().get("PIXEL_M", None)
+SNAP_TOL = globals().get("SNAP_TOL", None)
+
+# Keep the same conservative orientation rule used by
+# derive_topology_reaches.py and materialize_junctions.py. GRASS stream
+# geometry order is trusted unless a materially large adverse rise and slope
+# both support reversal.
+ORIENTATION_REVERSAL_MIN_RISE_M = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_RISE_M", 0.25)
+)
+ORIENTATION_REVERSAL_MIN_SLOPE = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_SLOPE", 0.00010)
+)
+
+FAR_MATCH_M = float(globals().get("FAR_MATCH_M", 60.0))
+SINK_NAME = globals().get("SINK_NAME", "Outlet")
+RELOAD_IN_PROJECT = bool(globals().get("RELOAD_IN_PROJECT", True))
 # ---------------------------------------------------------------------------
 
 site_path = os.path.join(ROOT, SITE_DIR)
@@ -97,6 +107,29 @@ junc_p    = os.path.join(OUT_DIR, JUNC_NAME)
 params_p  = os.path.join(OUT_DIR, PARAMS_NAME)
 pourpts_p = os.path.join(OUT_DIR, POURPTS_NAME)
 topo_p    = os.path.join(OUT_DIR, "topology.gpkg")
+flowdir_p = os.path.join(OUT_DIR, "flow_dir.tif")
+
+if PIXEL_M is None:
+    try:
+        from qgis.core import QgsRasterLayer
+        _flowdir = QgsRasterLayer(flowdir_p, "flow_dir_for_topology_build")
+        if _flowdir.isValid():
+            _px = [
+                abs(float(_flowdir.rasterUnitsPerPixelX())),
+                abs(float(_flowdir.rasterUnitsPerPixelY())),
+            ]
+            _px = [value for value in _px if value > 0]
+            PIXEL_M = sum(_px) / len(_px) if _px else 9.336
+        else:
+            PIXEL_M = 9.336
+    except Exception:
+        PIXEL_M = 9.336
+
+PIXEL_M = float(PIXEL_M)
+SNAP_TOL = float(SNAP_TOL) if SNAP_TOL is not None else SNAP_PX * PIXEL_M
+RECOVERY_TOL_M = float(
+    globals().get("RECOVERY_TOL_M", max(4.0 * PIXEL_M, 50.0))
+)
 
 for p in (reaches_p, junc_p, params_p, pourpts_p):
     if not os.path.isfile(p):
@@ -106,6 +139,9 @@ print("Reaches    :", reaches_p)
 print("Junctions  :", junc_p)
 print("Params     :", params_p)
 print("Pour points:", pourpts_p)
+print("Pixel size  : %.4f m" % PIXEL_M)
+print("Snap tol    : %.4f m" % SNAP_TOL)
+print("Recovery tol: %.4f m" % RECOVERY_TOL_M)
 
 
 def iid(v):
@@ -123,10 +159,22 @@ def iid(v):
 
 
 def line_endpoints(geom):
-    if geom.isMultipart():
-        pts = [p for part in geom.asMultiPolyline() for p in part]
-    else:
-        pts = geom.asPolyline()
+    """Return endpoints of the longest valid line part."""
+    if geom is None or geom.isEmpty():
+        return None, None
+
+    parts = geom.asMultiPolyline() if geom.isMultipart() else [geom.asPolyline()]
+    valid = [part for part in parts if len(part) >= 2]
+    if not valid:
+        return None, None
+
+    def part_length(part):
+        total = 0.0
+        for i in range(1, len(part)):
+            total += QgsPointXY(part[i - 1]).distance(QgsPointXY(part[i]))
+        return total
+
+    pts = max(valid, key=part_length)
     return QgsPointXY(pts[0]), QgsPointXY(pts[-1])
 
 
@@ -149,10 +197,37 @@ for f in reaches.getFeatures():
     if rid is None:
         rid = int(f.id())
     fp, lp = line_endpoints(f.geometry())
-    try:
-        zu = float(f["z_up_m"]); zd = float(f["z_dn_m"]); swap = zd > zu
-    except (TypeError, ValueError):
-        swap = False
+    if fp is None or lp is None:
+        raise Exception("Reach_%s has empty or invalid line geometry" % rid)
+
+    # Reuse the exact Phase 1 orientation decision. Small adverse DEM rises on
+    # nearly flat reaches must not reverse the line, otherwise an outgoing
+    # reach is misread as an incoming reach and a Reach <-> Junction cycle is
+    # created.
+    orient_text = ""
+    if "topo_orient" in rfields:
+        try:
+            orient_text = str(f["topo_orient"] or "").strip().lower()
+        except Exception:
+            orient_text = ""
+
+    swap = orient_text == "strong-elevation-reversal"
+
+    # Backward-compatible fallback for older reaches.gpkg files.
+    if not orient_text:
+        try:
+            zu = float(f["z_up_m"])
+            zd = float(f["z_dn_m"])
+            length_m = float(f.geometry().length())
+            adverse_rise = zd - zu
+            adverse_slope = adverse_rise / length_m if length_m > 0 else 0.0
+            swap = (
+                adverse_rise >= ORIENTATION_REVERSAL_MIN_RISE_M
+                and adverse_slope >= ORIENTATION_REVERSAL_MIN_SLOPE
+            )
+        except (TypeError, ValueError):
+            swap = False
+
     up_pt, dn_pt = (lp, fp) if swap else (fp, lp)
     R[rid] = {
         "up": up_pt, "dn": dn_pt, "geom": f.geometry(),
@@ -586,6 +661,12 @@ if problems:
 else:
     print("  OK: single sink, no cycles, all elements reach", SINK_NAME)
 print("  sink count:", nsink, "(expect 1)")
+
+if problems:
+    raise Exception(
+        "build_topology.py validation failed; topology.gpkg was not overwritten:\n"
+        + "\n".join("  " + problem for problem in problems)
+    )
 
 # ---------------------------------------------------------------------------
 # STEP 6: write topology.gpkg (non-spatial attribute table)
