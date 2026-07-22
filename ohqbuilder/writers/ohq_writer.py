@@ -97,6 +97,135 @@ def _reach_downstream_xy(reach: Any) -> tuple[float | None, float | None]:
     return _reach_actual_xy(reach)
 
 
+def _scale_layout_positions(
+    catchment_positions: dict[str, tuple[float, float]],
+    reach_positions: dict[str, tuple[float, float]],
+    outlet_position: tuple[float, float],
+) -> tuple[
+    dict[str, tuple[float, float]],
+    dict[str, tuple[float, float]],
+    tuple[float, float],
+    dict[str, float],
+]:
+    """Convert projected GIS coordinates to a compact OHQ canvas layout.
+
+    The transformation preserves relative geometry and aspect ratio while
+    translating the model to a local origin and fitting it inside a configurable
+    display canvas. Authoritative GIS coordinates remain stored on the model
+    objects and are only transformed for the emitted OHQ block ``x``/``y``
+    properties.
+
+    Environment variables
+    ---------------------
+    OHQ_LAYOUT_TARGET_WIDTH
+        Maximum drawable width in OHQ canvas units. Default: 5000.
+    OHQ_LAYOUT_TARGET_HEIGHT
+        Maximum drawable height in OHQ canvas units. Default: 5000.
+    OHQ_LAYOUT_MARGIN
+        Margin around the fitted model. Default: 500.
+    OHQ_LAYOUT_FLIP_Y
+        Set to 1/true/yes/on to invert the vertical axis. Default: false.
+    OHQ_LAYOUT_MAX_SCALE
+        Optional upper limit on enlargement. Default: 1.0. This prevents small
+        watersheds from being unnecessarily magnified.
+    """
+
+    all_points = [
+        *catchment_positions.values(),
+        *reach_positions.values(),
+        outlet_position,
+    ]
+    if not all_points:
+        return (
+            dict(catchment_positions),
+            dict(reach_positions),
+            outlet_position,
+            {
+                "scale": 1.0,
+                "source_width": 0.0,
+                "source_height": 0.0,
+                "target_width": 0.0,
+                "target_height": 0.0,
+                "margin": 0.0,
+            },
+        )
+
+    xs = [point[0] for point in all_points]
+    ys = [point[1] for point in all_points]
+
+    min_x = min(xs)
+    max_x = max(xs)
+    min_y = min(ys)
+    max_y = max(ys)
+
+    source_width = max_x - min_x
+    source_height = max_y - min_y
+
+    target_width = _positive(
+        os.environ.get("OHQ_LAYOUT_TARGET_WIDTH", "5000"),
+        5000.0,
+    )
+    target_height = _positive(
+        os.environ.get("OHQ_LAYOUT_TARGET_HEIGHT", "5000"),
+        5000.0,
+    )
+    margin = max(
+        _finite(os.environ.get("OHQ_LAYOUT_MARGIN", "500"), 500.0),
+        0.0,
+    )
+    max_scale = _positive(
+        os.environ.get("OHQ_LAYOUT_MAX_SCALE", "1.0"),
+        1.0,
+    )
+
+    available_width = max(target_width - 2.0 * margin, 1.0)
+    available_height = max(target_height - 2.0 * margin, 1.0)
+
+    width_scale = (
+        available_width / source_width if source_width > 0.0 else float("inf")
+    )
+    height_scale = (
+        available_height / source_height if source_height > 0.0 else float("inf")
+    )
+    scale = min(width_scale, height_scale, max_scale)
+    if not math.isfinite(scale) or scale <= 0.0:
+        scale = 1.0
+
+    flip_y = str(
+        os.environ.get("OHQ_LAYOUT_FLIP_Y", "0")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+    fitted_width = source_width * scale
+    fitted_height = source_height * scale
+
+    # Center the fitted watershed inside the configured canvas.
+    offset_x = margin + max((available_width - fitted_width) / 2.0, 0.0)
+    offset_y = margin + max((available_height - fitted_height) / 2.0, 0.0)
+
+    def transform(point: tuple[float, float]) -> tuple[float, float]:
+        x, y = point
+        canvas_x = offset_x + (x - min_x) * scale
+        if flip_y:
+            canvas_y = offset_y + (max_y - y) * scale
+        else:
+            canvas_y = offset_y + (y - min_y) * scale
+        return canvas_x, canvas_y
+
+    return (
+        {name: transform(point) for name, point in catchment_positions.items()},
+        {name: transform(point) for name, point in reach_positions.items()},
+        transform(outlet_position),
+        {
+            "scale": scale,
+            "source_width": source_width,
+            "source_height": source_height,
+            "target_width": target_width,
+            "target_height": target_height,
+            "margin": margin,
+        },
+    )
+
+
 def _resource_path(filename: str) -> str:
     root = os.environ.get(
         "OPENHYDROQUAL_RESOURCES",
@@ -424,6 +553,20 @@ class OHQWriter:
                 + "\n  ".join(missing_coordinates)
             )
 
+        # Preserve the real GIS geometry, but fit the emitted OHQ block
+        # coordinates into a compact canvas so blocks remain legible when the
+        # watershed covers a large projected extent.
+        (
+            catchment_positions,
+            reach_positions,
+            (outlet_x, outlet_y),
+            layout_info,
+        ) = _scale_layout_positions(
+            catchment_positions,
+            reach_positions,
+            (outlet_x, outlet_y),
+        )
+
         block_width = int(os.environ.get("OHQ_LAYOUT_BLOCK_WIDTH", "320"))
         block_height = int(os.environ.get("OHQ_LAYOUT_BLOCK_HEIGHT", "190"))
         outlet_width = int(os.environ.get("OHQ_LAYOUT_OUTLET_WIDTH", "260"))
@@ -438,7 +581,22 @@ class OHQWriter:
                 "Catchments discharge to stream reaches; GIS junctions are topology-only."
             )
             writer.comment(
-                "Block x/y values are real projected GIS coordinates, not schematic indices."
+                "Block x/y values preserve the GIS geometry after uniform canvas scaling."
+            )
+            writer.comment(
+                "Authoritative projected coordinates remain on the watershed model objects."
+            )
+            writer.comment(
+                "Layout scale={scale:.12g}; source span={width:.12g} x {height:.12g}; "
+                "target canvas={target_width:.12g} x {target_height:.12g}; margin={margin:.12g}."
+                .format(
+                    scale=layout_info["scale"],
+                    width=layout_info["source_width"],
+                    height=layout_info["source_height"],
+                    target_width=layout_info["target_width"],
+                    target_height=layout_info["target_height"],
+                    margin=layout_info["margin"],
+                )
             )
             writer.comment(
                 "Set OPENHYDROQUAL_RESOURCES and OHQ_RAINFALL_FILE when local paths differ."
