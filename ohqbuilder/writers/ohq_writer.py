@@ -124,7 +124,9 @@ def _scale_layout_positions(
     OHQ_LAYOUT_MARGIN
         Margin around the fitted model. Default: 500.
     OHQ_LAYOUT_FLIP_Y
-        Set to 1/true/yes/on to invert the vertical axis. Default: false.
+        Controls only the emitted OHQ canvas view. The default is true, so
+        north/up in GIS appears upward in the OHQ viewer. Set to 0/false/no/off
+        to retain the unflipped canvas direction.
     OHQ_LAYOUT_MAX_SCALE
         Optional upper limit on enlargement. Default: 1.0. This prevents small
         watersheds from being unnecessarily magnified.
@@ -191,8 +193,10 @@ def _scale_layout_positions(
     if not math.isfinite(scale) or scale <= 0.0:
         scale = 1.0
 
+    # This affects only the OHQ display coordinates. It does not modify
+    # x_act/y_act or any authoritative GIS coordinate stored in the model.
     flip_y = str(
-        os.environ.get("OHQ_LAYOUT_FLIP_Y", "0")
+        os.environ.get("OHQ_LAYOUT_FLIP_Y", "1")
     ).strip().lower() in {"1", "true", "yes", "on"}
 
     fitted_width = source_width * scale
@@ -581,7 +585,10 @@ class OHQWriter:
                 "Catchments discharge to stream reaches; GIS junctions are topology-only."
             )
             writer.comment(
-                "Block x/y values preserve the GIS geometry after uniform canvas scaling."
+                "Block x/y values preserve GIS geometry after uniform canvas scaling."
+            )
+            writer.comment(
+                "The OHQ display Y direction is flipped by default; actual GIS Y values are unchanged."
             )
             writer.comment(
                 "Authoritative projected coordinates remain on the watershed model objects."
