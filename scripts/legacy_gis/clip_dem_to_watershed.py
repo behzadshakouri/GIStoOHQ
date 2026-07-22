@@ -31,6 +31,7 @@ import processing
 import rasterio
 from rasterio.mask import mask as rasterio_mask
 from rasterio.warp import transform_geom
+from rasterio.crs import CRS as RasterioCRS
 
 from qgis.core import (
     QgsProject,
@@ -39,6 +40,16 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
 )
 
+
+
+def _crs_equal(left, right):
+    """Return True when two rasterio/Fiona CRS definitions are equivalent."""
+    if not left or not right:
+        return False
+    try:
+        return RasterioCRS.from_user_input(left) == RasterioCRS.from_user_input(right)
+    except Exception:
+        return str(left) == str(right)
 
 
 def clip_raster_with_rasterio(input_path, mask_path, output_path, nodata, options, layer_name=None):
@@ -68,8 +79,18 @@ def clip_raster_with_rasterio(input_path, mask_path, output_path, nodata, option
                 geom = feature.get("geometry")
                 if not geom:
                     continue
-                if vector_crs and src.crs and vector_crs != src.crs:
-                    geom = transform_geom(vector_crs, src.crs, geom)
+                if not vector_crs:
+                    raise Exception("Mask layer has no CRS: " + mask_path)
+                if not src.crs:
+                    raise Exception("Input raster has no CRS: " + input_path)
+                if not _crs_equal(vector_crs, src.crs):
+                    geom = transform_geom(
+                        vector_crs,
+                        src.crs,
+                        geom,
+                        antimeridian_cutting=False,
+                        precision=9,
+                    )
                 geometries.append(geom)
 
         if not geometries:
@@ -114,6 +135,7 @@ OUT_NAME = globals().get("OUT_NAME", "cliped_utm_wsclip.tif")
 
 NODATA = float(globals().get("NODATA", -9999.0))
 FALLBACK_EPSG = int(globals().get("FALLBACK_EPSG", 26912))
+ALLOW_MISSING_CRS = bool(globals().get("ALLOW_MISSING_CRS", False))
 ADD_TO_PROJECT = bool(globals().get("ADD_TO_PROJECT", True))
 FORCE = bool(globals().get("FORCE", True))
 GTIFF_OPTIONS = globals().get(
@@ -196,9 +218,27 @@ if boundary.featureCount() < 1:
 
 if dem.crs().isValid():
     dem_crs = dem.crs()
+elif ALLOW_MISSING_CRS:
+    dem_crs = QgsCoordinateReferenceSystem("EPSG:%d" % FALLBACK_EPSG)
+    print(
+        "WARNING: DEM has no CRS; using fallback EPSG:%d. "
+        "Prefer fixing the source raster." % FALLBACK_EPSG
+    )
 else:
-    dem_crs = QgsCoordinateReferenceSystem(
-        "EPSG:%d" % FALLBACK_EPSG
+    raise Exception(
+        "DEM has no valid CRS. Assign the correct CRS to the source raster "
+        "or set ALLOW_MISSING_CRS=True with a verified FALLBACK_EPSG."
+    )
+
+if not boundary.crs().isValid():
+    raise Exception(
+        "Watershed boundary has no valid CRS: " + BOUNDARY_PATH
+    )
+
+if dem_crs.isGeographic():
+    raise Exception(
+        "DEM CRS is geographic (%s). A projected CRS in metres is required."
+        % (dem_crs.authid() or dem_crs.description())
     )
 
 crs_authid = dem_crs.authid() or (
@@ -325,6 +365,24 @@ if chk.width() <= 0 or chk.height() <= 0:
     raise Exception(
         "clipped DEM has invalid dimensions: " + OUT_PATH
     )
+
+with rasterio.open(DEM_PATH) as _src_dem, rasterio.open(OUT_PATH) as _out_dem:
+    if not _src_dem.crs or not _out_dem.crs:
+        raise Exception("Input or output DEM is missing CRS metadata.")
+    if _src_dem.crs != _out_dem.crs:
+        raise Exception(
+            "Output CRS mismatch: input=%s output=%s"
+            % (_src_dem.crs, _out_dem.crs)
+        )
+    src_px = (abs(_src_dem.transform.a), abs(_src_dem.transform.e))
+    out_px = (abs(_out_dem.transform.a), abs(_out_dem.transform.e))
+    if any(abs(a - b) > 1.0e-8 for a, b in zip(src_px, out_px)):
+        raise Exception(
+            "Output pixel size changed unexpectedly: input=%s output=%s"
+            % (src_px, out_px)
+        )
+    if _out_dem.width <= 0 or _out_dem.height <= 0:
+        raise Exception("Output raster has invalid dimensions.")
 
 print("\nClipped DEM written:", OUT_PATH)
 print(

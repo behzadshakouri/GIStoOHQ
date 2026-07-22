@@ -116,6 +116,28 @@ reaches = QgsVectorLayer(reaches_p, "reaches", "ogr")
 if not reaches.isValid():
     raise Exception("invalid reaches layer")
 
+if not reaches.crs().isValid():
+    raise Exception("reaches.gpkg has no valid CRS")
+if reaches.crs().isGeographic():
+    raise Exception(
+        "reaches.gpkg uses geographic CRS %s; projected metres are required"
+        % reaches.crs().authid()
+    )
+try:
+    from qgis.core import QgsRasterLayer
+    _flowdir_check = QgsRasterLayer(flowdir_p, "flow_dir_crs_check")
+    if _flowdir_check.isValid() and _flowdir_check.crs().isValid():
+        if _flowdir_check.crs() != reaches.crs():
+            raise Exception(
+                "CRS mismatch: reaches=%s flow_dir=%s"
+                % (
+                    reaches.crs().authid(),
+                    _flowdir_check.crs().authid(),
+                )
+            )
+except ImportError:
+    pass
+
 field_names = [f.name() for f in reaches.fields()]
 if "ds_reach_id" not in field_names:
     raise Exception("run derive_topology.py first (no ds_reach_id field)")

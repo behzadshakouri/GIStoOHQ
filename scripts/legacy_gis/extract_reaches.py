@@ -103,6 +103,7 @@ MANNING_N     = 0.035           # ephemeral natural channel; document source
 SLOPE_FLOOR   = 0.0005          # min reach slope, avoids zero/negative
 
 ADD_TO_PROJECT = True
+STRICT_CRS = bool(globals().get("STRICT_CRS", True))
 # ---------------------------------------------------------------------------
 
 # --- derived paths ---------------------------------------------------------
@@ -121,6 +122,63 @@ print("Site     :", site_path)
 print("Flow acc :", FLOWACC_PATH)
 print("Outputs  :", OUT_DIR)
 
+def _require_valid_projected_crs(layer, label):
+    if not layer.isValid():
+        raise Exception("%s is invalid" % label)
+    crs_obj = layer.crs()
+    if not crs_obj.isValid():
+        raise Exception("%s has no valid CRS" % label)
+    if crs_obj.isGeographic():
+        raise Exception(
+            "%s uses geographic CRS %s; projected metres are required"
+            % (label, crs_obj.authid() or crs_obj.description())
+        )
+    return crs_obj
+
+
+def _same_crs(a, b):
+    return a.isValid() and b.isValid() and a == b
+
+
+def _raster_signature(path):
+    ds = gdal.Open(path)
+    if ds is None:
+        raise Exception("Could not open raster: " + path)
+    gt = ds.GetGeoTransform()
+    projection = ds.GetProjection()
+    signature = {
+        "width": ds.RasterXSize,
+        "height": ds.RasterYSize,
+        "gt": tuple(gt),
+        "projection": projection,
+    }
+    ds = None
+    return signature
+
+
+def _assert_same_grid(reference_path, other_path, label):
+    ref = _raster_signature(reference_path)
+    other = _raster_signature(other_path)
+    problems = []
+    if ref["width"] != other["width"] or ref["height"] != other["height"]:
+        problems.append(
+            "size %sx%s != %sx%s"
+            % (
+                other["width"], other["height"],
+                ref["width"], ref["height"],
+            )
+        )
+    if any(abs(a - b) > 1.0e-8 for a, b in zip(ref["gt"], other["gt"])):
+        problems.append("geotransform differs")
+    if ref["projection"] != other["projection"]:
+        problems.append("projection differs")
+    if problems:
+        raise Exception(
+            "%s is not grid-aligned with flow_dir.tif: %s"
+            % (label, "; ".join(problems))
+        )
+
+
 def grass_id(name):
     reg = QgsApplication.processingRegistry()
     for prefix in ("grass:", "grass7:"):
@@ -132,19 +190,67 @@ def grass_id(name):
         return "grass:" + name
     return "grass7:" + name
 
-# --- read cell size + CRS from the DEM (CRS source of truth) ---------------
+# --- read cell size + CRS from flow_dir.tif (spatial source of truth) -------
+for _required in (
+    FLOWDIR_PATH,
+    FLOWACC_PATH,
+    DEM_REAL_PATH,
+    os.path.join(OUT_DIR, "dem_carved.tif"),
+    WATERSHED_PATH,
+):
+    if not os.path.isfile(_required):
+        raise Exception("not found: " + _required)
+
 fdir = QgsRasterLayer(FLOWDIR_PATH, "flow_dir")
-if not fdir.isValid():
-    raise Exception("Flow direction raster invalid: " + FLOWDIR_PATH)
-crs = fdir.crs()
-px  = fdir.rasterUnitsPerPixelX()
-cell_area = px * px
-print(f"CRS = {crs.authid()}, pixel = {px:.4f} m, cell area = {cell_area:.3f} m^2")
+crs = _require_valid_projected_crs(fdir, "flow_dir.tif")
+px_x = abs(float(fdir.rasterUnitsPerPixelX()))
+px_y = abs(float(fdir.rasterUnitsPerPixelY()))
+if px_x <= 0 or px_y <= 0:
+    raise Exception("flow_dir.tif has invalid pixel size")
+cell_area = px_x * px_y
+px = (px_x + px_y) / 2.0
+print(
+    "CRS = %s, pixel = %.4f x %.4f m, cell area = %.3f m^2"
+    % (crs.authid(), px_x, px_y, cell_area)
+)
+
+for _path, _label in (
+    (FLOWACC_PATH, "flow_acc.tif"),
+    (os.path.join(OUT_DIR, "dem_carved.tif"), "dem_carved.tif"),
+):
+    _assert_same_grid(FLOWDIR_PATH, _path, _label)
+
+dem_real_layer = QgsRasterLayer(DEM_REAL_PATH, "real_dem")
+dem_real_crs = _require_valid_projected_crs(
+    dem_real_layer, "clipped real-elevation DEM"
+)
+if not _same_crs(crs, dem_real_crs):
+    raise Exception(
+        "Real DEM CRS mismatch: flow_dir=%s real_dem=%s"
+        % (crs.authid(), dem_real_crs.authid())
+    )
 
 # --- watershed area -> resolve A_crit -> threshold in cells ----------------
 ws = QgsVectorLayer(WATERSHED_PATH, "ws", "ogr")
-if not ws.isValid():
-    raise Exception("Watershed polygon invalid: " + WATERSHED_PATH)
+ws_crs = _require_valid_projected_crs(ws, "watershed boundary")
+if not _same_crs(crs, ws_crs):
+    print(
+        "Reprojecting watershed boundary from %s to %s for reach extraction..."
+        % (ws_crs.authid(), crs.authid())
+    )
+    ws = processing.run(
+        "native:reprojectlayer",
+        {
+            "INPUT": ws,
+            "TARGET_CRS": crs,
+            "OPERATION": "",
+            "OUTPUT": "TEMPORARY_OUTPUT",
+        },
+    )["OUTPUT"]
+    WATERSHED_CLIP_INPUT = ws
+else:
+    WATERSHED_CLIP_INPUT = WATERSHED_PATH
+
 ws_area_m2  = sum(f.geometry().area() for f in ws.getFeatures())
 ws_area_km2 = ws_area_m2 / 1e6
 
@@ -206,7 +312,7 @@ reaches_geom = streams
 #   cross the boundary are trimmed at it.
 print("Clipping reaches to watershed boundary ...")
 reaches_geom = processing.run("native:clip", {
-    "INPUT": reaches_geom, "OVERLAY": WATERSHED_PATH,
+    "INPUT": reaches_geom, "OVERLAY": WATERSHED_CLIP_INPUT,
     "OUTPUT": "TEMPORARY_OUTPUT"})["OUTPUT"]
 
 # --- attribute: length, endpoint Z (real DEM), slope -----------------------
@@ -277,6 +383,13 @@ processing.run("native:assignprojection", {
     "INPUT": reaches_lyr, "CRS": crs, "OUTPUT": REACHES_OUT})
 
 chk = QgsVectorLayer(REACHES_OUT, "reaches_chk", "ogr")
+if not chk.isValid():
+    raise Exception("reaches.gpkg was written but is invalid")
+if chk.crs() != crs:
+    raise Exception(
+        "reaches.gpkg CRS mismatch: expected %s, got %s"
+        % (crs.authid(), chk.crs().authid())
+    )
 print(f"  reaches written: {chk.featureCount()} | CRS = {chk.crs().authid()}")
 if ADD_TO_PROJECT and chk.isValid():
     QgsProject.instance().addMapLayer(chk)

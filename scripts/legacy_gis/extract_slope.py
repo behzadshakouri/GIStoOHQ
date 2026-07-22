@@ -34,7 +34,7 @@
 import os
 import processing
 from osgeo import gdal
-from qgis.core import QgsField, QgsProject, QgsVectorLayer
+from qgis.core import QgsField, QgsProject, QgsVectorLayer, QgsRasterLayer
 from qgis.PyQt.QtCore import QVariant
 gdal.UseExceptions()
 
@@ -90,6 +90,15 @@ for p in (dem, params):
     if not os.path.isfile(p):
         raise Exception("not found: " + p)
 
+dem_layer = QgsRasterLayer(dem, "dem_crs_check")
+if not dem_layer.isValid() or not dem_layer.crs().isValid():
+    raise Exception("DEM is invalid or has no CRS: " + dem)
+if dem_layer.crs().isGeographic():
+    raise Exception(
+        "DEM uses geographic CRS %s; projected metres are required."
+        % dem_layer.crs().authid()
+    )
+
 # --- slope raster (percent) from the DEM -----------------------------------
 if os.path.exists(slope_tif):
     os.remove(slope_tif)
@@ -97,7 +106,18 @@ gdal.DEMProcessing(
     slope_tif, dem, "slope",
     options=gdal.DEMProcessingOptions(slopeFormat="percent",
                                       creationOptions=["COMPRESS=LZW"]))
-print("Slope raster:", os.path.basename(slope_tif))
+slope_check = QgsRasterLayer(slope_tif, "slope_crs_check")
+if not slope_check.isValid():
+    raise Exception("Slope raster was created but is invalid: " + slope_tif)
+if slope_check.crs() != dem_layer.crs():
+    raise Exception(
+        "Slope raster CRS mismatch: DEM=%s slope=%s"
+        % (dem_layer.crs().authid(), slope_check.crs().authid())
+    )
+print(
+    "Slope raster: %s | CRS=%s"
+    % (os.path.basename(slope_tif), slope_check.crs().authid())
+)
 
 # --- zonal mean slope onto the params layer (in place) ---------------------
 # zonalstatisticsfb writes into the INPUT vector layer when given a file path;
@@ -106,6 +126,20 @@ print("Slope raster:", os.path.basename(slope_tif))
 layer = QgsVectorLayer(params + "|layername=" + PARAMS_LAYER, "params", "ogr")
 if not layer.isValid():
     raise Exception("could not open params layer: " + params)
+if not layer.crs().isValid():
+    raise Exception("subwatershed_params.gpkg has no valid CRS")
+if layer.crs().isGeographic():
+    raise Exception(
+        "subwatershed_params.gpkg uses geographic CRS %s; projected metres "
+        "are required for slope, area, and coordinates."
+        % layer.crs().authid()
+    )
+if layer.crs() != dem_layer.crs():
+    raise Exception(
+        "CRS mismatch: DEM=%s subwatersheds=%s. Reproject the polygon layer "
+        "before running extract_slope.py."
+        % (dem_layer.crs().authid(), layer.crs().authid())
+    )
 
 PREFIX = "slp_"
 res = processing.run("native:zonalstatisticsfb", {

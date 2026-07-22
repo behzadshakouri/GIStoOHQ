@@ -55,6 +55,12 @@ SNAP_TOL = globals().get("SNAP_TOL", None)
 
 RELOAD_IN_PROJECT = bool(globals().get("RELOAD_IN_PROJECT", True))
 ALLOW_REACH_FALLBACK = bool(globals().get("ALLOW_REACH_FALLBACK", True))
+ORIENTATION_REVERSAL_MIN_RISE_M = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_RISE_M", 0.25)
+)
+ORIENTATION_REVERSAL_MIN_SLOPE = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_SLOPE", 0.00010)
+)
 
 
 # =============================================================================
@@ -217,6 +223,23 @@ reaches = QgsVectorLayer(reaches_p, "reaches", "ogr")
 if not reaches.isValid():
     raise Exception("invalid reaches layer: " + reaches_p)
 
+if not reaches.crs().isValid():
+    raise Exception("reaches.gpkg has no valid CRS")
+if reaches.crs().isGeographic():
+    raise Exception(
+        "reaches.gpkg uses geographic CRS %s; projected metres are required"
+        % reaches.crs().authid()
+    )
+if os.path.isfile(FLOWDIR_PATH):
+    _flowdir_check = QgsRasterLayer(FLOWDIR_PATH, "flow_dir_crs_check")
+    if not _flowdir_check.isValid() or not _flowdir_check.crs().isValid():
+        raise Exception("flow_dir.tif is invalid or has no CRS")
+    if _flowdir_check.crs() != reaches.crs():
+        raise Exception(
+            "CRS mismatch: reaches=%s flow_dir=%s"
+            % (reaches.crs().authid(), _flowdir_check.crs().authid())
+        )
+
 reach_fields = [field.name() for field in reaches.fields()]
 if "reach_id" not in reach_fields:
     raise Exception(
@@ -237,10 +260,27 @@ for feature in reaches.getFeatures():
 
     z_first = ffloat(feature["z_up_m"]) if "z_up_m" in reach_fields else None
     z_last = ffloat(feature["z_dn_m"]) if "z_dn_m" in reach_fields else None
-    if z_first is not None and z_last is not None and z_last > z_first:
-        up_point, dn_point = last_point, first_point
-    else:
-        up_point, dn_point = first_point, last_point
+
+    orient_text = ""
+    if "topo_orient" in reach_fields:
+        try:
+            orient_text = str(feature["topo_orient"] or "").strip().lower()
+        except Exception:
+            orient_text = ""
+
+    swap = orient_text == "strong-elevation-reversal"
+    if not orient_text and z_first is not None and z_last is not None:
+        length_m = float(feature.geometry().length())
+        adverse_rise = z_last - z_first
+        adverse_slope = adverse_rise / length_m if length_m > 0 else 0.0
+        swap = (
+            adverse_rise >= ORIENTATION_REVERSAL_MIN_RISE_M
+            and adverse_slope >= ORIENTATION_REVERSAL_MIN_SLOPE
+        )
+
+    up_point, dn_point = (
+        (last_point, first_point) if swap else (first_point, last_point)
+    )
 
     rinfo[rid] = {
         "up": up_point,
@@ -279,6 +319,11 @@ for feature in junctions.getFeatures():
 
 if not jinfo:
     raise Exception("junctions.gpkg contains no usable junctions")
+if not junctions.crs().isValid() or junctions.crs() != reaches.crs():
+    raise Exception(
+        "CRS mismatch: reaches=%s junctions=%s"
+        % (reaches.crs().authid(), junctions.crs().authid() or "NONE")
+    )
 
 
 # =============================================================================
@@ -296,6 +341,11 @@ if not subbasins.isValid():
 sub_fields = [field.name() for field in subbasins.fields()]
 if "id" not in sub_fields:
     raise Exception("subwatershed params layer has no id field")
+if not subbasins.crs().isValid() or subbasins.crs() != reaches.crs():
+    raise Exception(
+        "CRS mismatch: reaches=%s subwatersheds=%s"
+        % (reaches.crs().authid(), subbasins.crs().authid() or "NONE")
+    )
 
 sub_centroids = {}
 sub_ids = set()
@@ -317,6 +367,11 @@ for feature in subbasins.getFeatures():
 pour_points = QgsVectorLayer(POUR_POINTS_PATH, "pour_points", "ogr")
 if not pour_points.isValid():
     raise Exception("invalid pour-point layer: " + POUR_POINTS_PATH)
+if not pour_points.crs().isValid() or pour_points.crs() != reaches.crs():
+    raise Exception(
+        "CRS mismatch: reaches=%s pour_points=%s"
+        % (reaches.crs().authid(), pour_points.crs().authid() or "NONE")
+    )
 
 pour_fields = [field.name() for field in pour_points.fields()]
 pour_id_field = "id" if "id" in pour_fields else None

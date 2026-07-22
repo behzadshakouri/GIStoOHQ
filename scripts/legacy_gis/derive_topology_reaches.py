@@ -234,6 +234,26 @@ reaches = QgsVectorLayer(reaches_p, "reaches", "ogr")
 if not reaches.isValid():
     raise Exception("invalid reaches layer: " + reaches_p)
 
+if not reaches.crs().isValid():
+    raise Exception("reaches.gpkg has no valid CRS")
+if reaches.crs().isGeographic():
+    raise Exception(
+        "reaches.gpkg uses geographic CRS %s; projected metres are required"
+        % reaches.crs().authid()
+    )
+if os.path.isfile(FLOWDIR_PATH):
+    _flowdir_crs_check = QgsRasterLayer(FLOWDIR_PATH, "flow_dir_crs_check")
+    if not _flowdir_crs_check.isValid() or not _flowdir_crs_check.crs().isValid():
+        raise Exception("flow_dir.tif is invalid or has no CRS")
+    if _flowdir_crs_check.crs() != reaches.crs():
+        raise Exception(
+            "CRS mismatch: reaches=%s flow_dir=%s"
+            % (
+                reaches.crs().authid(),
+                _flowdir_crs_check.crs().authid(),
+            )
+        )
+
 field_names = [field.name() for field in reaches.fields()]
 existing_reach_id_field = first_existing_field(field_names, ["reach_id"])
 
