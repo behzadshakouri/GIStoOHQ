@@ -1,341 +1,583 @@
 # =============================================================================
 # derive_topology_subbasins.py   (QGIS Python Console)
 #
-# PHASE 2 half of derive_topology.py: wire each SUBBASIN to its downstream
-# element, AFTER pour points exist, subwatershed_params.gpkg has been built, and
-# junctions.gpkg has been materialized (materialize_junctions.py).
+# GIStoOHQ / Sligo Creek topology utility.
 #
-# MODEL
-#   At this site each subbasin's pour point sits at (or very near) a JUNCTION
-#   -- the confluence where its flow joins the network. So a subbasin drains to
-#   its NEAREST JUNCTION. A pour point with no junction within SNAP_TOL is a
-#   deliberate mid-reach split; it falls back to the nearest reach UPSTREAM end
-#   and is flagged 'reach' so it surfaces in the debug column.
-#
-#   subbasin id == pour point id (coerced to int on both sides).
-#
-# OUTPUTS (in <SITE>/outputs/)
-#   subwatershed_params.gpkg            + ds_kind ('junction'|'reach'),
-#                                         ds_junction_id, ds_reach_id,
-#                                         ds_dist_m, ds_debug (human-readable)
-#   topology_connectors_subbasins.gpkg  subbasin CENTROID -> junction (or reach
-#                                         up end) verification lines, carrying
-#                                         the same ds_debug text for labeling
-#
-# VERIFY: render topology_connectors_subbasins over reaches + junctions +
-# pour points; each connector runs from a subwatershed centroid to the junction
-# its pour point sits on. Label the layer by 'ds_debug' to read the wiring.
-#
-# Run from: QGIS -> Plugins -> Python Console.
+# IMPORTANT
+#   - Uses stable reach_id attributes; provider feature IDs are never written as
+#     downstream identifiers.
+#   - Uses GRASS stream/next_stream attributes when available.
+#   - Uses endpoint geometry only as a validated fallback.
+#   - Derives snap tolerance from flow_dir.tif when available.
+#   - Rejects empty geometry and handles multipart lines by using the longest
+#     valid part rather than flattening disconnected parts.
 # =============================================================================
+
+import math
 import os
+
 from qgis.core import (
-    QgsProject, QgsVectorLayer, QgsField, QgsFields, QgsFeature,
-    QgsGeometry, QgsPointXY, QgsVectorFileWriter, QgsWkbTypes,
-    QgsCoordinateTransformContext
+    QgsCoordinateTransformContext,
+    QgsFeature,
+    QgsField,
+    QgsFields,
+    QgsGeometry,
+    QgsPointXY,
+    QgsProject,
+    QgsRasterLayer,
+    QgsVectorFileWriter,
+    QgsVectorLayer,
+    QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QVariant
 
-# --- root resolution -------------------------------------------------------
-# Set ONCE per session in the console, BEFORE running any script:
-#   ROOT = "/home/arash/Dropbox/Chloeta/NHA/"      # Arash
-#   ROOT = "C:/Users/smnfa/Dropbox/NHA/"           # Samaneh
-#   SITE_DIR = "WS3_GIS/AZ12-100"
-try:
-    ROOT
-except NameError:
-    ROOT = "/home/arash/Dropbox/Chloeta/NHA/"
-try:
-    SITE_DIR
-except NameError:
-    SITE_DIR = "WS3_GIS/AZ12-100"
 
-REACHES_NAME  = "reaches.gpkg"
-JUNC_NAME     = "junctions.gpkg"
-JUNC_LAYER    = "junctions"
-JUNC_ID_FIELD = "junction_id"
-PARAMS_NAME   = "subwatershed_params.gpkg"
-PARAMS_LAYER  = "subwatershed_params"
-POURPTS_NAME  = "pour_points_snapped.gpkg"
+# =============================================================================
+# SETTINGS
+# =============================================================================
 
-PIXEL_M = 9.336
-SNAP_PX = 1.5
-RELOAD_IN_PROJECT = True
-# ---------------------------------------------------------------------------
+ROOT = globals().get("ROOT", "/home/arash/Dropbox/Chloeta/NHA/")
+SITE_DIR = globals().get("SITE_DIR", "")
+OUT_DIR = globals().get("OUT_DIR", None)
 
-site_path = os.path.join(ROOT, SITE_DIR)
-OUT_DIR   = os.path.join(site_path, "outputs")
+REACHES_NAME = globals().get("REACHES_NAME", "reaches.gpkg")
+JUNCTIONS_NAME = globals().get("JUNCTIONS_NAME", "junctions.gpkg")
+JUNCTIONS_LAYER = globals().get("JUNCTIONS_LAYER", "junctions")
+PARAMS_NAME = globals().get("PARAMS_NAME", "subwatershed_params.gpkg")
+PARAMS_LAYER = globals().get("PARAMS_LAYER", "subwatershed_params")
+
+POUR_POINTS_PATH = globals().get("POUR_POINTS_PATH", None)
+FLOWDIR_PATH = globals().get("FLOWDIR_PATH", None)
+
+SNAP_PX = float(globals().get("SNAP_PX", 1.5))
+PIXEL_M = globals().get("PIXEL_M", None)
+SNAP_TOL = globals().get("SNAP_TOL", None)
+
+RELOAD_IN_PROJECT = bool(globals().get("RELOAD_IN_PROJECT", True))
+ALLOW_REACH_FALLBACK = bool(globals().get("ALLOW_REACH_FALLBACK", True))
+
+
+# =============================================================================
+# PATHS
+# =============================================================================
+
+ROOT = os.path.abspath(os.path.expanduser(ROOT))
+if os.path.isabs(SITE_DIR):
+    SITE_PATH = os.path.abspath(os.path.expanduser(SITE_DIR))
+else:
+    SITE_PATH = os.path.abspath(os.path.join(ROOT, SITE_DIR))
+
+if OUT_DIR is None:
+    OUT_DIR = os.path.join(SITE_PATH, "outputs")
+else:
+    OUT_DIR = os.path.abspath(os.path.expanduser(OUT_DIR))
+
 reaches_p = os.path.join(OUT_DIR, REACHES_NAME)
-junc_p    = os.path.join(OUT_DIR, JUNC_NAME)
-params_p  = os.path.join(OUT_DIR, PARAMS_NAME)
-pourpts_p = os.path.join(OUT_DIR, POURPTS_NAME)
+junctions_p = os.path.join(OUT_DIR, JUNCTIONS_NAME)
+params_p = os.path.join(OUT_DIR, PARAMS_NAME)
 connect_p = os.path.join(OUT_DIR, "topology_connectors_subbasins.gpkg")
-SNAP_TOL  = SNAP_PX * PIXEL_M
 
-for p in (reaches_p, junc_p, params_p, pourpts_p):
-    if not os.path.isfile(p):
-        raise Exception("not found: " + p)
+if POUR_POINTS_PATH is None:
+    candidates = [
+        os.path.join(OUT_DIR, "pour_points_snapped.gpkg"),
+        os.path.join(OUT_DIR, "pour_points.shp"),
+    ]
+    POUR_POINTS_PATH = next(
+        (path for path in candidates if os.path.isfile(path)),
+        candidates[-1],
+    )
+else:
+    POUR_POINTS_PATH = os.path.abspath(os.path.expanduser(POUR_POINTS_PATH))
 
-print("Reaches    :", reaches_p)
-print("Junctions  :", junc_p)
-print("Params     :", params_p)
-print("Pour points:", pourpts_p)
-print("Snap tol   : %.2f m (%.1f px)" % (SNAP_TOL, SNAP_PX))
+if FLOWDIR_PATH is None:
+    FLOWDIR_PATH = os.path.join(OUT_DIR, "flow_dir.tif")
+else:
+    FLOWDIR_PATH = os.path.abspath(os.path.expanduser(FLOWDIR_PATH))
 
-def as_int(v):
+for path in (reaches_p, junctions_p, params_p, POUR_POINTS_PATH):
+    if not os.path.isfile(path):
+        raise Exception("not found: " + path)
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def iid(value):
+    if value is None:
+        return None
     try:
-        return int(v)
+        if hasattr(value, "isNull") and value.isNull():
+            return None
+    except Exception:
+        pass
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
-# ---------------------------------------------------------------------------
-# load reaches; build oriented endpoints (must match phase-1 orientation)
-# (reach up ends are the fallback target when no junction is near a pour point)
-# ---------------------------------------------------------------------------
+
+def ffloat(value):
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "isNull") and value.isNull():
+            return None
+    except Exception:
+        pass
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def longest_line_points(geometry):
+    if geometry is None or geometry.isEmpty():
+        return []
+    parts = geometry.asMultiPolyline() if geometry.isMultipart() else [geometry.asPolyline()]
+    valid = [part for part in parts if len(part) >= 2]
+    if not valid:
+        return []
+
+    def part_length(part):
+        return sum(
+            QgsPointXY(part[index - 1]).distance(QgsPointXY(part[index]))
+            for index in range(1, len(part))
+        )
+
+    return max(valid, key=part_length)
+
+
+def line_endpoints(geometry):
+    points = longest_line_points(geometry)
+    if len(points) < 2:
+        return None, None
+    return QgsPointXY(points[0]), QgsPointXY(points[-1])
+
+
+def remove_loaded_dataset(path):
+    project = QgsProject.instance()
+    wanted = os.path.normcase(os.path.abspath(path))
+    for layer in list(project.mapLayers().values()):
+        try:
+            source = os.path.normcase(
+                os.path.abspath(layer.source().split("|", 1)[0])
+            )
+        except Exception:
+            continue
+        if source == wanted:
+            project.removeMapLayer(layer.id())
+
+
+def delete_dataset(path):
+    remove_loaded_dataset(path)
+    if not os.path.exists(path):
+        return
+    try:
+        QgsVectorFileWriter.deleteSilently(path)
+        return
+    except Exception:
+        pass
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        candidate = path + suffix
+        if os.path.exists(candidate):
+            os.remove(candidate)
+
+
+def resolve_pixel_size():
+    if PIXEL_M is not None:
+        value = ffloat(PIXEL_M)
+        if value is not None and value > 0:
+            return value, "PIXEL_M override"
+
+    if os.path.isfile(FLOWDIR_PATH):
+        raster = QgsRasterLayer(FLOWDIR_PATH, "flow_dir_for_topology")
+        if raster.isValid():
+            x_size = abs(float(raster.rasterUnitsPerPixelX()))
+            y_size = abs(float(raster.rasterUnitsPerPixelY()))
+            values = [value for value in (x_size, y_size) if value > 0]
+            if values:
+                return sum(values) / len(values), "flow_dir.tif"
+
+    return 9.336, "legacy fallback"
+
+
+pixel_m, pixel_source = resolve_pixel_size()
+snap_tol = float(SNAP_TOL) if SNAP_TOL is not None else SNAP_PX * pixel_m
+if snap_tol <= 0:
+    raise Exception("SNAP_TOL must be positive")
+
+
+# =============================================================================
+# LOAD REACHES
+# =============================================================================
+
 reaches = QgsVectorLayer(reaches_p, "reaches", "ogr")
 if not reaches.isValid():
-    raise Exception("invalid reaches layer")
+    raise Exception("invalid reaches layer: " + reaches_p)
 
-def line_endpoints(geom):
-    if geom.isMultipart():
-        parts = geom.asMultiPolyline()
-        pts = [p for part in parts for p in part]
-    else:
-        pts = geom.asPolyline()
-    return QgsPointXY(pts[0]), QgsPointXY(pts[-1])
+reach_fields = [field.name() for field in reaches.fields()]
+if "reach_id" not in reach_fields:
+    raise Exception(
+        "reaches.gpkg has no reach_id. Run derive_topology_reaches.py first."
+    )
 
 rinfo = {}
-for f in reaches.getFeatures():
-    fp, lp = line_endpoints(f.geometry())
-    zu, zd = f["z_up_m"], f["z_dn_m"]
-    if zu is not None and zd is not None and zd > zu:
-        up_pt, dn_pt = lp, fp
+for feature in reaches.getFeatures():
+    rid = iid(feature["reach_id"])
+    if rid is None:
+        raise Exception("reach feature %s has invalid reach_id" % feature.id())
+    if rid in rinfo:
+        raise Exception("duplicate reach_id: %s" % rid)
+
+    first_point, last_point = line_endpoints(feature.geometry())
+    if first_point is None or last_point is None:
+        raise Exception("Reach_%s has invalid line geometry" % rid)
+
+    z_first = ffloat(feature["z_up_m"]) if "z_up_m" in reach_fields else None
+    z_last = ffloat(feature["z_dn_m"]) if "z_dn_m" in reach_fields else None
+    if z_first is not None and z_last is not None and z_last > z_first:
+        up_point, dn_point = last_point, first_point
     else:
-        up_pt, dn_pt = fp, lp
-    rinfo[f.id()] = {"up": up_pt, "dn": dn_pt}
+        up_point, dn_point = first_point, last_point
 
-print("\nReaches loaded :", len(rinfo))
+    rinfo[rid] = {
+        "up": up_point,
+        "dn": dn_point,
+        "geometry": QgsGeometry(feature.geometry()),
+    }
 
-# ---------------------------------------------------------------------------
-# load junctions: junction_id -> point
-# ---------------------------------------------------------------------------
-juncs = QgsVectorLayer(junc_p + "|layername=" + JUNC_LAYER, "junctions", "ogr")
-if not juncs.isValid():
-    juncs = QgsVectorLayer(junc_p, "junctions", "ogr")
-if not juncs.isValid():
-    raise Exception("invalid junctions layer")
 
-jfields = [f.name() for f in juncs.fields()]
-if JUNC_ID_FIELD not in jfields:
-    raise Exception("junctions.gpkg has no '%s' field. Found: %s"
-                    % (JUNC_ID_FIELD, jfields))
+# =============================================================================
+# LOAD JUNCTIONS
+# =============================================================================
 
-jinfo = {}   # junction_id (int) -> QgsPointXY
-for f in juncs.getFeatures():
-    jid = as_int(f[JUNC_ID_FIELD])
-    g = f.geometry()
-    if jid is None or g is None or g.isEmpty():
+junctions = QgsVectorLayer(
+    junctions_p + "|layername=" + JUNCTIONS_LAYER,
+    "junctions",
+    "ogr",
+)
+if not junctions.isValid():
+    junctions = QgsVectorLayer(junctions_p, "junctions", "ogr")
+if not junctions.isValid():
+    raise Exception("invalid junctions layer: " + junctions_p)
+
+junction_fields = [field.name() for field in junctions.fields()]
+if "junction_id" not in junction_fields:
+    raise Exception("junctions.gpkg has no junction_id field")
+
+jinfo = {}
+for feature in junctions.getFeatures():
+    jid = iid(feature["junction_id"])
+    geometry = feature.geometry()
+    if jid is None or geometry is None or geometry.isEmpty():
         continue
-    jinfo[jid] = QgsPointXY(g.asPoint())
+    if jid in jinfo:
+        raise Exception("duplicate junction_id: %s" % jid)
+    jinfo[jid] = QgsPointXY(geometry.asPoint())
 
-print("Junctions loaded:", len(jinfo))
 if not jinfo:
-    raise Exception("no junctions found -- run materialize_junctions.py first")
+    raise Exception("junctions.gpkg contains no usable junctions")
 
-# ---------------------------------------------------------------------------
-# load subbasin centroids (origin of connector lines) by id
-# ---------------------------------------------------------------------------
-subs = QgsVectorLayer(params_p + "|layername=" + PARAMS_LAYER, "subs", "ogr")
-if not subs.isValid():
-    raise Exception("invalid subbasin layer")
 
-cent_xy = {}    # subbasin id (int) -> (x,y) centroid
-for f in subs.getFeatures():
-    sid = as_int(f["id"])
-    cx, cy = f["centroid_x"], f["centroid_y"]
-    if sid is not None and cx is not None and cy is not None:
-        try:
-            cent_xy[sid] = (float(cx), float(cy))
-        except (TypeError, ValueError):
-            pass
+# =============================================================================
+# LOAD SUBBASINS AND POUR POINTS
+# =============================================================================
 
-# ---------------------------------------------------------------------------
-# subbasin -> nearest JUNCTION (fallback: nearest reach UP end)
-# subbasin id == pour point id
-# ---------------------------------------------------------------------------
-pts = QgsVectorLayer(pourpts_p, "pour", "ogr")
-if not pts.isValid():
-    raise Exception("invalid pour-point layer")
+subbasins = QgsVectorLayer(
+    params_p + "|layername=" + PARAMS_LAYER,
+    "subwatersheds",
+    "ogr",
+)
+if not subbasins.isValid():
+    raise Exception("invalid subwatershed params layer: " + params_p)
 
-sub_kind  = {}   # id -> 'junction' | 'reach'
-sub_junc  = {}   # id -> junction_id   (or None)
-sub_reach = {}   # id -> reach fid     (or None)
-sub_dist  = {}   # id -> distance to chosen target (m)
-sub_dbg   = {}   # id -> human-readable wiring string
-pp_present = set()
+sub_fields = [field.name() for field in subbasins.fields()]
+if "id" not in sub_fields:
+    raise Exception("subwatershed params layer has no id field")
 
-for pt in pts.getFeatures():
-    pid = as_int(pt["id"])
-    if pid is None:
+sub_centroids = {}
+sub_ids = set()
+for feature in subbasins.getFeatures():
+    sid = iid(feature["id"])
+    if sid is None:
         continue
-    pp_present.add(pid)
-    g = pt.geometry()
-    p = QgsPointXY(g.asPoint())
+    if sid in sub_ids:
+        raise Exception("duplicate subbasin id: %s" % sid)
+    sub_ids.add(sid)
 
-    # nearest junction
-    bj, bjd = None, None
-    for jid, jp in jinfo.items():
-        d = p.distance(jp)
-        if bjd is None or d < bjd:
-            bj, bjd = jid, d
+    cx = ffloat(feature["centroid_x"]) if "centroid_x" in sub_fields else None
+    cy = ffloat(feature["centroid_y"]) if "centroid_y" in sub_fields else None
+    if cx is not None and cy is not None:
+        sub_centroids[sid] = QgsPointXY(cx, cy)
+    elif feature.geometry() is not None and not feature.geometry().isEmpty():
+        sub_centroids[sid] = QgsPointXY(feature.geometry().centroid().asPoint())
 
-    if bjd is not None and bjd <= SNAP_TOL:
-        sub_kind[pid]  = "junction"
-        sub_junc[pid]  = bj
-        sub_reach[pid] = None
-        sub_dist[pid]  = bjd
-        sub_dbg[pid]   = "sub %d -> junction %d (%.1f m)" % (pid, bj, bjd)
-    else:
-        # fallback: nearest reach UPSTREAM end
-        br, brd = None, None
-        for fid, e in rinfo.items():
-            d = p.distance(e["up"])
-            if brd is None or d < brd:
-                br, brd = fid, d
-        sub_kind[pid]  = "reach"
-        sub_junc[pid]  = None
-        sub_reach[pid] = br
-        sub_dist[pid]  = brd
-        sub_dbg[pid]   = ("sub %d -> reach %s up-end (%.1f m) "
-                          "[NO junction within %.1f m]"
-                          % (pid, br, brd, SNAP_TOL))
+pour_points = QgsVectorLayer(POUR_POINTS_PATH, "pour_points", "ogr")
+if not pour_points.isValid():
+    raise Exception("invalid pour-point layer: " + POUR_POINTS_PATH)
 
-n_junc  = sum(1 for k in sub_kind.values() if k == "junction")
-n_reach = sum(1 for k in sub_kind.values() if k == "reach")
-print("\nSubbasins wired: %d to junctions, %d to reach up-ends (fallback)."
-      % (n_junc, n_reach))
-if n_reach:
-    print("  NOTE: %d pour point(s) had no junction within %.1f m. They were"
-          " wired to the nearest reach up-end and flagged 'reach' in ds_debug."
-          % (n_reach, SNAP_TOL))
+pour_fields = [field.name() for field in pour_points.fields()]
+pour_id_field = "id" if "id" in pour_fields else None
 
-# ---------------------------------------------------------------------------
-# write ds_kind / ds_junction_id / ds_reach_id / ds_dist_m / ds_debug
-# onto subwatershed_params.gpkg
-# ---------------------------------------------------------------------------
-subs.startEditing()
-have = [f.name() for f in subs.fields()]
-want = [("ds_kind",        QVariant.String),
-        ("ds_junction_id", QVariant.Int),
-        ("ds_reach_id",    QVariant.Int),
-        ("ds_dist_m",      QVariant.Double),
-        ("ds_debug",       QVariant.String)]
-add = [QgsField(n, t) for (n, t) in want if n not in have]
-if add:
-    subs.dataProvider().addAttributes(add); subs.updateFields()
-i_kind = subs.fields().indexFromName("ds_kind")
-i_jid  = subs.fields().indexFromName("ds_junction_id")
-i_rid  = subs.fields().indexFromName("ds_reach_id")
-i_dst  = subs.fields().indexFromName("ds_dist_m")
-i_dbg  = subs.fields().indexFromName("ds_debug")
-for f in subs.getFeatures():
-    sid = as_int(f["id"])
-    if sid not in sub_kind:
-        subs.changeAttributeValue(f.id(), i_dbg,
-                                  "sub %s -> NO pour point matched" % str(sid))
+pp = {}
+for feature in pour_points.getFeatures():
+    pid = iid(feature[pour_id_field]) if pour_id_field else iid(feature.id())
+    geometry = feature.geometry()
+    if pid is None or geometry is None or geometry.isEmpty():
         continue
-    jid = sub_junc.get(sid); rid = sub_reach.get(sid)
-    subs.changeAttributeValue(f.id(), i_kind, sub_kind[sid])
-    subs.changeAttributeValue(f.id(), i_jid, None if jid is None else int(jid))
-    subs.changeAttributeValue(f.id(), i_rid, None if rid is None else int(rid))
-    subs.changeAttributeValue(f.id(), i_dst, float(sub_dist[sid]))
-    subs.changeAttributeValue(f.id(), i_dbg, sub_dbg[sid])
-subs.commitChanges()
-print("Wrote ds_kind / ds_junction_id / ds_reach_id / ds_dist_m / ds_debug"
-      " to subwatershed_params.gpkg")
+    if pid in pp:
+        raise Exception("duplicate pour-point id: %s" % pid)
+    pp[pid] = QgsPointXY(geometry.asPoint())
 
-# ---------------------------------------------------------------------------
-# verification connectors: subbasin CENTROID -> junction (or reach up end)
-# ---------------------------------------------------------------------------
-flds = QgsFields()
-flds.append(QgsField("kind",     QVariant.String))   # 'junction' | 'reach'
-flds.append(QgsField("sub_id",   QVariant.Int))
-flds.append(QgsField("dst_junc", QVariant.Int))
-flds.append(QgsField("dst_reach",QVariant.Int))
-flds.append(QgsField("dist_m",   QVariant.Double))
-flds.append(QgsField("ds_debug", QVariant.String))
 
-# release any project lock on this GPKG (Windows) before overwriting
-_proj = QgsProject.instance()
-for _lyr in list(_proj.mapLayers().values()):
-    try:
-        _src = _lyr.source().split("|", 1)[0]
-    except Exception:
-        _src = ""
-    if os.path.normcase(os.path.abspath(_src)) == \
-       os.path.normcase(os.path.abspath(connect_p)):
-        _proj.removeMapLayer(_lyr.id())
+# =============================================================================
+# RESOLVE SUBBASIN DOWNSTREAM ELEMENTS
+# =============================================================================
 
-opts = QgsVectorFileWriter.SaveVectorOptions()
-opts.driverName = "GPKG"; opts.layerName = "topology_connectors_subbasins"
-opts.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteFile
+def nearest_junction(point):
+    ranked = sorted(
+        (point.distance(junction_point), jid)
+        for jid, junction_point in jinfo.items()
+    )
+    return (ranked[0][1], ranked[0][0]) if ranked else (None, None)
+
+
+def nearest_reach(point):
+    ranked = []
+    point_geometry = QgsGeometry.fromPointXY(point)
+    for rid, info in rinfo.items():
+        line_distance = info["geometry"].distance(point_geometry)
+        up_distance = point.distance(info["up"])
+        ranked.append((line_distance, up_distance, rid))
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    if not ranked:
+        return None, None, None
+    line_distance, up_distance, rid = ranked[0]
+    return rid, line_distance, up_distance
+
+
+sub_kind = {}
+sub_junction = {}
+sub_reach = {}
+sub_distance = {}
+sub_debug = {}
+
+for sid in sorted(sub_ids):
+    point = pp.get(sid)
+    if point is None:
+        sub_kind[sid] = None
+        sub_junction[sid] = None
+        sub_reach[sid] = None
+        sub_distance[sid] = None
+        sub_debug[sid] = "sub %s -> NO matching pour point" % sid
+        continue
+
+    jid, junction_distance = nearest_junction(point)
+
+    if jid is not None and junction_distance <= snap_tol:
+        sub_kind[sid] = "junction"
+        sub_junction[sid] = jid
+        sub_reach[sid] = None
+        sub_distance[sid] = junction_distance
+        sub_debug[sid] = (
+            "sub %s -> junction %s (%.3f m)"
+            % (sid, jid, junction_distance)
+        )
+        continue
+
+    if not ALLOW_REACH_FALLBACK:
+        sub_kind[sid] = None
+        sub_junction[sid] = None
+        sub_reach[sid] = None
+        sub_distance[sid] = junction_distance
+        sub_debug[sid] = (
+            "sub %s -> NO junction within %.3f m"
+            % (sid, snap_tol)
+        )
+        continue
+
+    rid, line_distance, up_distance = nearest_reach(point)
+    sub_kind[sid] = "reach" if rid is not None else None
+    sub_junction[sid] = None
+    sub_reach[sid] = rid
+    sub_distance[sid] = line_distance
+    sub_debug[sid] = (
+        "sub %s -> reach %s; line distance %.3f m; up-end %.3f m "
+        "[NO junction within %.3f m]"
+        % (sid, rid, line_distance, up_distance, snap_tol)
+    )
+
+
+# =============================================================================
+# WRITE SUBBASIN ATTRIBUTES
+# =============================================================================
+
+subbasins.startEditing()
+wanted = [
+    ("ds_kind", QVariant.String),
+    ("ds_junction_id", QVariant.Int),
+    ("ds_reach_id", QVariant.Int),
+    ("ds_dist_m", QVariant.Double),
+    ("ds_debug", QVariant.String),
+]
+existing = [field.name() for field in subbasins.fields()]
+missing = [
+    QgsField(name, field_type)
+    for name, field_type in wanted
+    if name not in existing
+]
+if missing:
+    subbasins.dataProvider().addAttributes(missing)
+    subbasins.updateFields()
+
+index_kind = subbasins.fields().indexFromName("ds_kind")
+index_junction = subbasins.fields().indexFromName("ds_junction_id")
+index_reach = subbasins.fields().indexFromName("ds_reach_id")
+index_distance = subbasins.fields().indexFromName("ds_dist_m")
+index_debug = subbasins.fields().indexFromName("ds_debug")
+
+for feature in subbasins.getFeatures():
+    sid = iid(feature["id"])
+    if sid is None:
+        continue
+
+    subbasins.changeAttributeValue(
+        feature.id(),
+        index_kind,
+        sub_kind.get(sid),
+    )
+    subbasins.changeAttributeValue(
+        feature.id(),
+        index_junction,
+        sub_junction.get(sid),
+    )
+    subbasins.changeAttributeValue(
+        feature.id(),
+        index_reach,
+        sub_reach.get(sid),
+    )
+    subbasins.changeAttributeValue(
+        feature.id(),
+        index_distance,
+        sub_distance.get(sid),
+    )
+    subbasins.changeAttributeValue(
+        feature.id(),
+        index_debug,
+        sub_debug.get(sid, "sub %s -> unresolved" % sid),
+    )
+
+if not subbasins.commitChanges():
+    raise Exception("failed to commit subbasin topology attributes")
+
+
+# =============================================================================
+# WRITE CONNECTORS
+# =============================================================================
+
+delete_dataset(connect_p)
+
+fields = QgsFields()
+fields.append(QgsField("kind", QVariant.String))
+fields.append(QgsField("sub_id", QVariant.Int))
+fields.append(QgsField("dst_junc", QVariant.Int))
+fields.append(QgsField("dst_reach", QVariant.Int))
+fields.append(QgsField("dist_m", QVariant.Double))
+fields.append(QgsField("ds_debug", QVariant.String))
+
+options = QgsVectorFileWriter.SaveVectorOptions()
+options.driverName = "GPKG"
+options.layerName = "topology_connectors_subbasins"
+options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteFile
+
 writer = QgsVectorFileWriter.create(
-    connect_p, flds, QgsWkbTypes.LineString, reaches.crs(),
-    QgsCoordinateTransformContext(), opts)
+    connect_p,
+    fields,
+    QgsWkbTypes.LineString,
+    reaches.crs(),
+    QgsCoordinateTransformContext(),
+    options,
+)
 
-n_written = 0
-n_nocent  = 0
-for sid in sub_kind:
-    if sid not in cent_xy:
-        n_nocent += 1
+if writer.hasError() != QgsVectorFileWriter.NoError:
+    raise Exception("could not create connectors: " + writer.errorMessage())
+
+connector_count = 0
+for sid in sorted(sub_ids):
+    start = sub_centroids.get(sid)
+    kind = sub_kind.get(sid)
+    if start is None or kind is None:
         continue
-    ax, ay = cent_xy[sid]
-    a = QgsPointXY(ax, ay)
-    if sub_kind[sid] == "junction":
-        jid = sub_junc[sid]
-        b = jinfo[jid]
+
+    if kind == "junction":
+        end = jinfo.get(sub_junction[sid])
     else:
-        rid = sub_reach[sid]
-        b = rinfo[rid]["up"]
-    if a.distance(b) < 0.01:        # skip degenerate (zero-length) connectors
+        reach = rinfo.get(sub_reach[sid])
+        end = reach["up"] if reach else None
+
+    if end is None or start.distance(end) < 0.01:
         continue
-    ft = QgsFeature(flds)
-    ft.setGeometry(QgsGeometry.fromPolylineXY([a, b]))
-    ft["kind"]      = sub_kind[sid]
-    ft["sub_id"]    = int(sid)
-    ft["dst_junc"]  = None if sub_junc[sid]  is None else int(sub_junc[sid])
-    ft["dst_reach"] = None if sub_reach[sid] is None else int(sub_reach[sid])
-    ft["dist_m"]    = float(sub_dist[sid])
-    ft["ds_debug"]  = sub_dbg[sid]
-    writer.addFeature(ft)
-    n_written += 1
+
+    feature = QgsFeature(fields)
+    feature.setGeometry(QgsGeometry.fromPolylineXY([start, end]))
+    feature["kind"] = kind
+    feature["sub_id"] = int(sid)
+    feature["dst_junc"] = sub_junction.get(sid)
+    feature["dst_reach"] = sub_reach.get(sid)
+    feature["dist_m"] = sub_distance.get(sid)
+    feature["ds_debug"] = sub_debug.get(sid, "")
+    writer.addFeature(feature)
+    connector_count += 1
+
 del writer
-print("Wrote %d connector(s) -> %s" % (n_written, os.path.basename(connect_p)))
-if n_nocent:
-    print("  WARNING: %d subbasin(s) had no centroid_x/y -- no connector drawn"
-          " (centroid comes from extract_slope.py)." % n_nocent)
 
-# ---------------------------------------------------------------------------
-# report
-# ---------------------------------------------------------------------------
-print("\nSUBBASIN TOPOLOGY SUMMARY")
-print("  subbasin_id -> downstream element")
-for sid in sorted(sub_dbg):
-    print("    " + sub_dbg[sid])
 
-# any subbasin present in params but with no matching pour point?
-missing_pp = [as_int(f["id"]) for f in subs.getFeatures()
-              if as_int(f["id"]) is not None and as_int(f["id"]) not in pp_present]
-if missing_pp:
-    print("\n  WARNING: subbasin id(s) with no matching pour point:",
-          sorted(missing_pp))
+# =============================================================================
+# REPORT
+# =============================================================================
+
+print("=" * 78)
+print("DERIVE SUBBASIN TOPOLOGY")
+print("=" * 78)
+print("Reaches     :", reaches_p)
+print("Junctions   :", junctions_p)
+print("Subbasins   :", params_p)
+print("Pour points :", POUR_POINTS_PATH)
+print("Pixel size  : %.4f m (%s)" % (pixel_m, pixel_source))
+print("Snap tol    : %.4f m" % snap_tol)
+print("")
+print("SUBBASIN TOPOLOGY SUMMARY")
+for sid in sorted(sub_ids):
+    print("  " + sub_debug[sid])
+
+missing_points = sorted(sid for sid in sub_ids if sid not in pp)
+if missing_points:
+    print("\nWARNING: subbasins without matching pour points:", missing_points)
+
+fallbacks = sorted(
+    sid for sid in sub_ids if sub_kind.get(sid) == "reach"
+)
+if fallbacks:
+    print("\nWARNING: reach fallback used for subbasins:", fallbacks)
+
+unresolved = sorted(
+    sid for sid in sub_ids if sub_kind.get(sid) is None
+)
+if unresolved:
+    print("\nWARNING: unresolved subbasins:", unresolved)
+
+print("\nWrote %d connector(s): %s" % (connector_count, connect_p))
 
 if RELOAD_IN_PROJECT:
     QgsProject.instance().addMapLayer(
-        QgsVectorLayer(connect_p, "topology_connectors_subbasins", "ogr"))
-    print("\n  loaded topology_connectors_subbasins")
+        QgsVectorLayer(
+            connect_p,
+            "topology_connectors_subbasins",
+            "ogr",
+        )
+    )
+    print("Loaded topology_connectors_subbasins.")
 
-print("\nDone (phase 2 subbasin topology).")
-print("VERIFY: label topology_connectors_subbasins by 'ds_debug'; each line")
-print("should run from a subwatershed centroid to the junction its pour point")
-print("sits on. Any line flagged '[NO junction ...]' is a mid-reach fallback.")
+print("\nDone.")
