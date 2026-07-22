@@ -51,6 +51,17 @@ AMBIGUITY_MARGIN_FACTOR = float(
     globals().get("AMBIGUITY_MARGIN_FACTOR", 0.25)
 )
 ELEVATION_EPS_M = float(globals().get("ELEVATION_EPS_M", 0.01))
+
+# r.stream.extract normally digitizes reaches downstream. Endpoint DEM samples
+# can contain small adverse rises near flat channels/outlets. Do not reverse a
+# reach merely because the final endpoint is a few centimetres higher.
+ORIENTATION_REVERSAL_MIN_RISE_M = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_RISE_M", 0.25)
+)
+ORIENTATION_REVERSAL_MIN_SLOPE = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_SLOPE", 0.00010)
+)
+
 RELOAD_IN_PROJECT = bool(globals().get("RELOAD_IN_PROJECT", True))
 STRICT_SINGLE_OUTLET = bool(globals().get("STRICT_SINGLE_OUTLET", False))
 
@@ -296,24 +307,39 @@ for feature in features:
     z_first = ffloat(feature["z_up_m"]) if "z_up_m" in field_names else None
     z_last = ffloat(feature["z_dn_m"]) if "z_dn_m" in field_names else None
 
-    if (
-        z_first is not None
-        and z_last is not None
-        and abs(z_first - z_last) > ELEVATION_EPS_M
-    ):
-        if z_first >= z_last:
-            up_point, dn_point = first_point, last_point
-            z_up, z_dn = z_first, z_last
-            orientation_source = "elevation"
-        else:
-            up_point, dn_point = last_point, first_point
-            z_up, z_dn = z_last, z_first
-            orientation_source = "elevation-reversed"
+    # GRASS stream geometry order is the primary direction source. Reverse only
+    # when the endpoint DEM evidence is materially strong. This prevents tiny
+    # adverse DEM noise on nearly flat reaches from turning a real outflow reach
+    # into a false tributary and creating artificial terminal junctions.
+    geometry_length = float(feature.geometry().length())
+    adverse_rise = None
+    adverse_slope = None
+    if z_first is not None and z_last is not None:
+        adverse_rise = z_last - z_first
+        if geometry_length > 0:
+            adverse_slope = adverse_rise / geometry_length
+
+    should_reverse = (
+        adverse_rise is not None
+        and adverse_slope is not None
+        and adverse_rise >= ORIENTATION_REVERSAL_MIN_RISE_M
+        and adverse_slope >= ORIENTATION_REVERSAL_MIN_SLOPE
+    )
+
+    if should_reverse:
+        up_point, dn_point = last_point, first_point
+        z_up, z_dn = z_last, z_first
+        orientation_source = "strong-elevation-reversal"
     else:
         up_point, dn_point = first_point, last_point
         z_up, z_dn = z_first, z_last
-        orientation_source = "geometry-order"
-        orientation_warnings.append(rid)
+        if adverse_rise is not None and adverse_rise > ELEVATION_EPS_M:
+            orientation_source = "geometry-order; ignored small adverse DEM rise"
+            orientation_warnings.append(
+                (rid, adverse_rise, adverse_slope or 0.0)
+            )
+        else:
+            orientation_source = "geometry-order"
 
     source_stream = iid(feature[stream_id_field]) if stream_id_field else None
     source_next = iid(feature[next_stream_field]) if next_stream_field else None
@@ -342,10 +368,14 @@ print("Next field   :", next_stream_field or "<none>")
 
 if orientation_warnings:
     print(
-        "WARNING: %d reach(es) used geometry order because endpoint elevations "
-        "were absent or nearly equal: %s"
-        % (len(orientation_warnings), sorted(orientation_warnings))
+        "WARNING: %d reach(es) retained GRASS geometry order despite a small "
+        "adverse DEM rise:" % len(orientation_warnings)
     )
+    for _rid, _rise, _slope in orientation_warnings:
+        print(
+            "  Reach_%s: adverse rise %.4f m, adverse slope %.8f"
+            % (_rid, _rise, _slope)
+        )
 
 
 # =============================================================================
@@ -501,6 +531,7 @@ required_fields = [
     ("ds_type", QVariant.String),
     ("ds_reach_id", QVariant.Int),
     ("topo_note", QVariant.String),
+    ("topo_orient", QVariant.String),
 ]
 missing_fields = [
     QgsField(name, field_type)
@@ -515,6 +546,7 @@ index_reach_id = reaches.fields().indexFromName("reach_id")
 index_ds_type = reaches.fields().indexFromName("ds_type")
 index_ds_reach = reaches.fields().indexFromName("ds_reach_id")
 index_note = reaches.fields().indexFromName("topo_note")
+index_orient = reaches.fields().indexFromName("topo_orient")
 
 for feature in reaches.getFeatures():
     fid = int(feature.id())
@@ -532,6 +564,11 @@ for feature in reaches.getFeatures():
         None if downstream is None else int(downstream),
     )
     reaches.changeAttributeValue(fid, index_note, ds_note[rid])
+    reaches.changeAttributeValue(
+        fid,
+        index_orient,
+        rinfo[rid]["orientation_source"],
+    )
 
 if not reaches.commitChanges():
     raise Exception("failed to commit topology attributes to reaches.gpkg")
@@ -541,6 +578,7 @@ print("  reach_id")
 print("  ds_type")
 print("  ds_reach_id")
 print("  topo_note")
+print("  topo_orient")
 
 
 # =============================================================================

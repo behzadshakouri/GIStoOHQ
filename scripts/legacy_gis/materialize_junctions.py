@@ -63,17 +63,23 @@ except NameError:
 
 REACHES_NAME = "reaches.gpkg"
 
-PIXEL_M = 9.336
-SNAP_PX = 1.5
-SNAP_TOL = SNAP_PX * PIXEL_M
+SNAP_PX = float(globals().get("SNAP_PX", 1.5))
+PIXEL_M = globals().get("PIXEL_M", None)
+SNAP_TOL = globals().get("SNAP_TOL", None)
+
+ORIENTATION_REVERSAL_MIN_RISE_M = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_RISE_M", 0.25)
+)
+ORIENTATION_REVERSAL_MIN_SLOPE = float(
+    globals().get("ORIENTATION_REVERSAL_MIN_SLOPE", 0.00010)
+)
 
 # Used only to recover a downstream reach when its upstream endpoint is not in
 # the primary confluence cluster. Keep this modest so unrelated nearby reaches
 # are not joined accidentally.
-OUTFLOW_SEARCH_FACTOR = 2.5
-OUTFLOW_SEARCH_TOL = OUTFLOW_SEARCH_FACTOR * SNAP_TOL
+OUTFLOW_SEARCH_FACTOR = float(globals().get("OUTFLOW_SEARCH_FACTOR", 2.5))
 
-RELOAD_IN_PROJECT = True
+RELOAD_IN_PROJECT = bool(globals().get("RELOAD_IN_PROJECT", True))
 # ---------------------------------------------------------------------------
 
 site_path = os.path.join(ROOT, SITE_DIR)
@@ -81,6 +87,27 @@ OUT_DIR = os.path.join(site_path, "outputs")
 reaches_p = os.path.join(OUT_DIR, REACHES_NAME)
 junc_p = os.path.join(OUT_DIR, "junctions.gpkg")
 connect_p = os.path.join(OUT_DIR, "topology_connectors.gpkg")
+flowdir_p = os.path.join(OUT_DIR, "flow_dir.tif")
+
+if PIXEL_M is None:
+    try:
+        from qgis.core import QgsRasterLayer
+        _raster = QgsRasterLayer(flowdir_p, "flow_dir_for_junctions")
+        if _raster.isValid():
+            _px_values = [
+                abs(float(_raster.rasterUnitsPerPixelX())),
+                abs(float(_raster.rasterUnitsPerPixelY())),
+            ]
+            _px_values = [v for v in _px_values if v > 0]
+            PIXEL_M = sum(_px_values) / len(_px_values) if _px_values else 9.336
+        else:
+            PIXEL_M = 9.336
+    except Exception:
+        PIXEL_M = 9.336
+
+PIXEL_M = float(PIXEL_M)
+SNAP_TOL = float(SNAP_TOL) if SNAP_TOL is not None else SNAP_PX * PIXEL_M
+OUTFLOW_SEARCH_TOL = OUTFLOW_SEARCH_FACTOR * SNAP_TOL
 
 if not os.path.isfile(reaches_p):
     raise Exception("not found: " + reaches_p)
@@ -111,13 +138,19 @@ def iid(v):
 def line_endpoints(geom):
     if geom is None or geom.isEmpty():
         return None, None
-    if geom.isMultipart():
-        parts = geom.asMultiPolyline()
-        pts = [p for part in parts for p in part]
-    else:
-        pts = geom.asPolyline()
-    if len(pts) < 2:
+
+    parts = geom.asMultiPolyline() if geom.isMultipart() else [geom.asPolyline()]
+    valid = [part for part in parts if len(part) >= 2]
+    if not valid:
         return None, None
+
+    def part_length(part):
+        total = 0.0
+        for i in range(1, len(part)):
+            total += QgsPointXY(part[i - 1]).distance(QgsPointXY(part[i]))
+        return total
+
+    pts = max(valid, key=part_length)
     return QgsPointXY(pts[0]), QgsPointXY(pts[-1])
 
 
@@ -151,12 +184,23 @@ for f in reaches.getFeatures():
         print("WARNING: skipping empty/invalid reach geometry, reach_id=%s" % rid)
         continue
 
-    swap = False
-    if has_z_up and has_z_dn:
+    # Use the orientation decision written by derive_topology_reaches.py when
+    # available. Otherwise repeat its conservative rule: preserve GRASS geometry
+    # order unless a materially large adverse rise and slope both support reversal.
+    orient_text = normalized_text(f["topo_orient"]) if "topo_orient" in field_names else ""
+    swap = orient_text == "strong-elevation-reversal"
+
+    if not orient_text and has_z_up and has_z_dn:
         try:
             zu = float(f["z_up_m"])
             zd = float(f["z_dn_m"])
-            swap = zd > zu
+            length_m = float(f.geometry().length())
+            adverse_rise = zd - zu
+            adverse_slope = adverse_rise / length_m if length_m > 0 else 0.0
+            swap = (
+                adverse_rise >= ORIENTATION_REVERSAL_MIN_RISE_M
+                and adverse_slope >= ORIENTATION_REVERSAL_MIN_SLOPE
+            )
         except (TypeError, ValueError):
             swap = False
 
