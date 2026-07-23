@@ -386,10 +386,16 @@ class DemWorkflowDock:
         config_path = Path(self.config.text()).expanduser()
         data = _read_config(config_path)
         dem = data.get("dem_acquisition", {}) if isinstance(data, dict) else {}
+        outlet = data.get("outlet", {}) if isinstance(data, dict) else {}
         layer_values = {
             key: dem.get(key)
             for key in ("acquisition_area", "expanded_acquisition_area", "watershed_boundary", "tile_index")
         }
+        if isinstance(outlet, dict):
+            layer_values.update({
+                "outlet_raw": outlet.get("raw_path"),
+                "outlet_snapped": outlet.get("snapped_path"),
+            })
         manifest_value = dem.get("tile_manifest")
         if manifest_value:
             manifest_path = Path(manifest_value).expanduser()

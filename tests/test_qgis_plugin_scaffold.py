@@ -113,3 +113,12 @@ def test_qgis_plugin_runs_commands_with_qprocess():
     assert "readyReadStandardOutput" in dock
     assert "readyReadStandardError" in dock
     assert "A workflow command is already running" in dock
+
+
+def test_qgis_plugin_loads_raw_and_snapped_outlet_layers():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "outlet_raw" in dock
+    assert "outlet_snapped" in dock
+    assert "raw_path" in dock
+    assert "snapped_path" in dock

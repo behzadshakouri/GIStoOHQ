@@ -470,10 +470,13 @@ path used by the backend. This keeps manual polygon input, canvas-extent input,
 and config-driven `prepare-dem` on the same `dem_acquisition.acquisition_area`
 contract.
 
-Layer loading now includes DEM tile preview support. If `tile_index` exists, the
-QGIS dock loads it with the other configured layers; if `tile_manifest` contains
-selected item bounds, the dock writes a temporary selected-tile-footprints GeoJSON
-next to the manifest and loads that as a preview layer.
+Layer loading now includes outlet and DEM tile preview support. If
+`outlet.raw_path` or `outlet.snapped_path` exists, the QGIS dock loads those
+points so users can compare the clicked outlet with the snapped delineation
+point. If `tile_index` exists, the QGIS dock loads it with the other configured
+layers; if `tile_manifest` contains selected item bounds, the dock writes a
+temporary selected-tile-footprints GeoJSON next to the manifest and loads that as
+a preview layer.
 
 ### QGIS backend command resolution
 
