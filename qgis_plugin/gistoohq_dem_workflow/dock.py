@@ -23,6 +23,28 @@ def _write_config(path: Path, data) -> None:
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
+def _write_geojson_polygon(path: Path, coords: list[tuple[float, float]]) -> None:
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"source": "qgis_canvas_extent"},
+                        "geometry": {"type": "Polygon", "coordinates": [[list(point) for point in coords]]},
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 class OutletCaptureTool:
     def __init__(self, dock):
         from qgis.gui import QgsMapToolEmitPoint
@@ -74,6 +96,9 @@ class DemWorkflowDock:
         outlet_button = QPushButton("Pick Outlet on Map")
         outlet_button.clicked.connect(self.pick_outlet)
         layout.addWidget(outlet_button)
+        extent_button = QPushButton("Use Canvas Extent as DEM Area")
+        extent_button.clicked.connect(self.use_canvas_extent_as_area)
+        layout.addWidget(extent_button)
         for label, command in (
             ("Prepare DEM", "prepare-dem"),
             ("Download DEM Tiles", "download-dem-manifest"),
@@ -111,6 +136,40 @@ class DemWorkflowDock:
         outlet["latitude"] = lat
         outlet.setdefault("input_crs", "EPSG:4326")
         _write_config(config_path, data)
+
+    def use_canvas_extent_as_area(self) -> None:
+        from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject
+
+        config_path = Path(self.config.text()).expanduser()
+        data = _read_config(config_path)
+        if not isinstance(data, dict):
+            data = {}
+        dem = data.setdefault("dem_acquisition", {})
+        if not isinstance(dem, dict):
+            dem = {}
+            data["dem_acquisition"] = dem
+        area_value = dem.get("acquisition_area") or "intermediate/dem_acquisition_area.geojson"
+        area_path = Path(area_value).expanduser()
+        if not area_path.is_absolute():
+            area_path = config_path.parent / area_path
+        canvas = self.iface.mapCanvas()
+        extent = canvas.extent()
+        source_crs = canvas.mapSettings().destinationCrs()
+        target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+        transform = QgsCoordinateTransform(source_crs, target_crs, QgsProject.instance())
+        corners = [
+            transform.transform(extent.xMinimum(), extent.yMinimum()),
+            transform.transform(extent.xMaximum(), extent.yMinimum()),
+            transform.transform(extent.xMaximum(), extent.yMaximum()),
+            transform.transform(extent.xMinimum(), extent.yMaximum()),
+        ]
+        coords = [(point.x(), point.y()) for point in corners]
+        coords.append(coords[0])
+        _write_geojson_polygon(area_path, coords)
+        dem["method"] = "polygon"
+        dem["acquisition_area"] = str(area_path if area_path.is_absolute() else area_value)
+        _write_config(config_path, data)
+        self.log.append(f"Wrote DEM acquisition area from canvas extent: {area_path}")
 
     def run_command(self, command: str) -> None:
         argv = ["ohqbuild", command, "--config", self.config.text()]

@@ -390,3 +390,8 @@ a map-click tool, transform the clicked canvas coordinate to EPSG:4326, and writ
 `outlet.longitude`, `outlet.latitude`, and `outlet.input_crs` back to the selected
 project config. This is the first step toward replacing manual longitude/latitude
 entry with map interaction.
+
+The dock also includes a first manual-area helper: **Use Canvas Extent as DEM
+Area** writes the current QGIS map canvas extent to the configured acquisition
+GeoJSON and changes `dem_acquisition.method` to `polygon`. This provides a simple
+area-only/expert path before a full polygon drawing tool is implemented.
