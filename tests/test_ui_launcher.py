@@ -89,3 +89,14 @@ def test_geojson_preview_summary(tmp_path):
     )
 
     assert geojson_preview_summary(geojson) == "1 feature(s); geometry: Polygon"
+
+
+def test_ui_launcher_builds_run_dem_prep_command(tmp_path):
+    from ohqbuilder.ui.launcher import LauncherState, command_for_step
+
+    state = LauncherState(config_path=tmp_path / "config.yaml")
+
+    command = command_for_step("run-dem-prep", state)
+
+    assert command.label == "Run DEM Prep"
+    assert command.argv == ("ohqbuild", "run-dem-prep", "--config", str(tmp_path / "config.yaml"))

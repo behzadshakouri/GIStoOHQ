@@ -122,3 +122,10 @@ def test_qgis_plugin_loads_raw_and_snapped_outlet_layers():
     assert "outlet_snapped" in dock
     assert "raw_path" in dock
     assert "snapped_path" in dock
+
+
+def test_qgis_plugin_has_direct_dem_prep_button():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "Run Direct DEM Prep" in dock
+    assert "run-dem-prep" in dock

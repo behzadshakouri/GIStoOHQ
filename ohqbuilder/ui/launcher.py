@@ -14,6 +14,7 @@ import yaml
 
 WorkflowStep = Literal[
     "prepare-dem",
+    "run-dem-prep",
     "download-dem-manifest",
     "materialize-inputs",
     "validate-dem",
@@ -46,6 +47,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
 
     if step == "prepare-dem":
         return WorkflowCommand("Prepare DEM", ("ohqbuild", "prepare-dem", "--config", str(state.config_path)))
+    if step == "run-dem-prep":
+        return WorkflowCommand("Run DEM Prep", ("ohqbuild", "run-dem-prep", "--config", str(state.config_path)))
     if step == "validate-dem":
         return WorkflowCommand("Validate DEM", ("ohqbuild", "validate-dem", "--config", str(state.config_path)))
     if step == "download-dem-manifest":
@@ -219,7 +222,7 @@ class LauncherApp:
         tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
         tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
-        for step in ("prepare-dem", "download-dem-manifest", "materialize-inputs", "validate-dem"):
+        for step in ("prepare-dem", "run-dem-prep", "download-dem-manifest", "materialize-inputs", "validate-dem"):
             tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(side="left")
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="nsew")

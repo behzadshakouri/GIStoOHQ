@@ -452,7 +452,8 @@ ohqbuild ui
 
 The launcher is intentionally thin. It does not implement hydrology itself; it
 builds and runs the same backend commands used by terminal workflows:
-`prepare-dem`, `download-dem-manifest`, `materialize-inputs`, and `validate-dem`.
+`prepare-dem`, `run-dem-prep`, `download-dem-manifest`, `materialize-inputs`,
+and `validate-dem`.
 This keeps the UI, shell workflow, and future QGIS plugin on the same config and
 artifact contract.
 
@@ -465,8 +466,9 @@ selection and layer rendering while still calling the same backend commands.
 
 A QGIS plugin scaffold is included under `qgis_plugin/gistoohq_dem_workflow` for
 the next UI stage. The dock keeps the same design as the desktop launcher: it
-runs backend `ohqbuild` commands and can load configured GeoJSON outputs into the
-current QGIS project. The first scaffold intentionally avoids custom map tools;
+runs backend `ohqbuild` commands, including the direct `run-dem-prep` path, and
+can load configured GeoJSON outputs into the current QGIS project. The first
+scaffold intentionally avoids custom map tools;
 map-click outlet selection should be added after command execution and layer
 loading are stable.
 

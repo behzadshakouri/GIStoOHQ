@@ -137,7 +137,7 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         raise QgisDockConfigError("Project config must contain a JSON/YAML object.")
     dem = _as_mapping(config.get("dem_acquisition"), "dem_acquisition")
 
-    if command in {"prepare-dem", "validate-dem"}:
+    if command in {"prepare-dem", "run-dem-prep", "validate-dem"}:
         return ["ohqbuild", command, "--config", str(config_path)]
 
     if command == "download-dem-manifest":
@@ -265,6 +265,7 @@ class DemWorkflowDock:
         layout.addWidget(draw_button)
         for label, command in (
             ("Prepare DEM", "prepare-dem"),
+            ("Run Direct DEM Prep", "run-dem-prep"),
             ("Download DEM Tiles", "download-dem-manifest"),
             ("Materialize Inputs", "materialize-inputs"),
             ("Validate DEM", "validate-dem"),
