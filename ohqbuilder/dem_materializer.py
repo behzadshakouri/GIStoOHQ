@@ -44,11 +44,17 @@ def read_dem_manifest(manifest_path: str | Path) -> list[Path]:
         if not isinstance(tile, str) or not tile.strip():
             raise DemMaterializeError("DEM manifest tiles must be non-empty strings.")
         tile_path = Path(tile).expanduser()
-        if not tile_path.is_absolute():
-            tile_path = (base / tile_path).resolve()
-        if not tile_path.exists():
-            raise DemMaterializeError(f"DEM manifest tile does not exist: {tile_path}")
-        sources.append(tile_path)
+        candidates = [tile_path] if tile_path.is_absolute() else [
+            (base / tile_path).resolve(),
+            (base.parent / tile_path).resolve(),
+        ]
+        existing = next((candidate for candidate in candidates if candidate.exists()), None)
+        if existing is None:
+            raise DemMaterializeError(
+                "DEM manifest tile does not exist: "
+                + " or ".join(str(candidate) for candidate in candidates)
+            )
+        sources.append(existing)
     return sources
 
 

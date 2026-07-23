@@ -447,7 +447,8 @@ def test_download_dem_manifest_updates_tile_paths(tmp_path):
     assert result.tile_count == 2
     assert len(data["tiles"]) == 2
     assert (tmp_path / "raw" / "tile_01.tif").exists()
-    assert (tmp_path / "raw" / "named" / "tile_02.tif").exists()
+    assert (tmp_path / "raw" / "tile_02.tif").exists()
+    assert not (tmp_path / "raw" / "named" / "tile_02.tif").exists()
     assert calls[0][0] == "https://example.test/tile_01.tif"
 
 

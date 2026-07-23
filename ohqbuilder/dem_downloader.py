@@ -720,7 +720,7 @@ def download_dem_manifest(
         if isinstance(raw_path, str) and raw_path:
             target = Path(raw_path).expanduser()
             if not target.is_absolute():
-                target = destination / target
+                target = destination / target.name
         else:
             target = destination / _filename_from_url(url, f"dem_tile_{index + 1}.tif")
         target.parent.mkdir(parents=True, exist_ok=True)

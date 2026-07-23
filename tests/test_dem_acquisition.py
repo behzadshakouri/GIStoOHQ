@@ -38,6 +38,18 @@ def test_read_dem_manifest_uses_explicit_tiles(tmp_path):
     assert read_dem_manifest(manifest) == [tile.resolve()]
 
 
+def test_read_dem_manifest_falls_back_to_project_root_relative_tiles(tmp_path):
+    raw = tmp_path / "dem" / "raw"
+    raw.mkdir(parents=True)
+    tile = raw / "tile_01.tif"
+    tile.write_text("fake", encoding="utf-8")
+    manifest = tmp_path / "intermediate" / "dem_download_manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({"tiles": ["dem/raw/tile_01.tif"]}), encoding="utf-8")
+
+    assert read_dem_manifest(manifest) == [tile.resolve()]
+
+
 def test_cli_dem_acquisition_area(tmp_path, capsys):
     out = tmp_path / "area.geojson"
 
