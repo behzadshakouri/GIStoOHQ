@@ -355,3 +355,18 @@ ohqbuild dem-expand-area \
 This gives the future UI the same control loop as the terminal workflow:
 preview extent, download selected tiles, delineate, validate boundary clearance,
 and expand directionally only when needed.
+
+## Lightweight DEM workflow UI
+
+A first desktop launcher is available for users who prefer buttons and a log
+window over typing each command manually:
+
+```bash
+ohqbuild ui
+```
+
+The launcher is intentionally thin. It does not implement hydrology itself; it
+builds and runs the same backend commands used by terminal workflows:
+`prepare-dem`, `download-dem-manifest`, `materialize-inputs`, and `validate-dem`.
+This keeps the UI, shell workflow, and future QGIS plugin on the same config and
+artifact contract.

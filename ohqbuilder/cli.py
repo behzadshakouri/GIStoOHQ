@@ -338,6 +338,8 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--soil-pixel-size", type=float, default=0.0003)
     full.add_argument("--soil-top-depth", type=float, default=30.0)
 
+    sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
+
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
     doctor.add_argument("--strict-gis", action="store_true")
@@ -804,6 +806,10 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "ui":
+        from .ui.launcher import main as launch_ui
+
+        return launch_ui()
     if args.command == "doctor":
         report = run_doctor(args.script_dir, args.strict_gis)
         if args.json:
