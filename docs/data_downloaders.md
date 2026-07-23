@@ -295,7 +295,9 @@ ohqbuild dem-tile-manifest \
 ```
 
 The `upstream_network` method can create the same acquisition-area output file
-from reference flowlines in GeoJSON. When `outlet.snap_to_flowline` is enabled and
+from reference flowlines in GeoJSON. `prepare-dem` always writes the raw outlet
+point to `outlet.raw_path` (defaulting to `inputs/outlet_raw.geojson`) for map
+preview and auditability. When `outlet.snap_to_flowline` is enabled and
 a flowline path is configured, `prepare-dem` first snaps the outlet to the nearest
 flowline segment within `outlet.snap_distance_m` and writes
 `outlet.snapped_path` (defaulting to `inputs/outlet_snapped.geojson`). It then

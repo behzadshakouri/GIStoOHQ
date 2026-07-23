@@ -57,6 +57,14 @@ def _write_geojson_point(path: Path, lon: float, lat: float, properties: dict[st
     path.write_text(json.dumps(feature, indent=2), encoding="utf-8")
 
 
+def write_outlet_point(lon: float, lat: float, output_path: str | Path, *, source: str = "raw") -> Path:
+    """Write an EPSG:4326 outlet point GeoJSON for workflow handoffs/previews."""
+
+    output = Path(output_path).expanduser().resolve()
+    _write_geojson_point(output, lon, lat, {"source": source, "outlet_lon": lon, "outlet_lat": lat})
+    return output
+
+
 def snap_outlet_to_flowlines(
     lon: float,
     lat: float,

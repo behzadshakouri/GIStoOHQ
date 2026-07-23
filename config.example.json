@@ -30,6 +30,7 @@
     "longitude": null,
     "latitude": null,
     "input_crs": "EPSG:4326",
+    "raw_path": "inputs/outlet_raw.geojson",
     "snap_to_flowline": true,
     "snap_distance_m": 500,
     "snapped_path": "inputs/outlet_snapped.geojson"

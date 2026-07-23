@@ -350,3 +350,14 @@ def test_cli_dem_snap_outlet(tmp_path, capsys):
     assert "Wrote snapped outlet:" in text
     assert "Snap distance:" in text
     assert out.exists()
+
+
+def test_write_outlet_point_writes_raw_geojson(tmp_path):
+    from ohqbuilder.dem_acquisition import write_outlet_point
+
+    out = write_outlet_point(-76.9765, 38.9921, tmp_path / "outlet_raw.geojson")
+
+    data = json.loads(out.read_text(encoding="utf-8"))
+    feature = data["features"][0]
+    assert feature["geometry"]["type"] == "Point"
+    assert feature["properties"]["source"] == "raw"

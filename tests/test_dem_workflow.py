@@ -253,6 +253,7 @@ def test_write_dem_config_template_infers_target_crs(tmp_path):
 
     data = json.loads(config.read_text(encoding="utf-8"))
     assert data["site"]["target_crs"] == "EPSG:26918"
+    assert data["outlet"]["raw_path"] == "inputs/outlet_raw.geojson"
 
 
 def test_prepare_dem_from_config_snaps_outlet_before_network_area(tmp_path):
@@ -275,6 +276,7 @@ def test_prepare_dem_from_config_snaps_outlet_before_network_area(tmp_path):
 outlet:
   longitude: -76.95
   latitude: 39.001
+  raw_path: inputs/outlet_raw.geojson
   snap_to_flowline: true
   snap_distance_m: 200
   snapped_path: inputs/outlet_snapped.geojson
@@ -293,5 +295,7 @@ dem_acquisition:
     result = prepare_dem_from_config(config)
 
     assert result.acquisition_area is not None
+    raw = json.loads((tmp_path / "inputs" / "outlet_raw.geojson").read_text(encoding="utf-8"))
+    assert raw["features"][0]["properties"]["source"] == "raw"
     snapped = json.loads((tmp_path / "inputs" / "outlet_snapped.geojson").read_text(encoding="utf-8"))
     assert abs(snapped["features"][0]["geometry"]["coordinates"][1] - 39.0) < 0.00001

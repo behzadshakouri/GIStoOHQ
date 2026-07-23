@@ -14,6 +14,7 @@ from .dem_acquisition import (
     create_outlet_buffer_area,
     create_upstream_network_area,
     snap_outlet_to_flowlines,
+    write_outlet_point,
 )
 
 
@@ -91,6 +92,12 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
     outlet_lon = _required_float(outlet, "longitude", "outlet") if outlet.get("longitude") is not None else None
     outlet_lat = _required_float(outlet, "latitude", "outlet") if outlet.get("latitude") is not None else None
+    if outlet_lon is not None and outlet_lat is not None:
+        write_outlet_point(
+            outlet_lon,
+            outlet_lat,
+            _resolve(outlet.get("raw_path") or "inputs/outlet_raw.geojson", base),
+        )
     if outlet.get("snap_to_flowline") and flowline_value and outlet_lon is not None and outlet_lat is not None:
         snapped = snap_outlet_to_flowlines(
             outlet_lon,
@@ -326,6 +333,7 @@ def write_dem_config_template(
             "longitude": lon,
             "latitude": lat,
             "input_crs": "EPSG:4326",
+            "raw_path": "inputs/outlet_raw.geojson",
             "snap_to_flowline": True,
             "snap_distance_m": 500,
             "snapped_path": "inputs/outlet_snapped.geojson",
