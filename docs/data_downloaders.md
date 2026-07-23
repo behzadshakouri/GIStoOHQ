@@ -282,3 +282,32 @@ Using the acquisition polygon for tile selection and the manifest for DEM
 materialization keeps the downloader, merger, cropper, delineator, and future UI
 independent while avoiding accidental inclusion of derived rasters such as
 `merged_dem_utm.tif` as new merge inputs.
+
+## Boundary validation and directional expansion
+
+After watershed delineation, the workflow should reject a DEM extent when the
+watershed is too close to an acquisition boundary. The lightweight terminal/UI
+check is:
+
+```bash
+ohqbuild dem-boundary-check \
+  --watershed intermediate/watershed_boundary.geojson \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --safety-distance-m 500
+```
+
+A non-zero status of `3` means the watershed is too close to one or more DEM
+edges and the acquisition area should be expanded before downloading or merging
+again. Expand only the touched directions instead of growing a circular buffer:
+
+```bash
+ohqbuild dem-expand-area \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --out intermediate/dem_acquisition_area_attempt2.geojson \
+  --edges north,west \
+  --expansion-distance-km 5
+```
+
+This gives the future UI the same control loop as the terminal workflow:
+preview extent, download selected tiles, delineate, validate boundary clearance,
+and expand directionally only when needed.

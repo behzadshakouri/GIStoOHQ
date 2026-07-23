@@ -152,3 +152,75 @@ def test_build_dem_tile_manifest_rejects_bbox_only_overlap(tmp_path):
 
     assert result.selected_count == 0
     assert manifest["tiles"] == []
+
+
+def test_validate_watershed_within_acquisition_flags_touched_edges(tmp_path):
+    from ohqbuilder.dem_acquisition import validate_watershed_within_acquisition
+
+    acquisition = tmp_path / "area.geojson"
+    watershed = tmp_path / "watershed.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    watershed.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("watershed", (-77.099, 38.94, -76.95, 39.08))],
+    }), encoding="utf-8")
+
+    result = validate_watershed_within_acquisition(watershed, acquisition, safety_distance_m=500)
+
+    assert not result.is_valid
+    assert "west" in result.touched_edges
+    assert "east" not in result.touched_edges
+
+
+def test_expand_acquisition_bounds_expands_only_requested_edges(tmp_path):
+    from ohqbuilder.dem_acquisition import expand_acquisition_bounds
+
+    acquisition = tmp_path / "area.geojson"
+    out = tmp_path / "expanded.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+
+    result = expand_acquisition_bounds(acquisition, out, ("north",), expansion_distance_km=5)
+
+    minx, miny, maxx, maxy = result.bounds
+    assert minx == -77.1
+    assert miny == 38.9
+    assert maxx == -76.9
+    assert maxy > 39.1
+    assert json.loads(out.read_text(encoding="utf-8"))["features"][0]["properties"]["expanded_edges"] == ["north"]
+
+
+def test_cli_dem_boundary_check_and_expand(tmp_path, capsys):
+    acquisition = tmp_path / "area.geojson"
+    watershed = tmp_path / "watershed.geojson"
+    expanded = tmp_path / "expanded.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    watershed.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("watershed", (-77.099, 38.94, -76.95, 39.08))],
+    }), encoding="utf-8")
+
+    assert main([
+        "dem-boundary-check",
+        "--watershed", str(watershed),
+        "--acquisition-area", str(acquisition),
+        "--safety-distance-m", "500",
+    ]) == 3
+    assert "Touched edges: west" in capsys.readouterr().out
+
+    assert main([
+        "dem-expand-area",
+        "--acquisition-area", str(acquisition),
+        "--out", str(expanded),
+        "--edges", "west,north",
+        "--expansion-distance-km", "5",
+    ]) == 0
+    assert expanded.exists()

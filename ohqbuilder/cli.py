@@ -4,7 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-from .dem_acquisition import DemAcquisitionError, build_dem_tile_manifest, create_outlet_buffer_area
+from .dem_acquisition import (
+    DemAcquisitionError,
+    build_dem_tile_manifest,
+    create_outlet_buffer_area,
+    expand_acquisition_bounds,
+    validate_watershed_within_acquisition,
+)
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
@@ -175,6 +181,24 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--out", required=True, help="Output DEM download manifest JSON.")
     manifest.add_argument("--url-field", default="url", help="Tile-index property containing the download URL.")
     manifest.add_argument("--path-field", default="path", help="Tile-index property containing the local raw tile path.")
+
+    boundary = sub.add_parser(
+        "dem-boundary-check",
+        help="Check whether a delineated watershed is too close to the DEM acquisition boundary.",
+    )
+    boundary.add_argument("--watershed", required=True, help="Delineated watershed GeoJSON polygon.")
+    boundary.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon.")
+    boundary.add_argument("--safety-distance-m", type=float, default=500.0)
+    boundary.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
+
+    expand = sub.add_parser(
+        "dem-expand-area",
+        help="Directionally expand a DEM acquisition polygon after a boundary check fails.",
+    )
+    expand.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon to expand.")
+    expand.add_argument("--out", required=True, help="Output expanded DEM acquisition GeoJSON polygon.")
+    expand.add_argument("--edges", required=True, help="Comma-separated edges to expand: west,south,east,north.")
+    expand.add_argument("--expansion-distance-km", type=float, default=5.0)
 
     fetch = sub.add_parser(
         "fetch-phase1-inputs",
@@ -622,6 +646,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Selected tile count: {result.selected_count}")
         minx, miny, maxx, maxy = result.acquisition_bounds
         print(f"Acquisition bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+    if args.command == "dem-boundary-check":
+        try:
+            result = validate_watershed_within_acquisition(
+                args.watershed,
+                args.acquisition_area,
+                safety_distance_m=args.safety_distance_m,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-boundary-check failed: {exc}")
+            return 2
+        if args.json:
+            print(json.dumps({
+                "is_valid": result.is_valid,
+                "touched_edges": result.touched_edges,
+                "distances_m": result.distances_m,
+            }, indent=2, sort_keys=True))
+        else:
+            print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
+            print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+            for edge, distance in result.distances_m.items():
+                print(f"Distance {edge}: {distance:g} m")
+        return 0 if result.is_valid else 3
+    if args.command == "dem-expand-area":
+        try:
+            result = expand_acquisition_bounds(
+                args.acquisition_area,
+                args.out,
+                tuple(edge.strip() for edge in args.edges.split(",") if edge.strip()),
+                expansion_distance_km=args.expansion_distance_km,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-expand-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote expanded acquisition area: {result.output_path}")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
         return 0
     if args.command == "fetch-phase1-inputs":
         try:

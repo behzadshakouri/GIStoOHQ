@@ -371,3 +371,95 @@ def build_dem_tile_manifest(
     )
     return DemTileManifest(output, len(items), acquisition_bounds)
 
+
+
+@dataclass(frozen=True)
+class DemBoundaryValidation:
+    is_valid: bool
+    touched_edges: tuple[str, ...]
+    distances_m: dict[str, float]
+
+
+def _meters_per_degree_at_lat(lat: float) -> tuple[float, float]:
+    meters_per_lat = METERS_PER_DEGREE
+    meters_per_lon = METERS_PER_DEGREE * max(0.1, abs(math.cos(math.radians(lat))))
+    return meters_per_lon, meters_per_lat
+
+
+def validate_watershed_within_acquisition(
+    watershed_area: str | Path,
+    acquisition_area: str | Path,
+    *,
+    safety_distance_m: float = 500.0,
+) -> DemBoundaryValidation:
+    """Check whether a delineated watershed is too close to the DEM acquisition edge.
+
+    Inputs are GeoJSON in EPSG:4326. The check is intentionally bounds-based:
+    once a delineated watershed exists, this answers the workflow-control question
+    "which side should be expanded before trying again?" without requiring GIS
+    dependencies in the terminal/UI orchestration layer.
+    """
+
+    watershed_bounds = _bounds_from_geojson(Path(watershed_area).expanduser().resolve())
+    acquisition_bounds = _bounds_from_geojson(Path(acquisition_area).expanduser().resolve())
+    minx, miny, maxx, maxy = watershed_bounds
+    aminx, aminy, amaxx, amaxy = acquisition_bounds
+    center_lat = (miny + maxy) / 2.0
+    meters_per_lon, meters_per_lat = _meters_per_degree_at_lat(center_lat)
+    distances = {
+        "west": (minx - aminx) * meters_per_lon,
+        "south": (miny - aminy) * meters_per_lat,
+        "east": (amaxx - maxx) * meters_per_lon,
+        "north": (amaxy - maxy) * meters_per_lat,
+    }
+    touched = tuple(edge for edge, distance in distances.items() if distance < safety_distance_m)
+    return DemBoundaryValidation(not touched, touched, distances)
+
+
+def expand_acquisition_bounds(
+    acquisition_area: str | Path,
+    output_path: str | Path,
+    touched_edges: tuple[str, ...] | list[str],
+    *,
+    expansion_distance_km: float = 5.0,
+) -> DemAcquisitionArea:
+    """Write an expanded axis-aligned acquisition polygon in touched directions."""
+
+    if expansion_distance_km <= 0:
+        raise DemAcquisitionError("expansion_distance_km must be positive.")
+    source = Path(acquisition_area).expanduser().resolve()
+    output = Path(output_path).expanduser().resolve()
+    minx, miny, maxx, maxy = _bounds_from_geojson(source)
+    center_lat = (miny + maxy) / 2.0
+    lon_deg, lat_deg = _degrees_per_meter(center_lat)
+    delta_lon = expansion_distance_km * 1000.0 * lon_deg
+    delta_lat = expansion_distance_km * 1000.0 * lat_deg
+    edges = set(touched_edges)
+    valid_edges = {"west", "south", "east", "north"}
+    invalid_edges = edges - valid_edges
+    if invalid_edges:
+        raise DemAcquisitionError(f"Invalid expansion edge(s): {', '.join(sorted(invalid_edges))}")
+    if "west" in edges:
+        minx -= delta_lon
+    if "east" in edges:
+        maxx += delta_lon
+    if "south" in edges:
+        miny -= delta_lat
+    if "north" in edges:
+        maxy += delta_lat
+    coords = [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy), (minx, miny)]
+    width_km = (maxx - minx) / lon_deg / 1000.0
+    height_km = (maxy - miny) / lat_deg / 1000.0
+    area_km2 = width_km * height_km
+    _write_geojson_polygon(
+        output,
+        coords,
+        {
+            "mode": "directional_expansion",
+            "source_area": str(source),
+            "expanded_edges": sorted(edges),
+            "expansion_distance_km": expansion_distance_km,
+            "area_km2": area_km2,
+        },
+    )
+    return DemAcquisitionArea("directional_expansion", output, (minx, miny, maxx, maxy), area_km2)

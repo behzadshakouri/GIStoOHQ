@@ -44,6 +44,8 @@
     "auto_expand": true,
     "directional_expansion": true,
     "boundary_safety_distance_m": 500,
-    "final_watershed_buffer_m": 1000
+    "final_watershed_buffer_m": 1000,
+    "expanded_acquisition_area": "intermediate/dem_acquisition_area_attempt2.geojson",
+    "expansion_distance_km": 5
   }
 }
