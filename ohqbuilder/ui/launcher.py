@@ -13,6 +13,7 @@ from typing import Any, Literal
 import yaml
 
 WorkflowStep = Literal[
+    "init-dem-config",
     "prepare-dem",
     "run-dem-prep",
     "download-dem-manifest",
@@ -45,6 +46,11 @@ class LauncherState:
 def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowCommand:
     """Build the backend command that the UI should execute for a workflow step."""
 
+    if step == "init-dem-config":
+        return WorkflowCommand(
+            "Initialize DEM Config",
+            ("ohqbuild", "init-dem-config", "--output", str(state.config_path)),
+        )
     if step == "prepare-dem":
         return WorkflowCommand("Prepare DEM", ("ohqbuild", "prepare-dem", "--config", str(state.config_path)))
     if step == "run-dem-prep":
@@ -229,7 +235,14 @@ class LauncherApp:
         tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
         tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
-        for step in ("prepare-dem", "run-dem-prep", "download-dem-manifest", "materialize-inputs", "validate-dem"):
+        for step in (
+            "init-dem-config",
+            "prepare-dem",
+            "run-dem-prep",
+            "download-dem-manifest",
+            "materialize-inputs",
+            "validate-dem",
+        ):
             tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(side="left")
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="nsew")

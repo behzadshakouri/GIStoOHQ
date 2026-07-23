@@ -14,6 +14,14 @@ from ohqbuilder.ui.launcher import (
 )
 
 
+def test_command_for_init_dem_config():
+    command = command_for_step(
+        "init-dem-config", LauncherState(config_path=Path("config.yaml"))
+    )
+
+    assert command.argv == ("ohqbuild", "init-dem-config", "--output", "config.yaml")
+
+
 def test_command_for_prepare_dem():
     command = command_for_step("prepare-dem", LauncherState(config_path=Path("config.yaml")))
 

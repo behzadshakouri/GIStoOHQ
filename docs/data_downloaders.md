@@ -476,10 +476,11 @@ and `validate-dem`.
 This keeps the UI, shell workflow, and future QGIS plugin on the same config and
 artifact contract.
 
-The launcher includes basic config load/save controls and a lightweight GeoJSON
-preview summary for the acquisition area. The preview is intentionally simple in
-this first UI pass; a later QGIS dock can replace it with map-click outlet
-selection and layer rendering while still calling the same backend commands.
+The launcher includes basic config load/save controls, an **init-dem-config**
+button for creating a starter config at the selected path, and a lightweight
+GeoJSON preview summary for the acquisition area. The preview is intentionally
+simple in this first UI pass; the QGIS dock adds map-click outlet selection and
+layer rendering while still calling the same backend commands.
 
 ## QGIS dock skeleton
 
