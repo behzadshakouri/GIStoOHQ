@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import queue
 import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+
+import yaml
 
 WorkflowStep = Literal[
     "prepare-dem",
@@ -79,6 +82,82 @@ def _require_tkinter():
     return importlib.import_module("tkinter")
 
 
+def load_project_config(config_path: str | Path) -> dict[str, Any]:
+    path = Path(config_path).expanduser()
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise LauncherError("Project config must be a mapping.")
+    return data
+
+
+def save_project_config(config_path: str | Path, config: dict[str, Any]) -> None:
+    path = Path(config_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".json":
+        path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    else:
+        path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def _set_nested(config: dict[str, Any], section: str, key: str, value: Any) -> None:
+    target = config.setdefault(section, {})
+    if not isinstance(target, dict):
+        raise LauncherError(f"Config section is not a mapping: {section}")
+    target[key] = value
+
+
+def state_from_config(config_path: str | Path, config: dict[str, Any]) -> LauncherState:
+    base = Path(config_path).expanduser().parent
+    dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
+    site_config = config.get("site") if isinstance(config.get("site"), dict) else {}
+    paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
+
+    def path_value(value: Any) -> Path | None:
+        if not isinstance(value, str) or not value:
+            return None
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else base / path
+
+    return LauncherState(
+        config_path=Path(config_path).expanduser(),
+        manifest_path=path_value(dem.get("tile_manifest")),
+        raw_dem_dir=path_value(paths.get("raw_dem_dir") or dem.get("raw_dem_dir")),
+        root=path_value(config.get("root") or "."),
+        site=str(site_config.get("name") or config.get("site") or "."),
+        source_dir=path_value(config.get("download_dir") or "source_downloads"),
+        target_crs=str(site_config.get("target_crs") or config.get("target_crs") or "") or None,
+    )
+
+
+def update_config_from_state(config: dict[str, Any], state: LauncherState) -> dict[str, Any]:
+    updated = dict(config)
+    _set_nested(updated, "dem_acquisition", "tile_manifest", str(state.manifest_path or ""))
+    _set_nested(updated, "paths", "raw_dem_dir", str(state.raw_dem_dir or ""))
+    if state.site:
+        _set_nested(updated, "site", "name", state.site)
+    if state.target_crs:
+        _set_nested(updated, "site", "target_crs", state.target_crs)
+    updated["root"] = str(state.root or ".")
+    updated["download_dir"] = str(state.source_dir or "source_downloads")
+    return updated
+
+
+def geojson_preview_summary(path: str | Path) -> str:
+    data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    features = data.get("features") if isinstance(data, dict) else None
+    if not isinstance(features, list):
+        raise LauncherError("Preview file must be a GeoJSON FeatureCollection.")
+    geometry_types = sorted({
+        feature.get("geometry", {}).get("type", "Unknown")
+        for feature in features
+        if isinstance(feature, dict) and isinstance(feature.get("geometry"), dict)
+    })
+    return f"{len(features)} feature(s); geometry: {', '.join(geometry_types) or 'none'}"
+
+
 class CommandRunner(threading.Thread):
     def __init__(self, command: WorkflowCommand, messages: queue.Queue[str]):
         super().__init__(daemon=True)
@@ -137,6 +216,9 @@ class LauncherApp:
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
         buttons = tk.Frame(frame)
         buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=8)
+        tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
+        tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
+        tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
         for step in ("prepare-dem", "download-dem-manifest", "materialize-inputs", "validate-dem"):
             tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(side="left")
         self.log = tk.Text(frame, height=24, width=100)
@@ -155,6 +237,46 @@ class LauncherApp:
             source_dir=Path(self.source_var.get()).expanduser(),
             target_crs=crs,
         )
+
+
+    def apply_state(self, state: LauncherState) -> None:
+        self.config_var.set(str(state.config_path))
+        self.manifest_var.set(str(state.manifest_path or ""))
+        self.raw_dem_var.set(str(state.raw_dem_dir or ""))
+        self.root_var.set(str(state.root or "."))
+        self.site_var.set(state.site or "")
+        self.source_var.set(str(state.source_dir or ""))
+        self.crs_var.set(state.target_crs or "")
+
+    def load_config(self) -> None:
+        try:
+            config = load_project_config(self.config_var.get())
+            self.apply_state(state_from_config(self.config_var.get(), config))
+            self.messages.put("Loaded config.\n")
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: {exc}\n")
+
+    def save_config(self) -> None:
+        try:
+            current = load_project_config(self.config_var.get()) if Path(self.config_var.get()).exists() else {}
+            save_project_config(self.config_var.get(), update_config_from_state(current, self.state()))
+            self.messages.put("Saved config.\n")
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: {exc}\n")
+
+    def preview_acquisition(self) -> None:
+        try:
+            config = load_project_config(self.config_var.get())
+            dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
+            area = dem.get("acquisition_area")
+            if not isinstance(area, str) or not area:
+                raise LauncherError("dem_acquisition.acquisition_area is not configured.")
+            path = Path(area).expanduser()
+            if not path.is_absolute():
+                path = Path(self.config_var.get()).expanduser().parent / path
+            self.messages.put(f"Acquisition preview: {geojson_preview_summary(path)}\n")
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: {exc}\n")
 
     def run_step(self, step: WorkflowStep) -> None:
         try:

@@ -370,3 +370,8 @@ builds and runs the same backend commands used by terminal workflows:
 `prepare-dem`, `download-dem-manifest`, `materialize-inputs`, and `validate-dem`.
 This keeps the UI, shell workflow, and future QGIS plugin on the same config and
 artifact contract.
+
+The launcher includes basic config load/save controls and a lightweight GeoJSON
+preview summary for the acquisition area. The preview is intentionally simple in
+this first UI pass; a later QGIS dock can replace it with map-click outlet
+selection and layer rendering while still calling the same backend commands.
