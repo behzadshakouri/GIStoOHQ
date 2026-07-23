@@ -1,0 +1,9 @@
+[general]
+name=GIStoOHQ DEM Workflow
+qgisMinimumVersion=3.28
+description=Dock panel for running GIStoOHQ DEM acquisition workflow commands from QGIS.
+version=0.1.0
+author=GIStoOHQ contributors
+email=
+category=Hydrology
+experimental=True

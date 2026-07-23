@@ -37,6 +37,20 @@ ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
 python3 run.py config.json
 ```
 
+To try the new outlet-first DEM workflow UI immediately from a source checkout,
+run the bundled launcher script. It uses `ohqbuild ui` when installed and falls
+back to `python -m ohqbuilder.cli ui`, so it works before packaging:
+
+```bash
+scripts/run_dem_ui.sh
+```
+
+For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
+
+```bash
+scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml
+```
+
 For a single command that starts from an approximate outlet coordinate, downloads
 source data, materializes the DEM and NHD flowlines, runs both GIS phases, and
 writes the final OHQ file, use a QGIS Python environment:

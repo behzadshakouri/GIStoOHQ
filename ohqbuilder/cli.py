@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import yaml
 from pathlib import Path
 
-from .dem_downloader import parse_products, process_csv
+from .dem_acquisition import (
+    DemAcquisitionError,
+    build_dem_tile_manifest,
+    create_outlet_buffer_area,
+    create_upstream_network_area,
+    snap_outlet_to_flowlines,
+    expand_acquisition_bounds,
+    validate_watershed_within_acquisition,
+)
+from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
+from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config, write_dem_config_template
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -129,6 +140,14 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
     dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
 
+    manifest_download = sub.add_parser(
+        "download-dem-manifest",
+        help="Download URL-backed DEM manifest items and update tile paths.",
+    )
+    manifest_download.add_argument("--manifest", required=True, help="DEM manifest JSON with URL-backed items.")
+    manifest_download.add_argument("--out-dir", required=True, help="Directory for downloaded raw DEM tiles.")
+    manifest_download.add_argument("--updated-manifest", default=None, help="Optional output manifest path; defaults to updating --manifest.")
+
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
     hsg.add_argument("--site", required=True)
@@ -151,6 +170,71 @@ def build_parser() -> argparse.ArgumentParser:
     mat_dem.add_argument("--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips.")
     mat_dem.add_argument("--out", default=None, help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.")
     mat_dem.add_argument("--dst-crs", default=None, help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.")
+    mat_dem.add_argument("--manifest", default=None, help="DEM download manifest with an explicit tiles list; avoids scanning unrelated rasters.")
+
+    area = sub.add_parser(
+        "dem-acquisition-area",
+        help="Create an outlet-based initial DEM acquisition polygon for downloader tile selection.",
+    )
+    area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
+    area.add_argument("--upstream-km", type=float, default=25.0, help="Distance from outlet toward upstream end.")
+    area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
+    area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
+    area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
+
+    snap = sub.add_parser(
+        "dem-snap-outlet",
+        help="Snap an outlet point to the nearest GeoJSON flowline segment.",
+    )
+    snap.add_argument("--lat", type=float, required=True, help="Raw outlet latitude in EPSG:4326.")
+    snap.add_argument("--lon", type=float, required=True, help="Raw outlet longitude in EPSG:4326.")
+    snap.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines.")
+    snap.add_argument("--out", required=True, help="Output GeoJSON path for the snapped outlet point.")
+    snap.add_argument("--snap-distance-m", type=float, default=500.0, help="Maximum allowed snap distance in meters.")
+
+    network_area = sub.add_parser(
+        "dem-upstream-network-area",
+        help="Create a lightweight upstream-flowline DEM acquisition envelope.",
+    )
+    network_area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    network_area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    network_area.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines used to infer the upstream envelope.")
+    network_area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
+    network_area.add_argument("--upstream-trace-km", type=float, default=40.0, help="Maximum outlet-to-flowline vertex distance to consider.")
+    network_area.add_argument("--upstream-margin-km", type=float, default=5.0, help="Safety margin beyond the upstream flowline extent.")
+    network_area.add_argument("--downstream-margin-km", type=float, default=3.0, help="Safety margin downstream of the outlet.")
+    network_area.add_argument("--lateral-margin-km", type=float, default=4.0, help="Safety margin on both sides of the flowline envelope.")
+    network_area.add_argument("--envelope-type", default="oriented_rectangle", choices=("oriented_rectangle", "axis_aligned_rectangle"))
+
+    manifest = sub.add_parser(
+        "dem-tile-manifest",
+        help="Select DEM tile-index features intersecting a DEM acquisition polygon.",
+    )
+    manifest.add_argument("--acquisition-area", required=True, help="GeoJSON acquisition polygon from dem-acquisition-area or UI drawing.")
+    manifest.add_argument("--tile-index", required=True, help="GeoJSON tile footprint/index file with URL/path properties.")
+    manifest.add_argument("--out", required=True, help="Output DEM download manifest JSON.")
+    manifest.add_argument("--url-field", default="url", help="Tile-index property containing the download URL.")
+    manifest.add_argument("--path-field", default="path", help="Tile-index property containing the local raw tile path.")
+
+    boundary = sub.add_parser(
+        "dem-boundary-check",
+        help="Check whether a delineated watershed is too close to the DEM acquisition boundary.",
+    )
+    boundary.add_argument("--watershed", required=True, help="Delineated watershed GeoJSON polygon.")
+    boundary.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon.")
+    boundary.add_argument("--safety-distance-m", type=float, default=500.0)
+    boundary.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
+
+    expand = sub.add_parser(
+        "dem-expand-area",
+        help="Directionally expand a DEM acquisition polygon after a boundary check fails.",
+    )
+    expand.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon to expand.")
+    expand.add_argument("--out", required=True, help="Output expanded DEM acquisition GeoJSON polygon.")
+    expand.add_argument("--edges", required=True, help="Comma-separated edges to expand: west,south,east,north.")
+    expand.add_argument("--expansion-distance-km", type=float, default=5.0)
 
     fetch = sub.add_parser(
         "fetch-phase1-inputs",
@@ -192,12 +276,47 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--site", required=True)
     materialize.add_argument("--source-dir", default=None)
     materialize.add_argument("--target-crs", default=None)
+    materialize.add_argument("--dem-manifest", default=None, help="DEM tile manifest with explicit raw raster paths.")
     materialize.add_argument("--clip-bounds", default=None, help="Optional minx,miny,maxx,maxy materialization bounds.")
     materialize.add_argument("--clip-bounds-crs", default="EPSG:4326", help="CRS for --clip-bounds; defaults to EPSG:4326.")
     materialize.add_argument("--clip-center-lat", type=float, default=None, help="Latitude for auto materialization bounds.")
     materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
     materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
     materialize.add_argument("--clip-buffer-scale", type=float, default=1.2, help="Safety scale applied to --clip-buffer; default 1.2.")
+
+    init_dem = sub.add_parser(
+        "init-dem-config",
+        help="Write a starter DEM acquisition config from outlet and optional flowline/tile-index paths.",
+    )
+    init_dem.add_argument("--config", required=True, help="Output YAML/JSON config path.")
+    init_dem.add_argument("--site", required=True, help="Site/project name.")
+    init_dem.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    init_dem.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    init_dem.add_argument("--flowlines", default=None, help="GeoJSON flowlines for upstream_network mode.")
+    init_dem.add_argument("--tile-index", default=None, help="Optional DEM tile-index GeoJSON path.")
+    init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to NAD83 UTM inferred from outlet.")
+    init_dem.add_argument("--method", default="upstream_network", choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"))
+
+    run_dem_prep = sub.add_parser(
+        "run-dem-prep",
+        help="Run the direct DEM prep path from one config, with optional download/materialization.",
+    )
+    run_dem_prep.add_argument("--config", required=True, help="YAML/JSON project config.")
+    run_dem_prep.add_argument("--download", action="store_true", help="Download URL-backed DEM manifest tiles after prepare-dem.")
+    run_dem_prep.add_argument("--materialize", action="store_true", help="Run materialize-inputs after optional download.")
+    run_dem_prep.add_argument("--validate", action="store_true", help="Run validate-dem after prepare/download/materialize.")
+
+    prepare_dem = sub.add_parser(
+        "prepare-dem",
+        help="Create DEM acquisition area and tile manifest from a project config.",
+    )
+    prepare_dem.add_argument("--config", required=True, help="YAML/JSON project config.")
+
+    validate_dem = sub.add_parser(
+        "validate-dem",
+        help="Validate watershed clearance from a project config and optionally expand DEM area.",
+    )
+    validate_dem.add_argument("--config", required=True, help="YAML/JSON project config.")
 
     bounds = sub.add_parser(
         "watershed-bounds",
@@ -268,6 +387,8 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--soil-pixel-size", type=float, default=0.0003)
     full.add_argument("--soil-top-depth", type=float, default=30.0)
 
+    sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
+
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
     doctor.add_argument("--script-dir", default=None)
     doctor.add_argument("--strict-gis", action="store_true")
@@ -314,6 +435,40 @@ def _legacy_options_from_args(args) -> LegacyWorkflowOptions:
         auto_outlet=not getattr(args, "no_auto_outlet", False),
         start_at=getattr(args, "start_at", None),
     )
+
+
+def _load_cli_config(config_path: str) -> dict:
+    path = Path(config_path).expanduser()
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _cli_site_name(config: dict) -> str:
+    site = config.get("site")
+    if isinstance(site, dict):
+        return str(site.get("name") or ".")
+    return str(site or ".")
+
+
+def _cli_target_crs(config: dict) -> str | None:
+    site = config.get("site")
+    if isinstance(site, dict) and site.get("target_crs") and site.get("target_crs") != "auto":
+        return str(site["target_crs"])
+    value = config.get("target_crs")
+    return str(value) if value and value != "auto" else None
+
+
+def _resolve_cli_path(config_path: str, value, default: str | None = None) -> str | None:
+    raw = value or default
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str(Path(config_path).expanduser().parent / path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -472,6 +627,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote HSG data: {result.hsg.vector_path}")
         print(f"Wrote soil texture data: {result.texture.vector_path}")
         return 0
+    if args.command == "download-dem-manifest":
+        try:
+            result = download_dem_manifest(
+                args.manifest,
+                args.out_dir,
+                updated_manifest_path=args.updated_manifest,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-dem-manifest failed: {exc}")
+            return 2
+        print(f"Wrote DEM manifest: {result.manifest_path}")
+        print(f"Downloaded tile count: {result.downloaded}")
+        print(f"Skipped existing tile count: {result.skipped}")
+        print(f"Materialized tile count: {result.tile_count}")
+        return 0
     if args.command == "download-hsg":
         try:
             result = retrieve_hydrologic_soil_groups(
@@ -497,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
                 clip_center_lat=args.clip_center_lat,
                 clip_buffer_m=args.clip_buffer,
                 clip_buffer_scale=args.clip_buffer_scale,
+                dem_manifest=args.dem_manifest,
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"materialize-inputs failed: {exc}")
@@ -510,6 +681,94 @@ def main(argv: list[str] | None = None) -> int:
         if cn_lookup is not None:
             print(f"Wrote CN lookup: {cn_lookup}")
         return 0
+
+    if args.command == "init-dem-config":
+        try:
+            path = write_dem_config_template(
+                args.config,
+                site=args.site,
+                lon=args.lon,
+                lat=args.lat,
+                flowline_path=args.flowlines,
+                tile_index=args.tile_index,
+                target_crs=args.target_crs,
+                method=args.method,
+            )
+        except (DemWorkflowError, ValueError) as exc:
+            print(f"init-dem-config failed: {exc}")
+            return 2
+        print(f"Wrote DEM config: {path}")
+        print("Next: ohqbuild prepare-dem --config " + str(path))
+        return 0
+
+    if args.command == "run-dem-prep":
+        try:
+            result = prepare_dem_from_config(args.config)
+            print(f"Wrote DEM workflow summary: {result.summary_path}")
+            if result.acquisition_area:
+                print(f"Wrote acquisition area: {result.acquisition_area.output_path}")
+            manifest_path = result.tile_manifest.output_path if result.tile_manifest else None
+            if result.tile_manifest:
+                print(f"Wrote tile manifest: {manifest_path}")
+                print(f"Selected tile count: {result.tile_manifest.selected_count}")
+            config = _load_cli_config(args.config)
+            dem = config.get("dem_acquisition", {}) if isinstance(config.get("dem_acquisition"), dict) else {}
+            paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
+            if args.download:
+                if manifest_path is None:
+                    raise DemWorkflowError("run-dem-prep --download requires a tile manifest from prepare-dem.")
+                raw_dem_dir = _resolve_cli_path(args.config, paths.get("raw_dem_dir") or dem.get("raw_dem_dir"), "dem/raw")
+                download_result = download_dem_manifest(manifest_path, raw_dem_dir)
+                print(f"Downloaded tile count: {download_result.downloaded}")
+                print(f"Skipped existing tile count: {download_result.skipped}")
+            if args.materialize:
+                if manifest_path is None:
+                    raise DemWorkflowError("run-dem-prep --materialize requires a tile manifest from prepare-dem.")
+                materialized = materialize_source_inputs(
+                    _resolve_cli_path(args.config, config.get("root"), "."),
+                    _cli_site_name(config),
+                    source_dir=_resolve_cli_path(args.config, config.get("download_dir") or config.get("source_dir")),
+                    target_crs=_cli_target_crs(config),
+                    dem_manifest=str(manifest_path),
+                )
+                print(f"Wrote DEM: {materialized.dem.output_path}")
+                print(f"Wrote flowlines: {materialized.hydro.output_path}")
+            if args.validate:
+                validation = validate_dem_from_config(args.config)
+                print(f"Wrote DEM validation summary: {validation.summary_path}")
+                print(f"Boundary validation: {'OK' if validation.is_valid else 'EXPAND'}")
+                print(f"Touched edges: {','.join(validation.touched_edges) if validation.touched_edges else 'none'}")
+                if validation.expanded_area:
+                    print(f"Wrote expanded acquisition area: {validation.expanded_area.output_path}")
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"run-dem-prep failed: {exc}")
+            return 2
+        return 0
+    if args.command == "prepare-dem":
+        try:
+            result = prepare_dem_from_config(args.config)
+        except (DemWorkflowError, DemAcquisitionError, ValueError) as exc:
+            print(f"prepare-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM workflow summary: {result.summary_path}")
+        if result.acquisition_area:
+            print(f"Wrote acquisition area: {result.acquisition_area.output_path}")
+        if result.tile_manifest:
+            print(f"Wrote tile manifest: {result.tile_manifest.output_path}")
+            print(f"Selected tile count: {result.tile_manifest.selected_count}")
+        return 0
+    if args.command == "validate-dem":
+        try:
+            result = validate_dem_from_config(args.config)
+        except (DemWorkflowError, DemAcquisitionError, ValueError) as exc:
+            print(f"validate-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM validation summary: {result.summary_path}")
+        print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
+        print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+        if result.expanded_area:
+            print(f"Wrote expanded acquisition area: {result.expanded_area.output_path}")
+        return 0 if result.is_valid else 3
     if args.command == "watershed-bounds":
         try:
             result = resolve_materialization_bounds(
@@ -553,6 +812,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_dir=args.source_dir,
                 output_path=args.out,
                 dst_crs=args.dst_crs,
+                manifest_path=args.manifest,
             )
         except DemMaterializeError as exc:
             print(f"materialize-dem failed: {exc}")
@@ -560,6 +820,120 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote DEM: {result.output_path}")
         print(f"Source product count: {result.source_count}")
         print(f"Target CRS: {result.dst_crs}")
+        return 0
+    if args.command == "dem-acquisition-area":
+        try:
+            result = create_outlet_buffer_area(
+                args.lon,
+                args.lat,
+                args.out,
+                upstream_km=args.upstream_km,
+                downstream_km=args.downstream_km,
+                lateral_km=args.lateral_km,
+                azimuth_deg=args.azimuth,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-acquisition-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote acquisition area: {result.output_path}")
+        print(f"Mode: {result.mode}")
+        print(f"Area: {result.area_km2:g} km^2")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+
+
+    if args.command == "dem-snap-outlet":
+        try:
+            result = snap_outlet_to_flowlines(
+                args.lon,
+                args.lat,
+                args.flowlines,
+                snap_distance_m=args.snap_distance_m,
+                output_path=args.out,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-snap-outlet failed: {exc}")
+            return 2
+        print(f"Wrote snapped outlet: {result.output_path}")
+        print(f"Snapped outlet: {result.snapped_lon},{result.snapped_lat}")
+        print(f"Snap distance: {result.distance_m:g} m")
+        return 0
+    if args.command == "dem-upstream-network-area":
+        try:
+            result = create_upstream_network_area(
+                args.lon,
+                args.lat,
+                args.flowlines,
+                args.out,
+                upstream_trace_distance_km=args.upstream_trace_km,
+                upstream_margin_km=args.upstream_margin_km,
+                downstream_margin_km=args.downstream_margin_km,
+                lateral_margin_km=args.lateral_margin_km,
+                envelope_type=args.envelope_type,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-upstream-network-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote acquisition area: {result.output_path}")
+        print(f"Mode: {result.mode}")
+        print(f"Area: {result.area_km2:g} km^2")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+    if args.command == "dem-tile-manifest":
+        try:
+            result = build_dem_tile_manifest(
+                args.acquisition_area,
+                args.tile_index,
+                args.out,
+                url_field=args.url_field,
+                path_field=args.path_field,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-tile-manifest failed: {exc}")
+            return 2
+        print(f"Wrote DEM tile manifest: {result.output_path}")
+        print(f"Selected tile count: {result.selected_count}")
+        minx, miny, maxx, maxy = result.acquisition_bounds
+        print(f"Acquisition bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+    if args.command == "dem-boundary-check":
+        try:
+            result = validate_watershed_within_acquisition(
+                args.watershed,
+                args.acquisition_area,
+                safety_distance_m=args.safety_distance_m,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-boundary-check failed: {exc}")
+            return 2
+        if args.json:
+            print(json.dumps({
+                "is_valid": result.is_valid,
+                "touched_edges": result.touched_edges,
+                "distances_m": result.distances_m,
+            }, indent=2, sort_keys=True))
+        else:
+            print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
+            print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+            for edge, distance in result.distances_m.items():
+                print(f"Distance {edge}: {distance:g} m")
+        return 0 if result.is_valid else 3
+    if args.command == "dem-expand-area":
+        try:
+            result = expand_acquisition_bounds(
+                args.acquisition_area,
+                args.out,
+                tuple(edge.strip() for edge in args.edges.split(",") if edge.strip()),
+                expansion_distance_km=args.expansion_distance_km,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-expand-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote expanded acquisition area: {result.output_path}")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
         return 0
     if args.command == "fetch-phase1-inputs":
         try:
@@ -618,6 +992,10 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "ui":
+        from .ui.launcher import main as launch_ui
+
+        return launch_ui()
     if args.command == "doctor":
         report = run_doctor(args.script_dir, args.strict_gis)
         if args.json:

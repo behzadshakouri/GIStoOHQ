@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import ohqbuilder.dem_downloader as dd
@@ -421,3 +422,47 @@ def test_process_csv_hydro_prefers_one_latest_vector_package_per_hu4(monkeypatch
     assert not (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20240501_RASTER.zip").exists()
     assert (downloads / "Sligo" / "hydro" / "NHDPLUS_H_0206_HU4_20230301_SHAPE.zip").is_file()
     assert any("1 preferred unique/latest vector package" in message for message in progress_messages)
+
+
+def test_download_dem_manifest_updates_tile_paths(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "tile one", "url": "https://example.test/tile_01.tif"},
+            {"title": "local name", "url": "https://example.test/ignored.tif", "path": "named/tile_02.tif"},
+        ]
+    }), encoding="utf-8")
+    calls = []
+
+    def fake_download(url, target):
+        calls.append((url, target))
+        target.write_text(url, encoding="utf-8")
+
+    result = download_dem_manifest(manifest, tmp_path / "raw", downloader=fake_download)
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert result.downloaded == 2
+    assert result.tile_count == 2
+    assert len(data["tiles"]) == 2
+    assert (tmp_path / "raw" / "tile_01.tif").exists()
+    assert (tmp_path / "raw" / "named" / "tile_02.tif").exists()
+    assert calls[0][0] == "https://example.test/tile_01.tif"
+
+
+def test_cli_download_dem_manifest(monkeypatch, tmp_path, capsys):
+    from ohqbuilder.cli import main
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"items": []}), encoding="utf-8")
+
+    assert main([
+        "download-dem-manifest",
+        "--manifest", str(manifest),
+        "--out-dir", str(tmp_path / "raw"),
+    ]) == 0
+
+    out = capsys.readouterr().out
+    assert "Wrote DEM manifest:" in out
+    assert "Materialized tile count: 0" in out
