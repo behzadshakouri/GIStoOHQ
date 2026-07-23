@@ -45,6 +45,51 @@ def _write_geojson_polygon(path: Path, coords: list[tuple[float, float]], *, sou
     )
 
 
+def _write_manifest_footprints(manifest_path: Path) -> Path | None:
+    import json
+
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    items = data.get("items")
+    if not isinstance(items, list):
+        return None
+    features = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        bounds = item.get("bounds")
+        if not isinstance(bounds, list) or len(bounds) != 4:
+            continue
+        minx, miny, maxx, maxy = (float(value) for value in bounds)
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "path": item.get("path", ""),
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [minx, miny],
+                        [maxx, miny],
+                        [maxx, maxy],
+                        [minx, maxy],
+                        [minx, miny],
+                    ]],
+                },
+            }
+        )
+    if not features:
+        return None
+    output = manifest_path.with_name(manifest_path.stem + "_footprints.geojson")
+    output.write_text(
+        json.dumps({"type": "FeatureCollection", "features": features}, indent=2),
+        encoding="utf-8",
+    )
+    return output
+
+
 class OutletCaptureTool:
     def __init__(self, dock):
         from qgis.gui import QgsMapToolEmitPoint
@@ -236,8 +281,20 @@ class DemWorkflowDock:
         config_path = Path(self.config.text()).expanduser()
         data = _read_config(config_path)
         dem = data.get("dem_acquisition", {}) if isinstance(data, dict) else {}
-        for key in ("acquisition_area", "expanded_acquisition_area", "watershed_boundary"):
-            value = dem.get(key)
+        layer_values = {
+            key: dem.get(key)
+            for key in ("acquisition_area", "expanded_acquisition_area", "watershed_boundary", "tile_index")
+        }
+        manifest_value = dem.get("tile_manifest")
+        if manifest_value:
+            manifest_path = Path(manifest_value).expanduser()
+            if not manifest_path.is_absolute():
+                manifest_path = config_path.parent / manifest_path
+            if manifest_path.exists():
+                footprint_path = _write_manifest_footprints(manifest_path)
+                if footprint_path is not None:
+                    layer_values["selected_tile_footprints"] = str(footprint_path)
+        for key, value in layer_values.items():
             if not value:
                 continue
             path = Path(value).expanduser()

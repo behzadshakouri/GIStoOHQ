@@ -33,3 +33,11 @@ def test_qgis_plugin_dock_has_draw_polygon_tool():
     assert "Draw DEM Area Polygon" in dock
     assert "AcquisitionPolygonTool" in dock
     assert "qgis_drawn_polygon" in dock
+
+
+def test_qgis_plugin_dock_loads_tile_preview_layers():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "tile_index" in dock
+    assert "selected_tile_footprints" in dock
+    assert "_write_manifest_footprints" in dock
