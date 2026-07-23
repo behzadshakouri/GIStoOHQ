@@ -1,0 +1,32 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "demo_tile_sligo_01",
+        "path": "dem/raw/demo_tile_sligo_01.tif",
+        "url": "https://example.invalid/demo_tile_sligo_01.tif"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-77.08, 38.95], [-76.90, 38.95], [-76.90, 39.13], [-77.08, 39.13], [-77.08, 38.95]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "demo_tile_outside",
+        "path": "dem/raw/demo_tile_outside.tif"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-76.50, 38.95], [-76.40, 38.95], [-76.40, 39.05], [-76.50, 39.05], [-76.50, 38.95]
+        ]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Sligo Creek demo centerline"},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-76.9765, 38.9921],
+          [-76.9850, 39.0200],
+          [-76.9920, 39.0550],
+          [-77.0000, 39.0900]
+        ]
+      }
+    }
+  ]
+}

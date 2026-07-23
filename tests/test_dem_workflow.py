@@ -382,3 +382,19 @@ def test_run_dem_prep_shell_wrapper_exists():
 
     assert script.is_file()
     assert "ohqbuild run-dem-prep" in script.read_text(encoding="utf-8")
+
+
+def test_sligo_creek_demo_config_runs_prepare(tmp_path):
+    import shutil
+
+    source = Path("examples/SligoCreek")
+    project = tmp_path / "SligoCreek"
+    shutil.copytree(source, project)
+
+    assert main(["run-dem-prep", "--config", str(project / "dem_workflow.example.yaml")]) == 0
+
+    assert (project / "inputs" / "outlet_raw.geojson").exists()
+    assert (project / "inputs" / "outlet_snapped.geojson").exists()
+    assert (project / "intermediate" / "dem_acquisition_area.geojson").exists()
+    manifest = json.loads((project / "intermediate" / "dem_download_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tiles"] == ["dem/raw/demo_tile_sligo_01.tif"]
