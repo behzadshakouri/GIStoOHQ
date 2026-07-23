@@ -14,7 +14,7 @@ from .dem_acquisition import (
 )
 from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
-from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config
+from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config, write_dem_config_template
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -271,6 +271,19 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
     materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
     materialize.add_argument("--clip-buffer-scale", type=float, default=1.2, help="Safety scale applied to --clip-buffer; default 1.2.")
+
+    init_dem = sub.add_parser(
+        "init-dem-config",
+        help="Write a starter DEM acquisition config from outlet and optional flowline/tile-index paths.",
+    )
+    init_dem.add_argument("--config", required=True, help="Output YAML/JSON config path.")
+    init_dem.add_argument("--site", required=True, help="Site/project name.")
+    init_dem.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    init_dem.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    init_dem.add_argument("--flowlines", default=None, help="GeoJSON flowlines for upstream_network mode.")
+    init_dem.add_argument("--tile-index", default=None, help="Optional DEM tile-index GeoJSON path.")
+    init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to auto.")
+    init_dem.add_argument("--method", default="upstream_network", choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"))
 
     prepare_dem = sub.add_parser(
         "prepare-dem",
@@ -612,6 +625,25 @@ def main(argv: list[str] | None = None) -> int:
         cn_lookup = getattr(result, "cn_lookup", None)
         if cn_lookup is not None:
             print(f"Wrote CN lookup: {cn_lookup}")
+        return 0
+
+    if args.command == "init-dem-config":
+        try:
+            path = write_dem_config_template(
+                args.config,
+                site=args.site,
+                lon=args.lon,
+                lat=args.lat,
+                flowline_path=args.flowlines,
+                tile_index=args.tile_index,
+                target_crs=args.target_crs,
+                method=args.method,
+            )
+        except (DemWorkflowError, ValueError) as exc:
+            print(f"init-dem-config failed: {exc}")
+            return 2
+        print(f"Wrote DEM config: {path}")
+        print("Next: ohqbuild prepare-dem --config " + str(path))
         return 0
     if args.command == "prepare-dem":
         try:

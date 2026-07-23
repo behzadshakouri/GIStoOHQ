@@ -189,3 +189,45 @@ dem_acquisition:
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
     assert summary["method"] == "upstream_network"
     assert (tmp_path / "intermediate" / "dem_acquisition_area.geojson").exists()
+
+
+def test_write_dem_config_template_creates_upstream_network_config(tmp_path):
+    from ohqbuilder.dem_workflow import write_dem_config_template
+
+    config = write_dem_config_template(
+        tmp_path / "SligoCreek.yaml",
+        site="SligoCreek",
+        lon=-76.9765,
+        lat=38.9921,
+        flowline_path="hydro/NHDFlowline.geojson",
+        tile_index="indexes/usgs_3dep_tiles.geojson",
+        target_crs="EPSG:26918",
+    )
+
+    text = config.read_text(encoding="utf-8")
+    assert "method: upstream_network" in text
+    assert "flowline_path: hydro/NHDFlowline.geojson" in text
+    assert "tile_index: indexes/usgs_3dep_tiles.geojson" in text
+    assert "target_crs: EPSG:26918" in text
+
+
+def test_cli_init_dem_config_writes_next_step(tmp_path, capsys):
+    config = tmp_path / "SligoCreek.json"
+
+    assert main([
+        "init-dem-config",
+        "--config", str(config),
+        "--site", "SligoCreek",
+        "--lon", "-76.9765",
+        "--lat", "38.9921",
+        "--flowlines", "hydro/NHDFlowline.geojson",
+        "--tile-index", "indexes/usgs_3dep_tiles.geojson",
+        "--target-crs", "EPSG:26918",
+    ]) == 0
+
+    out = capsys.readouterr().out
+    assert "Wrote DEM config:" in out
+    assert "prepare-dem" in out
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert data["site"]["name"] == "SligoCreek"
+    assert data["dem_acquisition"]["method"] == "upstream_network"

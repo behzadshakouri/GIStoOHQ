@@ -221,7 +221,25 @@ python3 run.py config.json
 ## Config-driven DEM preparation
 
 For terminal workflows and future UI launchers, `prepare-dem` reads the shared
-project config and creates the DEM acquisition artifacts in one step:
+project config and creates the DEM acquisition artifacts in one step.
+
+
+You can create a starter config from the terminal instead of editing every field
+by hand:
+
+```bash
+ohqbuild init-dem-config \
+  --config configs/SligoCreek.yaml \
+  --site SligoCreek \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --tile-index indexes/usgs_3dep_tiles.geojson \
+  --target-crs EPSG:26918
+```
+
+The generated config is ready for `ohqbuild prepare-dem --config configs/SligoCreek.yaml` after the referenced flowline and tile-index files exist.
+
 
 ```bash
 ohqbuild prepare-dem --config configs/SligoCreek.yaml

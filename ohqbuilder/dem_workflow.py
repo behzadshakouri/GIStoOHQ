@@ -234,3 +234,67 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
         expanded_area,
         summary_path,
     )
+
+
+def write_dem_config_template(
+    output_path: str | Path,
+    *,
+    site: str,
+    lon: float,
+    lat: float,
+    flowline_path: str | Path | None = None,
+    tile_index: str | Path | None = None,
+    target_crs: str | None = None,
+    method: str = "upstream_network",
+) -> Path:
+    """Write a starter DEM acquisition project config for terminal/UI workflows."""
+
+    path = Path(output_path).expanduser().resolve()
+    dem: dict[str, Any] = {
+        "method": method,
+        "acquisition_area": "intermediate/dem_acquisition_area.geojson",
+        "tile_manifest": "intermediate/dem_download_manifest.json",
+        "summary": "intermediate/dem_workflow_summary.json",
+        "watershed_boundary": "intermediate/watershed_boundary.geojson",
+        "validation_summary": "intermediate/dem_boundary_validation_summary.json",
+        "expanded_acquisition_area": "intermediate/dem_acquisition_area_attempt2.geojson",
+        "auto_expand": True,
+        "directional_expansion": True,
+        "boundary_safety_distance_m": 500,
+        "expansion_distance_km": 5,
+        "final_watershed_buffer_m": 1000,
+    }
+    if method == "upstream_network":
+        if flowline_path is None:
+            raise DemWorkflowError("flowline_path is required for upstream_network configs.")
+        dem.update({
+            "flowline_path": str(flowline_path),
+            "envelope_type": "oriented_rectangle",
+            "upstream_trace_distance_km": 40,
+            "upstream_margin_km": 5,
+            "downstream_margin_km": 3,
+            "lateral_margin_km": 4,
+        })
+    else:
+        dem.update({"upstream_km": 35, "downstream_km": 3, "lateral_km": 4})
+    if tile_index is not None:
+        dem["tile_index"] = str(tile_index)
+    config: dict[str, Any] = {
+        "root": ".",
+        "site": {"name": site, "target_crs": target_crs or "auto"},
+        "spatial_input": {"mode": "outlet"},
+        "outlet": {
+            "longitude": lon,
+            "latitude": lat,
+            "input_crs": "EPSG:4326",
+            "snap_to_flowline": True,
+            "snap_distance_m": 500,
+        },
+        "dem_acquisition": dem,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".json":
+        path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    else:
+        path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return path
