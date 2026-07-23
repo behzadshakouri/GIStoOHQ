@@ -706,6 +706,26 @@ def download_dem_manifest(
     def default_downloader(url: str, target: Path) -> None:
         urllib.request.urlretrieve(url, target)  # noqa: S310
 
+    def local_source(url: str) -> Path | None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme == "file":
+            source = Path(urllib.request.url2pathname(parsed.path)).expanduser()
+            return source.resolve() if source.exists() else source
+        if parsed.scheme or parsed.netloc:
+            return None
+        raw_source = Path(urllib.parse.unquote(url)).expanduser()
+        candidates = [raw_source]
+        if not raw_source.is_absolute():
+            candidates = [
+                Path.cwd() / raw_source,
+                manifest.parent / raw_source,
+                manifest.parent.parent / raw_source,
+            ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        return candidates[0].resolve()
+
     fetch = downloader or default_downloader
     downloaded = 0
     skipped = 0
@@ -727,7 +747,13 @@ def download_dem_manifest(
         if target.exists():
             skipped += 1
         else:
-            fetch(url, target)
+            source = local_source(url)
+            if source is not None:
+                if not source.exists():
+                    raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
+                shutil.copy2(source, target)
+            else:
+                fetch(url, target)
             downloaded += 1
         item["path"] = str(target)
         tiles.append(str(target))
