@@ -395,3 +395,9 @@ The dock also includes a first manual-area helper: **Use Canvas Extent as DEM
 Area** writes the current QGIS map canvas extent to the configured acquisition
 GeoJSON and changes `dem_acquisition.method` to `polygon`. This provides a simple
 area-only/expert path before a full polygon drawing tool is implemented.
+
+A first drawn-polygon hook is also scaffolded. **Draw DEM Area Polygon** lets the
+QGIS dock collect clicked vertices and write them to the same acquisition GeoJSON
+path used by the backend. This keeps manual polygon input, canvas-extent input,
+and config-driven `prepare-dem` on the same `dem_acquisition.acquisition_area`
+contract.

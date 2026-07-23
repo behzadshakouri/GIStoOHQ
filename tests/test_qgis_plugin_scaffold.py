@@ -25,3 +25,11 @@ def test_qgis_plugin_dock_can_use_canvas_extent_as_area():
     assert "Use Canvas Extent as DEM Area" in dock
     assert "qgis_canvas_extent" in dock
     assert "use_canvas_extent_as_area" in dock
+
+
+def test_qgis_plugin_dock_has_draw_polygon_tool():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "Draw DEM Area Polygon" in dock
+    assert "AcquisitionPolygonTool" in dock
+    assert "qgis_drawn_polygon" in dock
