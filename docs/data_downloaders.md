@@ -218,6 +218,21 @@ materializes and clips the downloaded NHD flowlines before GIS preparation.
 python3 run.py config.json
 ```
 
+## Config-driven DEM preparation
+
+For terminal workflows and future UI launchers, `prepare-dem` reads the shared
+project config and creates the DEM acquisition artifacts in one step:
+
+```bash
+ohqbuild prepare-dem --config configs/SligoCreek.yaml
+```
+
+The command currently supports `outlet_buffer`, `oriented_outlet_buffer`, and
+`polygon` acquisition methods. When both `tile_index` and `tile_manifest` are
+configured, it also selects the intersecting DEM tile records and writes the
+manifest. A machine-readable summary is written to
+`dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
+
 ## Outlet-first DEM acquisition areas
 
 A watershed boundary is not available until after a DEM has been downloaded,

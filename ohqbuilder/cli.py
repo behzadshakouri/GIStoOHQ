@@ -13,6 +13,7 @@ from .dem_acquisition import (
 )
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
+from .dem_workflow import DemWorkflowError, prepare_dem_from_config
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -247,6 +248,12 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
     materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
     materialize.add_argument("--clip-buffer-scale", type=float, default=1.2, help="Safety scale applied to --clip-buffer; default 1.2.")
+
+    prepare_dem = sub.add_parser(
+        "prepare-dem",
+        help="Create DEM acquisition area and tile manifest from a project config.",
+    )
+    prepare_dem.add_argument("--config", required=True, help="YAML/JSON project config.")
 
     bounds = sub.add_parser(
         "watershed-bounds",
@@ -559,6 +566,19 @@ def main(argv: list[str] | None = None) -> int:
         cn_lookup = getattr(result, "cn_lookup", None)
         if cn_lookup is not None:
             print(f"Wrote CN lookup: {cn_lookup}")
+        return 0
+    if args.command == "prepare-dem":
+        try:
+            result = prepare_dem_from_config(args.config)
+        except (DemWorkflowError, DemAcquisitionError, ValueError) as exc:
+            print(f"prepare-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM workflow summary: {result.summary_path}")
+        if result.acquisition_area:
+            print(f"Wrote acquisition area: {result.acquisition_area.output_path}")
+        if result.tile_manifest:
+            print(f"Wrote tile manifest: {result.tile_manifest.output_path}")
+            print(f"Selected tile count: {result.tile_manifest.selected_count}")
         return 0
     if args.command == "watershed-bounds":
         try:
