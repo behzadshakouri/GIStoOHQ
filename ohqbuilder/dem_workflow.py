@@ -220,9 +220,23 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
 
     from .dem_acquisition import expand_acquisition_bounds, validate_watershed_within_acquisition
 
+    watershed_path = _resolve(watershed_value, base)
+    acquisition_path = _resolve(acquisition_value, base)
+    if not watershed_path.exists():
+        raise DemWorkflowError(
+            f"Watershed boundary does not exist yet: {watershed_path}. "
+            "Run watershed delineation before validate-dem, or update "
+            "dem_acquisition.watershed_boundary."
+        )
+    if not acquisition_path.exists():
+        raise DemWorkflowError(
+            f"DEM acquisition area does not exist yet: {acquisition_path}. "
+            "Run prepare-dem before validate-dem."
+        )
+
     validation = validate_watershed_within_acquisition(
-        _resolve(watershed_value, base),
-        _resolve(acquisition_value, base),
+        watershed_path,
+        acquisition_path,
         safety_distance_m=float(dem_acquisition.get("boundary_safety_distance_m", 500.0)),
     )
     expanded_area: DemAcquisitionArea | None = None

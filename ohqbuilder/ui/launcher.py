@@ -41,16 +41,50 @@ class LauncherState:
     site: str | None = None
     source_dir: Path | None = None
     target_crs: str | None = None
+    lon: float | None = None
+    lat: float | None = None
+    method: str | None = None
+    flowline_path: Path | None = None
+    tile_index: Path | None = None
+
+
+def _path_for_config_value(path: Path, config_path: Path) -> str:
+    """Return a path string suitable for writing into ``config_path``."""
+
+    config_dir = config_path.expanduser().parent
+    try:
+        return str(path.expanduser().relative_to(config_dir))
+    except ValueError:
+        return str(path)
 
 
 def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowCommand:
     """Build the backend command that the UI should execute for a workflow step."""
 
     if step == "init-dem-config":
-        return WorkflowCommand(
-            "Initialize DEM Config",
-            ("ohqbuild", "init-dem-config", "--output", str(state.config_path)),
-        )
+        if not state.site or state.lon is None or state.lat is None:
+            raise LauncherError("Site, outlet longitude, and outlet latitude are required for init-dem-config.")
+        argv = [
+            "ohqbuild",
+            "init-dem-config",
+            "--config",
+            str(state.config_path),
+            "--site",
+            state.site,
+            "--lon",
+            str(state.lon),
+            "--lat",
+            str(state.lat),
+        ]
+        if state.flowline_path is not None:
+            argv.extend(("--flowlines", _path_for_config_value(state.flowline_path, state.config_path)))
+        if state.tile_index is not None:
+            argv.extend(("--tile-index", _path_for_config_value(state.tile_index, state.config_path)))
+        if state.target_crs:
+            argv.extend(("--target-crs", state.target_crs))
+        if state.method:
+            argv.extend(("--method", state.method))
+        return WorkflowCommand("Initialize DEM Config", tuple(argv))
     if step == "prepare-dem":
         return WorkflowCommand("Prepare DEM", ("ohqbuild", "prepare-dem", "--config", str(state.config_path)))
     if step == "run-dem-prep":
@@ -140,11 +174,20 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
     return LauncherState(
         config_path=Path(config_path).expanduser(),
         manifest_path=path_value(dem.get("tile_manifest")),
-        raw_dem_dir=path_value(paths.get("raw_dem_dir") or dem.get("raw_dem_dir")),
+        raw_dem_dir=path_value(paths.get("raw_dem_dir") or dem.get("raw_dem_dir") or "dem/raw"),
         root=path_value(config.get("root") or "."),
         site=str(site_config.get("name") or config.get("site") or "."),
         source_dir=path_value(config.get("download_dir") or "source_downloads"),
         target_crs=str(site_config.get("target_crs") or config.get("target_crs") or "") or None,
+        lon=float(config.get("outlet", {}).get("longitude"))
+        if isinstance(config.get("outlet"), dict) and config.get("outlet", {}).get("longitude") is not None
+        else None,
+        lat=float(config.get("outlet", {}).get("latitude"))
+        if isinstance(config.get("outlet"), dict) and config.get("outlet", {}).get("latitude") is not None
+        else None,
+        method=str(dem.get("method") or "") or None,
+        flowline_path=path_value(dem.get("flowline_path")),
+        tile_index=path_value(dem.get("tile_index")),
     )
 
 
@@ -156,6 +199,16 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "site", "name", state.site)
     if state.target_crs:
         _set_nested(updated, "site", "target_crs", state.target_crs)
+    if state.lon is not None:
+        _set_nested(updated, "outlet", "longitude", state.lon)
+    if state.lat is not None:
+        _set_nested(updated, "outlet", "latitude", state.lat)
+    if state.method:
+        _set_nested(updated, "dem_acquisition", "method", state.method)
+    if state.flowline_path is not None:
+        _set_nested(updated, "dem_acquisition", "flowline_path", str(state.flowline_path))
+    if state.tile_index is not None:
+        _set_nested(updated, "dem_acquisition", "tile_index", str(state.tile_index))
     updated["root"] = str(state.root or ".")
     updated["download_dir"] = str(state.source_dir or "source_downloads")
     return updated
@@ -211,6 +264,11 @@ class LauncherApp:
         self.site_var = tk.StringVar(value=".")
         self.source_var = tk.StringVar(value="source_downloads")
         self.crs_var = tk.StringVar(value="")
+        self.lon_var = tk.StringVar(value="")
+        self.lat_var = tk.StringVar(value="")
+        self.method_var = tk.StringVar(value="upstream_network")
+        self.flowline_var = tk.StringVar(value="")
+        self.tile_index_var = tk.StringVar(value="")
         self._build()
         self._poll_messages()
 
@@ -226,6 +284,11 @@ class LauncherApp:
             ("Site", self.site_var),
             ("Source dir", self.source_var),
             ("Target CRS", self.crs_var),
+            ("Outlet lon", self.lon_var),
+            ("Outlet lat", self.lat_var),
+            ("DEM method", self.method_var),
+            ("Flowlines", self.flowline_var),
+            ("Tile index", self.tile_index_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
@@ -251,14 +314,28 @@ class LauncherApp:
 
     def state(self) -> LauncherState:
         crs = self.crs_var.get().strip() or None
+
+        def optional_path(value: str) -> Path | None:
+            text = value.strip()
+            return Path(text).expanduser() if text else None
+
+        def optional_float(value: str) -> float | None:
+            text = value.strip()
+            return float(text) if text else None
+
         return LauncherState(
             config_path=Path(self.config_var.get()).expanduser(),
-            manifest_path=Path(self.manifest_var.get()).expanduser(),
-            raw_dem_dir=Path(self.raw_dem_var.get()).expanduser(),
-            root=Path(self.root_var.get()).expanduser(),
+            manifest_path=optional_path(self.manifest_var.get()),
+            raw_dem_dir=optional_path(self.raw_dem_var.get()),
+            root=optional_path(self.root_var.get()),
             site=self.site_var.get().strip() or None,
-            source_dir=Path(self.source_var.get()).expanduser(),
+            source_dir=optional_path(self.source_var.get()),
             target_crs=crs,
+            lon=optional_float(self.lon_var.get()),
+            lat=optional_float(self.lat_var.get()),
+            method=self.method_var.get().strip() or None,
+            flowline_path=optional_path(self.flowline_var.get()),
+            tile_index=optional_path(self.tile_index_var.get()),
         )
 
 
@@ -270,6 +347,11 @@ class LauncherApp:
         self.site_var.set(state.site or "")
         self.source_var.set(str(state.source_dir or ""))
         self.crs_var.set(state.target_crs or "")
+        self.lon_var.set("" if state.lon is None else str(state.lon))
+        self.lat_var.set("" if state.lat is None else str(state.lat))
+        self.method_var.set(state.method or "")
+        self.flowline_var.set(str(state.flowline_path or ""))
+        self.tile_index_var.set(str(state.tile_index or ""))
 
     def load_config(self) -> None:
         try:

@@ -16,10 +16,61 @@ from ohqbuilder.ui.launcher import (
 
 def test_command_for_init_dem_config():
     command = command_for_step(
-        "init-dem-config", LauncherState(config_path=Path("config.yaml"))
+        "init-dem-config",
+        LauncherState(
+            config_path=Path("config.yaml"),
+            site="SligoCreek",
+            lon=-76.9765,
+            lat=38.9921,
+            flowline_path=Path("flowlines.geojson"),
+            tile_index=Path("tiles.geojson"),
+            target_crs="EPSG:26918",
+            method="upstream_network",
+        ),
     )
 
-    assert command.argv == ("ohqbuild", "init-dem-config", "--output", "config.yaml")
+    assert command.argv == (
+        "ohqbuild",
+        "init-dem-config",
+        "--config",
+        "config.yaml",
+        "--site",
+        "SligoCreek",
+        "--lon",
+        "-76.9765",
+        "--lat",
+        "38.9921",
+        "--flowlines",
+        "flowlines.geojson",
+        "--tile-index",
+        "tiles.geojson",
+        "--target-crs",
+        "EPSG:26918",
+        "--method",
+        "upstream_network",
+    )
+
+
+def test_command_for_init_dem_config_keeps_config_relative_paths(tmp_path):
+    config_path = tmp_path / "project" / "config.yaml"
+    state = LauncherState(
+        config_path=config_path,
+        site="SligoCreek",
+        lon=-76.9765,
+        lat=38.9921,
+        flowline_path=tmp_path / "project" / "hydro" / "flowlines.geojson",
+        tile_index=tmp_path / "project" / "indexes" / "tiles.geojson",
+    )
+
+    command = command_for_step("init-dem-config", state)
+
+    assert "hydro/flowlines.geojson" in command.argv
+    assert "indexes/tiles.geojson" in command.argv
+
+
+def test_command_for_init_dem_config_requires_outlet():
+    with pytest.raises(LauncherError, match="outlet longitude"):
+        command_for_step("init-dem-config", LauncherState(config_path=Path("config.yaml")))
 
 
 def test_command_for_prepare_dem():
@@ -69,8 +120,14 @@ def test_ui_config_load_state_update_and_save(tmp_path):
 site:
   name: SligoCreek
   target_crs: EPSG:26918
+outlet:
+  longitude: -76.9765
+  latitude: 38.9921
 dem_acquisition:
+  method: upstream_network
   tile_manifest: intermediate/manifest.json
+  flowline_path: hydro/flowlines.geojson
+  tile_index: indexes/tiles.geojson
 paths:
   raw_dem_dir: dem/raw
 """.strip(),
@@ -82,6 +139,12 @@ paths:
     assert state.site == "SligoCreek"
     assert state.target_crs == "EPSG:26918"
     assert state.manifest_path == tmp_path / "intermediate" / "manifest.json"
+    assert state.raw_dem_dir == tmp_path / "dem" / "raw"
+    assert state.lon == -76.9765
+    assert state.lat == 38.9921
+    assert state.method == "upstream_network"
+    assert state.flowline_path == tmp_path / "hydro" / "flowlines.geojson"
+    assert state.tile_index == tmp_path / "indexes" / "tiles.geojson"
 
     updated = update_config_from_state(config, state)
     output = tmp_path / "saved.json"
