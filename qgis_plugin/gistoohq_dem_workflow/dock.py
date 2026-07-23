@@ -4,6 +4,49 @@ import subprocess
 from pathlib import Path
 
 
+def _read_config(path: Path):
+    import json
+    import yaml
+
+    if path.suffix.lower() == ".json":
+        return json.loads(path.read_text(encoding="utf-8"))
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _write_config(path: Path, data) -> None:
+    import json
+    import yaml
+
+    if path.suffix.lower() == ".json":
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    else:
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+class OutletCaptureTool:
+    def __init__(self, dock):
+        from qgis.gui import QgsMapToolEmitPoint
+
+        self.dock = dock
+        self.tool = QgsMapToolEmitPoint(dock.iface.mapCanvas())
+        self.tool.canvasClicked.connect(self.capture)
+
+    def activate(self):
+        self.dock.iface.mapCanvas().setMapTool(self.tool)
+        self.dock.log.append("Click the outlet point on the map canvas.")
+
+    def capture(self, point, button):
+        from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject
+
+        canvas = self.dock.iface.mapCanvas()
+        source_crs = canvas.mapSettings().destinationCrs()
+        target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+        transform = QgsCoordinateTransform(source_crs, target_crs, QgsProject.instance())
+        lonlat = transform.transform(point)
+        self.dock.write_outlet(lonlat.x(), lonlat.y())
+        self.dock.log.append(f"Outlet set to lon={lonlat.x():.8f}, lat={lonlat.y():.8f}")
+
+
 class DemWorkflowDock:
     """QGIS dock skeleton that delegates workflow work to ohqbuild commands."""
 
@@ -28,6 +71,9 @@ class DemWorkflowDock:
         self.config = QLineEdit("config.example.json")
         row.addWidget(self.config)
         layout.addLayout(row)
+        outlet_button = QPushButton("Pick Outlet on Map")
+        outlet_button.clicked.connect(self.pick_outlet)
+        layout.addWidget(outlet_button)
         for label, command in (
             ("Prepare DEM", "prepare-dem"),
             ("Download DEM Tiles", "download-dem-manifest"),
@@ -48,6 +94,24 @@ class DemWorkflowDock:
     def __getattr__(self, name):
         return getattr(self.widget, name)
 
+    def pick_outlet(self) -> None:
+        self.outlet_tool = OutletCaptureTool(self)
+        self.outlet_tool.activate()
+
+    def write_outlet(self, lon: float, lat: float) -> None:
+        config_path = Path(self.config.text()).expanduser()
+        data = _read_config(config_path)
+        if not isinstance(data, dict):
+            data = {}
+        outlet = data.setdefault("outlet", {})
+        if not isinstance(outlet, dict):
+            outlet = {}
+            data["outlet"] = outlet
+        outlet["longitude"] = lon
+        outlet["latitude"] = lat
+        outlet.setdefault("input_crs", "EPSG:4326")
+        _write_config(config_path, data)
+
     def run_command(self, command: str) -> None:
         argv = ["ohqbuild", command, "--config", self.config.text()]
         self.log.append("$ " + " ".join(argv))
@@ -59,12 +123,10 @@ class DemWorkflowDock:
         self.log.append(f"[{command} exited with {process.returncode}]")
 
     def load_configured_layers(self) -> None:
-        import json
-        import yaml
         from qgis.core import QgsProject, QgsVectorLayer
 
         config_path = Path(self.config.text()).expanduser()
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.suffix.lower() != ".json" else json.loads(config_path.read_text(encoding="utf-8"))
+        data = _read_config(config_path)
         dem = data.get("dem_acquisition", {}) if isinstance(data, dict) else {}
         for key in ("acquisition_area", "expanded_acquisition_area", "watershed_boundary"):
             value = dem.get(key)

@@ -384,3 +384,9 @@ runs backend `ohqbuild` commands and can load configured GeoJSON outputs into th
 current QGIS project. The first scaffold intentionally avoids custom map tools;
 map-click outlet selection should be added after command execution and layer
 loading are stable.
+
+The QGIS scaffold now includes a first outlet-picking hook. The dock can activate
+a map-click tool, transform the clicked canvas coordinate to EPSG:4326, and write
+`outlet.longitude`, `outlet.latitude`, and `outlet.input_crs` back to the selected
+project config. This is the first step toward replacing manual longitude/latitude
+entry with map interaction.
