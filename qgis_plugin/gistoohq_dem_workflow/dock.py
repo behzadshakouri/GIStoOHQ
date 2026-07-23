@@ -90,6 +90,85 @@ def _write_manifest_footprints(manifest_path: Path) -> Path | None:
     return output
 
 
+class QgisDockConfigError(RuntimeError):
+    """Raised when the QGIS dock cannot build a backend command from config."""
+
+
+def _as_mapping(value, name: str) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    raise QgisDockConfigError(f"Config section {name!r} must be an object.")
+
+
+def _relative_to_config(config_path: Path, value) -> Path | None:
+    if value in (None, ""):
+        return None
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return path
+    return config_path.parent / path
+
+
+def _site_name(config: dict) -> str:
+    site = config.get("site")
+    if isinstance(site, dict):
+        name = site.get("name")
+        if name:
+            return str(name)
+    if isinstance(site, str) and site:
+        return site
+    return "."
+
+
+def _target_crs(config: dict) -> str | None:
+    site = config.get("site")
+    if isinstance(site, dict) and site.get("target_crs"):
+        return str(site["target_crs"])
+    if config.get("target_crs"):
+        return str(config["target_crs"])
+    return None
+
+
+def _command_for_workflow(command: str, config_text: str) -> list[str]:
+    config_path = Path(config_text).expanduser()
+    config = _read_config(config_path)
+    if not isinstance(config, dict):
+        raise QgisDockConfigError("Project config must contain a JSON/YAML object.")
+    dem = _as_mapping(config.get("dem_acquisition"), "dem_acquisition")
+
+    if command in {"prepare-dem", "validate-dem"}:
+        return ["ohqbuild", command, "--config", str(config_path)]
+
+    if command == "download-dem-manifest":
+        manifest = _relative_to_config(config_path, dem.get("tile_manifest"))
+        if manifest is None:
+            raise QgisDockConfigError("dem_acquisition.tile_manifest is required to download DEM tiles.")
+        paths = _as_mapping(config.get("paths"), "paths")
+        out_dir = _relative_to_config(
+            config_path,
+            paths.get("raw_dem_dir") or dem.get("raw_dem_dir") or "dem/raw",
+        )
+        return ["ohqbuild", command, "--manifest", str(manifest), "--out-dir", str(out_dir)]
+
+    if command == "materialize-inputs":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        argv = ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
+        source_dir = _relative_to_config(config_path, config.get("download_dir") or config.get("source_dir"))
+        if source_dir is not None:
+            argv.extend(["--source-dir", str(source_dir)])
+        target_crs = _target_crs(config)
+        if target_crs:
+            argv.extend(["--target-crs", target_crs])
+        manifest = _relative_to_config(config_path, dem.get("tile_manifest"))
+        if manifest is not None:
+            argv.extend(["--dem-manifest", str(manifest)])
+        return argv
+
+    raise QgisDockConfigError(f"Unsupported workflow command: {command}")
+
+
 class OutletCaptureTool:
     def __init__(self, dock):
         from qgis.gui import QgsMapToolEmitPoint
@@ -266,7 +345,11 @@ class DemWorkflowDock:
         self.log.append(f"Wrote DEM acquisition area from canvas extent: {area_path}")
 
     def run_command(self, command: str) -> None:
-        argv = ["ohqbuild", command, "--config", self.config.text()]
+        try:
+            argv = _command_for_workflow(command, self.config.text())
+        except (OSError, QgisDockConfigError, ValueError) as exc:
+            self.log.append(f"Cannot run {command}: {exc}")
+            return
         self.log.append("$ " + " ".join(argv))
         process = subprocess.run(argv, capture_output=True, text=True, check=False)
         if process.stdout:

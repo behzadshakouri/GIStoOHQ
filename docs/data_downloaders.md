@@ -406,3 +406,9 @@ Layer loading now includes DEM tile preview support. If `tile_index` exists, the
 QGIS dock loads it with the other configured layers; if `tile_manifest` contains
 selected item bounds, the dock writes a temporary selected-tile-footprints GeoJSON
 next to the manifest and loads that as a preview layer.
+
+### QGIS backend command resolution
+
+The QGIS dock now builds command-specific `ohqbuild` calls from the selected project config instead of appending `--config` to every button action. `Prepare DEM` and `Validate DEM` still call the config-driven commands, while `Download DEM Tiles` resolves `dem_acquisition.tile_manifest` and a raw DEM directory before calling `download-dem-manifest`. `Materialize Inputs` resolves the project root, site name, optional source directory, target CRS, and DEM manifest before calling `materialize-inputs`.
+
+This keeps the dock as a thin controller while avoiding invalid CLI invocations for commands that intentionally use explicit manifest/root arguments rather than a project config flag.
