@@ -1,0 +1,33 @@
+root: .
+site:
+  name: SligoCreekDemo
+  target_crs: EPSG:26918
+spatial_input:
+  mode: outlet
+outlet:
+  longitude: -76.9765
+  latitude: 38.9921
+  input_crs: EPSG:4326
+  raw_path: inputs/outlet_raw.geojson
+  snap_to_flowline: true
+  snap_distance_m: 500
+  snapped_path: inputs/outlet_snapped.geojson
+dem_acquisition:
+  method: upstream_network
+  acquisition_area: intermediate/dem_acquisition_area.geojson
+  tile_index: indexes/usgs_3dep_tiles.demo.geojson
+  tile_manifest: intermediate/dem_download_manifest.json
+  flowline_path: hydro/NHDFlowline.demo.geojson
+  envelope_type: oriented_rectangle
+  upstream_trace_distance_km: 20
+  upstream_margin_km: 3
+  downstream_margin_km: 1
+  lateral_margin_km: 2
+  auto_expand: true
+  directional_expansion: true
+  boundary_safety_distance_m: 500
+  expanded_acquisition_area: intermediate/dem_acquisition_area_attempt2.geojson
+  expansion_distance_km: 5
+  summary: intermediate/dem_workflow_summary.json
+  watershed_boundary: intermediate/watershed_boundary.geojson
+  validation_summary: intermediate/dem_boundary_validation_summary.json

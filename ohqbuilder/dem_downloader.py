@@ -672,3 +672,67 @@ def _write_output_csv(path: Path, rows: list[dict[str, str]]) -> None:
         writer = csv.DictWriter(fp, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+@dataclass(frozen=True)
+class ManifestDownloadResult:
+    manifest_path: Path
+    downloaded: int
+    skipped: int
+    tile_count: int
+
+
+def download_dem_manifest(
+    manifest_path: str | Path,
+    output_dir: str | Path,
+    *,
+    updated_manifest_path: str | Path | None = None,
+    downloader: Callable[[str, Path], None] | None = None,
+) -> ManifestDownloadResult:
+    """Download URL-backed DEM manifest items and write materializer-ready tile paths."""
+
+    manifest = Path(manifest_path).expanduser().resolve()
+    destination = Path(output_dir).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise ValueError("DEM download manifest must contain an items list.")
+    target_manifest = (
+        Path(updated_manifest_path).expanduser().resolve()
+        if updated_manifest_path
+        else manifest
+    )
+
+    def default_downloader(url: str, target: Path) -> None:
+        urllib.request.urlretrieve(url, target)  # noqa: S310
+
+    fetch = downloader or default_downloader
+    downloaded = 0
+    skipped = 0
+    tiles: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError("DEM manifest items must be objects.")
+        url = item.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        raw_path = item.get("path")
+        if isinstance(raw_path, str) and raw_path:
+            target = Path(raw_path).expanduser()
+            if not target.is_absolute():
+                target = destination / target.name
+        else:
+            target = destination / _filename_from_url(url, f"dem_tile_{index + 1}.tif")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            skipped += 1
+        else:
+            fetch(url, target)
+            downloaded += 1
+        item["path"] = str(target)
+        tiles.append(str(target))
+
+    data["tiles"] = tiles
+    target_manifest.parent.mkdir(parents=True, exist_ok=True)
+    target_manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return ManifestDownloadResult(target_manifest, downloaded, skipped, len(tiles))

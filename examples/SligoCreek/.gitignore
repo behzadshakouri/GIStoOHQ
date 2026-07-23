@@ -1,0 +1,5 @@
+/inputs/*.geojson
+/intermediate/*.geojson
+/intermediate/*.json
+/dem/raw/*
+!/dem/raw/.gitkeep
