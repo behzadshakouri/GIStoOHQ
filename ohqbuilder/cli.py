@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .dem_acquisition import DemAcquisitionError, create_outlet_buffer_area
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
@@ -151,6 +152,19 @@ def build_parser() -> argparse.ArgumentParser:
     mat_dem.add_argument("--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips.")
     mat_dem.add_argument("--out", default=None, help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.")
     mat_dem.add_argument("--dst-crs", default=None, help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.")
+    mat_dem.add_argument("--manifest", default=None, help="DEM download manifest with an explicit tiles list; avoids scanning unrelated rasters.")
+
+    area = sub.add_parser(
+        "dem-acquisition-area",
+        help="Create an outlet-based initial DEM acquisition polygon for downloader tile selection.",
+    )
+    area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
+    area.add_argument("--upstream-km", type=float, default=25.0, help="Distance from outlet toward upstream end.")
+    area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
+    area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
+    area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
 
     fetch = sub.add_parser(
         "fetch-phase1-inputs",
@@ -553,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_dir=args.source_dir,
                 output_path=args.out,
                 dst_crs=args.dst_crs,
+                manifest_path=args.manifest,
             )
         except DemMaterializeError as exc:
             print(f"materialize-dem failed: {exc}")
@@ -560,6 +575,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote DEM: {result.output_path}")
         print(f"Source product count: {result.source_count}")
         print(f"Target CRS: {result.dst_crs}")
+        return 0
+    if args.command == "dem-acquisition-area":
+        try:
+            result = create_outlet_buffer_area(
+                args.lon,
+                args.lat,
+                args.out,
+                upstream_km=args.upstream_km,
+                downstream_km=args.downstream_km,
+                lateral_km=args.lateral_km,
+                azimuth_deg=args.azimuth,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-acquisition-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote acquisition area: {result.output_path}")
+        print(f"Mode: {result.mode}")
+        print(f"Area: {result.area_km2:g} km^2")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
         return 0
     if args.command == "fetch-phase1-inputs":
         try:

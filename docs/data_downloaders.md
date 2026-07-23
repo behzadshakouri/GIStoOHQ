@@ -217,3 +217,56 @@ materializes and clips the downloaded NHD flowlines before GIS preparation.
 ```bash
 python3 run.py config.json
 ```
+
+## Outlet-first DEM acquisition areas
+
+A watershed boundary is not available until after a DEM has been downloaded,
+merged, projected, and delineated. For outlet-first projects, GIStoOHQ therefore
+uses an explicit **DEM acquisition area** as the handoff object between UI or
+terminal input and the downloader. The first implementation supports an
+outlet-based rectangular polygon that can be axis-aligned or oriented along a
+known upstream azimuth:
+
+```bash
+ohqbuild dem-acquisition-area \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --out intermediate/dem_acquisition_area.geojson \
+  --upstream-km 35 \
+  --downstream-km 3 \
+  --lateral-km 4 \
+  --azimuth 20
+```
+
+For an elongated watershed such as Sligo Creek, the upstream/downstream/lateral
+margins produce a long acquisition polygon instead of a large circular buffer.
+The downloader should select DEM tiles by intersecting tile footprints with this
+polygon. Later, an upstream-network method can create the same output file from
+snapped NHD flowlines, and a UI can preview both the acquisition polygon and the
+intersecting tile footprints before downloading.
+
+The DEM merger can also consume an explicit download manifest instead of scanning
+the whole source tree:
+
+```json
+{
+  "site": "SligoCreek",
+  "tiles": [
+    "../dem/raw/tile_01.tif",
+    "../dem/raw/tile_02.tif"
+  ]
+}
+```
+
+```bash
+ohqbuild materialize-dem \
+  --root /path/to/project \
+  --site SligoCreek \
+  --manifest intermediate/dem_download_manifest.json \
+  --dst-crs EPSG:26918
+```
+
+Using the acquisition polygon for tile selection and the manifest for DEM
+materialization keeps the downloader, merger, cropper, delineator, and future UI
+independent while avoiding accidental inclusion of derived rasters such as
+`merged_dem_utm.tif` as new merge inputs.

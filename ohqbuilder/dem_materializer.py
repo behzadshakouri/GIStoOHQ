@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import tempfile
 import zipfile
@@ -27,6 +28,28 @@ def _require_rasterio() -> None:
             "Materializing demlr/cliped_utm.tif requires rasterio. "
             "Install GIS dependencies with `pip install -e .[gis]`."
         )
+
+
+def read_dem_manifest(manifest_path: str | Path) -> list[Path]:
+    """Return DEM source paths explicitly listed in a download manifest."""
+
+    path = Path(manifest_path).expanduser().resolve()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    raw_tiles = data.get("tiles")
+    if not isinstance(raw_tiles, list):
+        raise DemMaterializeError("DEM manifest must contain a tiles list.")
+    base = path.parent
+    sources: list[Path] = []
+    for tile in raw_tiles:
+        if not isinstance(tile, str) or not tile.strip():
+            raise DemMaterializeError("DEM manifest tiles must be non-empty strings.")
+        tile_path = Path(tile).expanduser()
+        if not tile_path.is_absolute():
+            tile_path = (base / tile_path).resolve()
+        if not tile_path.exists():
+            raise DemMaterializeError(f"DEM manifest tile does not exist: {tile_path}")
+        sources.append(tile_path)
+    return sources
 
 
 def discover_dem_sources(source_dir: str | Path) -> list[Path]:
@@ -134,6 +157,7 @@ def materialize_dem(
     dst_crs: str | None = None,
     clip_bounds: str | tuple[float, float, float, float] | None = None,
     clip_bounds_crs: str = "EPSG:4326",
+    manifest_path: str | Path | None = None,
 ) -> DemMaterializeResult:
     """Mosaic/reproject downloaded DEM rasters into the legacy DEM filename."""
 
@@ -146,9 +170,14 @@ def materialize_dem(
     site_path = root_path / site
     source_path = Path(source_dir).expanduser().resolve() if source_dir else site_path / "source_downloads"
     target = Path(output_path).expanduser().resolve() if output_path else site_path / "demlr" / "cliped_utm.tif"
-    sources = discover_dem_sources(source_path)
+    if manifest_path:
+        sources = read_dem_manifest(manifest_path)
+        source_label = f"manifest: {Path(manifest_path).expanduser().resolve()}"
+    else:
+        sources = discover_dem_sources(source_path)
+        source_label = f"directory: {source_path}"
     if not sources:
-        raise DemMaterializeError(f"No DEM rasters or zip archives found under: {source_path}")
+        raise DemMaterializeError(f"No DEM rasters or zip archives found from {source_label}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:

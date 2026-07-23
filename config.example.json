@@ -22,5 +22,27 @@
   "download_dir": null,
   "max_tiles": null,
   "max_file_size_mb": 512.0,
-  "target_crs": null
+  "target_crs": null,
+  "spatial_input": {
+    "mode": "outlet"
+  },
+  "outlet": {
+    "longitude": null,
+    "latitude": null,
+    "input_crs": "EPSG:4326",
+    "snap_to_flowline": true,
+    "snap_distance_m": 500
+  },
+  "dem_acquisition": {
+    "method": "oriented_outlet_buffer",
+    "acquisition_area": "intermediate/dem_acquisition_area.geojson",
+    "tile_manifest": "intermediate/dem_download_manifest.json",
+    "upstream_km": 35,
+    "downstream_km": 3,
+    "lateral_km": 4,
+    "auto_expand": true,
+    "directional_expansion": true,
+    "boundary_safety_distance_m": 500,
+    "final_watershed_buffer_m": 1000
+  }
 }
