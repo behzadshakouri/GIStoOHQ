@@ -14,4 +14,7 @@ fi
 
 CONFIG=$1
 shift
-exec ohqbuild run-dem-prep --config "$CONFIG" "$@"
+if command -v ohqbuild >/dev/null 2>&1; then
+  exec ohqbuild run-dem-prep --config "$CONFIG" "$@"
+fi
+exec python -m ohqbuilder.cli run-dem-prep --config "$CONFIG" "$@"

@@ -112,4 +112,6 @@ def test_run_dem_ui_shell_wrapper_exists():
     script = Path("scripts/run_dem_ui.sh")
 
     assert script.is_file()
-    assert "ohqbuild ui" in script.read_text(encoding="utf-8")
+    text = script.read_text(encoding="utf-8")
+    assert "ohqbuild ui" in text
+    assert "python -m ohqbuilder.cli ui" in text

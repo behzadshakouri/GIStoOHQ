@@ -381,7 +381,9 @@ def test_run_dem_prep_shell_wrapper_exists():
     script = Path("scripts/run_dem_prep.sh")
 
     assert script.is_file()
-    assert "ohqbuild run-dem-prep" in script.read_text(encoding="utf-8")
+    text = script.read_text(encoding="utf-8")
+    assert "ohqbuild run-dem-prep" in text
+    assert "python -m ohqbuilder.cli run-dem-prep" in text
 
 
 def test_sligo_creek_demo_config_runs_prepare(tmp_path):

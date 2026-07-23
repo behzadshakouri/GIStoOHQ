@@ -2,7 +2,7 @@
 
 This folder is a small no-network smoke test for the outlet-first DEM acquisition workflow. It uses simplified demo GeoJSON files, not authoritative hydrography or DEM indexes.
 
-Run the prepare path from the repository root:
+Run the prepare path from the repository root. The wrapper uses `ohqbuild` when installed and falls back to `python -m ohqbuilder.cli` from a source checkout:
 
 ```bash
 scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml

@@ -259,7 +259,7 @@ ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download --materialize
 ohqbuild run-dem-prep --config configs/SligoCreek.yaml --validate
 ```
 
-For shell-script users, the same direct path is wrapped as:
+For shell-script users, the same direct path is wrapped by scripts that use `ohqbuild` when installed and fall back to `python -m ohqbuilder.cli` from a source checkout:
 
 ```bash
 scripts/run_dem_prep.sh configs/SligoCreek.yaml --download --materialize
