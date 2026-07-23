@@ -53,6 +53,7 @@ dem_acquisition:
     assert result.tile_manifest.selected_count == 1
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
     assert summary["selected_tile_count"] == 1
+    assert summary["raw_outlet"] == "inputs/outlet_raw.geojson"
     assert (tmp_path / "intermediate" / "dem_acquisition_area.geojson").exists()
     assert (tmp_path / "intermediate" / "dem_download_manifest.json").exists()
 
@@ -297,5 +298,9 @@ dem_acquisition:
     assert result.acquisition_area is not None
     raw = json.loads((tmp_path / "inputs" / "outlet_raw.geojson").read_text(encoding="utf-8"))
     assert raw["features"][0]["properties"]["source"] == "raw"
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary["raw_outlet"] == "inputs/outlet_raw.geojson"
+    assert summary["snapped_outlet"] == "inputs/outlet_snapped.geojson"
+    assert summary["snap_distance_m"] < 200
     snapped = json.loads((tmp_path / "inputs" / "outlet_snapped.geojson").read_text(encoding="utf-8"))
     assert abs(snapped["features"][0]["geometry"]["coordinates"][1] - 39.0) < 0.00001

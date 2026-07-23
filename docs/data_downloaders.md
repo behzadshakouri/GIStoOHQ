@@ -250,6 +250,9 @@ The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
 `tile_manifest` are configured, it also selects the intersecting DEM tile records
 and writes the manifest. A machine-readable summary is written to
 `dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
+The summary includes raw/snapped outlet artifact paths and snap distance when
+outlet snapping runs, so UI progress panels can report exactly which point was
+used for acquisition.
 
 After delineation, `validate-dem` reads the same config to run the boundary
 clearance check and, when `auto_expand` is true, writes the configured expanded

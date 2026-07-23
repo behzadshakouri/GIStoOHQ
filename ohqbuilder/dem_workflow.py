@@ -92,8 +92,10 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
     outlet_lon = _required_float(outlet, "longitude", "outlet") if outlet.get("longitude") is not None else None
     outlet_lat = _required_float(outlet, "latitude", "outlet") if outlet.get("latitude") is not None else None
+    raw_outlet_path: Path | None = None
+    snapped = None
     if outlet_lon is not None and outlet_lat is not None:
-        write_outlet_point(
+        raw_outlet_path = write_outlet_point(
             outlet_lon,
             outlet_lat,
             _resolve(outlet.get("raw_path") or "inputs/outlet_raw.geojson", base),
@@ -181,6 +183,9 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         if tile_manifest_result
         else None,
         "selected_tile_count": tile_manifest_result.selected_count if tile_manifest_result else None,
+        "raw_outlet": _relativize(raw_outlet_path, base) if raw_outlet_path else None,
+        "snapped_outlet": _relativize(snapped.output_path, base) if snapped and snapped.output_path else None,
+        "snap_distance_m": snapped.distance_m if snapped else None,
     }
     if acquisition_result:
         summary["acquisition_bounds"] = acquisition_result.bounds
