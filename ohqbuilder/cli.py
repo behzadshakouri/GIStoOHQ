@@ -282,7 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_dem.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
     init_dem.add_argument("--flowlines", default=None, help="GeoJSON flowlines for upstream_network mode.")
     init_dem.add_argument("--tile-index", default=None, help="Optional DEM tile-index GeoJSON path.")
-    init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to auto.")
+    init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to NAD83 UTM inferred from outlet.")
     init_dem.add_argument("--method", default="upstream_network", choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"))
 
     prepare_dem = sub.add_parser(

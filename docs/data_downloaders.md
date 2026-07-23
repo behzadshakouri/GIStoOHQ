@@ -238,7 +238,7 @@ ohqbuild init-dem-config \
   --target-crs EPSG:26918
 ```
 
-The generated config is ready for `ohqbuild prepare-dem --config configs/SligoCreek.yaml` after the referenced flowline and tile-index files exist.
+If `--target-crs` is omitted, the initializer infers a NAD83 UTM CRS from the outlet coordinates; for Sligo Creek, that is `EPSG:26918`. The generated config is ready for `ohqbuild prepare-dem --config configs/SligoCreek.yaml` after the referenced flowline and tile-index files exist.
 
 
 ```bash

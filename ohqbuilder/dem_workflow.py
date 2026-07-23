@@ -236,6 +236,30 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
     )
 
 
+def infer_utm_crs(lon: float, lat: float, *, datum: str = "NAD83") -> str:
+    """Infer a UTM CRS string from WGS84 longitude/latitude.
+
+    Defaults to NAD83 EPSG:269xx for northern-hemisphere US workflows. Use
+    ``datum="WGS84"`` to return EPSG:326xx/327xx codes instead.
+    """
+
+    if not -180.0 <= lon <= 180.0:
+        raise DemWorkflowError("Longitude must be between -180 and 180 to infer UTM CRS.")
+    if not -80.0 <= lat <= 84.0:
+        raise DemWorkflowError("Latitude must be between -80 and 84 to infer UTM CRS.")
+    zone = int((lon + 180.0) // 6.0) + 1
+    zone = max(1, min(60, zone))
+    normalized = datum.upper().replace(" ", "")
+    if normalized == "NAD83":
+        if lat < 0:
+            raise DemWorkflowError("NAD83 UTM inference is only supported for northern latitudes.")
+        return f"EPSG:{26900 + zone}"
+    if normalized in {"WGS84", "WGS_84"}:
+        base = 32600 if lat >= 0 else 32700
+        return f"EPSG:{base + zone}"
+    raise DemWorkflowError("datum must be NAD83 or WGS84.")
+
+
 def write_dem_config_template(
     output_path: str | Path,
     *,
@@ -281,7 +305,7 @@ def write_dem_config_template(
         dem["tile_index"] = str(tile_index)
     config: dict[str, Any] = {
         "root": ".",
-        "site": {"name": site, "target_crs": target_crs or "auto"},
+        "site": {"name": site, "target_crs": target_crs or infer_utm_crs(lon, lat)},
         "spatial_input": {"mode": "outlet"},
         "outlet": {
             "longitude": lon,

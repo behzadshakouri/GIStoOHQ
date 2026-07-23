@@ -231,3 +231,25 @@ def test_cli_init_dem_config_writes_next_step(tmp_path, capsys):
     data = json.loads(config.read_text(encoding="utf-8"))
     assert data["site"]["name"] == "SligoCreek"
     assert data["dem_acquisition"]["method"] == "upstream_network"
+
+
+def test_infer_utm_crs_defaults_to_nad83_for_sligo_creek():
+    from ohqbuilder.dem_workflow import infer_utm_crs
+
+    assert infer_utm_crs(-76.9765, 38.9921) == "EPSG:26918"
+    assert infer_utm_crs(-76.9765, 38.9921, datum="WGS84") == "EPSG:32618"
+
+
+def test_write_dem_config_template_infers_target_crs(tmp_path):
+    from ohqbuilder.dem_workflow import write_dem_config_template
+
+    config = write_dem_config_template(
+        tmp_path / "SligoCreek.json",
+        site="SligoCreek",
+        lon=-76.9765,
+        lat=38.9921,
+        flowline_path="hydro/NHDFlowline.geojson",
+    )
+
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert data["site"]["target_crs"] == "EPSG:26918"
