@@ -34,10 +34,16 @@
     "snap_distance_m": 500
   },
   "dem_acquisition": {
-    "method": "oriented_outlet_buffer",
+    "method": "upstream_network",
     "acquisition_area": "intermediate/dem_acquisition_area.geojson",
     "tile_index": "indexes/usgs_3dep_tiles.geojson",
     "tile_manifest": "intermediate/dem_download_manifest.json",
+    "flowline_path": "hydro/NHDFlowline.geojson",
+    "envelope_type": "oriented_rectangle",
+    "upstream_trace_distance_km": 40,
+    "upstream_margin_km": 5,
+    "downstream_margin_km": 3,
+    "lateral_margin_km": 4,
     "upstream_km": 35,
     "downstream_km": 3,
     "lateral_km": 4,

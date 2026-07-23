@@ -147,3 +147,45 @@ def test_cli_validate_dem_runs_config_workflow(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Boundary validation: OK" in out
     assert (tmp_path / "validation.json").exists()
+
+
+def test_prepare_dem_from_config_supports_upstream_network(tmp_path):
+    flowlines = tmp_path / "hydro" / "flowlines.geojson"
+    flowlines.parent.mkdir()
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"name": "main"},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-76.9765, 38.9921], [-76.99, 39.04], [-77.0, 39.08]],
+            },
+        }],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+outlet:
+  longitude: -76.9765
+  latitude: 38.9921
+dem_acquisition:
+  method: upstream_network
+  flowline_path: hydro/flowlines.geojson
+  acquisition_area: intermediate/dem_acquisition_area.geojson
+  upstream_trace_distance_km: 15
+  upstream_margin_km: 3
+  downstream_margin_km: 1
+  lateral_margin_km: 2
+  envelope_type: oriented_rectangle
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = prepare_dem_from_config(config)
+
+    assert result.acquisition_area is not None
+    assert result.acquisition_area.mode == "upstream_network"
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary["method"] == "upstream_network"
+    assert (tmp_path / "intermediate" / "dem_acquisition_area.geojson").exists()

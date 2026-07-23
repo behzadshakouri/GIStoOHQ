@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 METERS_PER_DEGREE = 111_320.0
-AcquisitionMode = Literal["outlet_buffer", "oriented_outlet_buffer"]
+AcquisitionMode = Literal["outlet_buffer", "oriented_outlet_buffer", "upstream_network"]
 
 
 class DemAcquisitionError(RuntimeError):
@@ -126,6 +126,142 @@ def create_outlet_buffer_area(
         },
     )
     return DemAcquisitionArea(mode, output, (min(xs), min(ys), max(xs), max(ys)), area_km2)
+
+
+def _lonlat_to_local_m(lon: float, lat: float, origin_lon: float, origin_lat: float) -> tuple[float, float]:
+    meters_per_lon, meters_per_lat = _meters_per_degree_at_lat(origin_lat)
+    return (lon - origin_lon) * meters_per_lon, (lat - origin_lat) * meters_per_lat
+
+
+def _local_m_to_lonlat(x: float, y: float, origin_lon: float, origin_lat: float) -> tuple[float, float]:
+    meters_per_lon, meters_per_lat = _meters_per_degree_at_lat(origin_lat)
+    return origin_lon + x / meters_per_lon, origin_lat + y / meters_per_lat
+
+
+def _principal_axis(points_m: list[tuple[float, float]], outlet_m: tuple[float, float]) -> tuple[float, float]:
+    if len(points_m) < 2:
+        raise DemAcquisitionError("At least two upstream flowline vertices are required.")
+    mean_x = sum(x for x, _ in points_m) / len(points_m)
+    mean_y = sum(y for _, y in points_m) / len(points_m)
+    sxx = sum((x - mean_x) ** 2 for x, _ in points_m)
+    syy = sum((y - mean_y) ** 2 for _, y in points_m)
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in points_m)
+    if abs(sxy) < 1.0e-12 and sxx >= syy:
+        axis = (1.0, 0.0)
+    elif abs(sxy) < 1.0e-12:
+        axis = (0.0, 1.0)
+    else:
+        angle = 0.5 * math.atan2(2.0 * sxy, sxx - syy)
+        axis = (math.cos(angle), math.sin(angle))
+    mean_vector = (mean_x - outlet_m[0], mean_y - outlet_m[1])
+    if axis[0] * mean_vector[0] + axis[1] * mean_vector[1] < 0:
+        axis = (-axis[0], -axis[1])
+    return axis
+
+
+def create_upstream_network_area(
+    lon: float,
+    lat: float,
+    flowline_path: str | Path,
+    output_path: str | Path,
+    *,
+    upstream_trace_distance_km: float = 40.0,
+    upstream_margin_km: float = 5.0,
+    downstream_margin_km: float = 3.0,
+    lateral_margin_km: float = 4.0,
+    envelope_type: str = "oriented_rectangle",
+) -> DemAcquisitionArea:
+    """Create a lightweight upstream-network DEM acquisition envelope from GeoJSON flowlines.
+
+    This helper intentionally avoids heavy GIS dependencies. It expects reference
+    flowlines as GeoJSON in EPSG:4326, collects vertices within
+    ``upstream_trace_distance_km`` of the outlet, and builds either an oriented
+    principal-axis rectangle or an axis-aligned envelope with safety margins.
+    """
+
+    if upstream_trace_distance_km <= 0 or lateral_margin_km <= 0:
+        raise DemAcquisitionError("upstream_trace_distance_km and lateral_margin_km must be positive.")
+    if upstream_margin_km < 0 or downstream_margin_km < 0:
+        raise DemAcquisitionError("upstream_margin_km and downstream_margin_km cannot be negative.")
+    flowline = Path(flowline_path).expanduser().resolve()
+    output = Path(output_path).expanduser().resolve()
+    data = json.loads(flowline.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise DemAcquisitionError(f"Expected GeoJSON flowlines: {flowline}")
+    features = _geojson_features(data, flowline)
+    outlet_m = (0.0, 0.0)
+    max_distance_m = upstream_trace_distance_km * 1000.0
+    local_points: list[tuple[float, float]] = []
+    for feature in features:
+        for point_lon, point_lat in _feature_points(feature):
+            point_m = _lonlat_to_local_m(point_lon, point_lat, lon, lat)
+            if math.hypot(point_m[0], point_m[1]) <= max_distance_m:
+                local_points.append(point_m)
+    if len(local_points) < 2:
+        raise DemAcquisitionError("No flowline vertices found within upstream_trace_distance_km of the outlet.")
+    local_points.append(outlet_m)
+    margin_u = upstream_margin_km * 1000.0
+    margin_d = downstream_margin_km * 1000.0
+    margin_l = lateral_margin_km * 1000.0
+    envelope = envelope_type.lower()
+    if envelope == "axis_aligned_rectangle":
+        xs = [x for x, _ in local_points]
+        ys = [y for _, y in local_points]
+        minx, maxx = min(xs) - margin_l, max(xs) + margin_l
+        miny, maxy = min(ys) - margin_l, max(ys) + margin_l
+        minx = min(minx, -margin_d)
+        maxx = max(maxx, margin_u)
+        coords_m = [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy), (minx, miny)]
+    elif envelope == "oriented_rectangle":
+        axis = _principal_axis(local_points, outlet_m)
+        lateral = (-axis[1], axis[0])
+        projections = [x * axis[0] + y * axis[1] for x, y in local_points]
+        lateral_offsets = [x * lateral[0] + y * lateral[1] for x, y in local_points]
+        min_p = min(min(projections) - margin_d, -margin_d)
+        max_p = max(max(projections) + margin_u, margin_u)
+        min_l = min(lateral_offsets) - margin_l
+        max_l = max(lateral_offsets) + margin_l
+        corners = [(min_p, min_l), (min_p, max_l), (max_p, max_l), (max_p, min_l)]
+        coords_m = [
+            (p * axis[0] + offset * lateral[0], p * axis[1] + offset * lateral[1])
+            for p, offset in corners
+        ]
+        coords_m.append(coords_m[0])
+    else:
+        raise DemAcquisitionError("envelope_type must be oriented_rectangle or axis_aligned_rectangle.")
+    coords = [_local_m_to_lonlat(x, y, lon, lat) for x, y in coords_m]
+    xs = [x for x, _ in coords]
+    ys = [y for _, y in coords]
+    area_km2 = _polygon_area_km2(coords, lat)
+    _write_geojson_polygon(
+        output,
+        coords,
+        {
+            "mode": "upstream_network",
+            "flowline_path": str(flowline),
+            "outlet_lon": lon,
+            "outlet_lat": lat,
+            "upstream_trace_distance_km": upstream_trace_distance_km,
+            "upstream_margin_km": upstream_margin_km,
+            "downstream_margin_km": downstream_margin_km,
+            "lateral_margin_km": lateral_margin_km,
+            "envelope_type": envelope,
+            "selected_vertex_count": len(local_points) - 1,
+            "area_km2": area_km2,
+        },
+    )
+    return DemAcquisitionArea("upstream_network", output, (min(xs), min(ys), max(xs), max(ys)), area_km2)
+
+
+def _polygon_area_km2(coords: list[tuple[float, float]], origin_lat: float) -> float:
+    if len(coords) < 4:
+        return 0.0
+    origin_lon = sum(x for x, _ in coords) / len(coords)
+    local = [_lonlat_to_local_m(x, y, origin_lon, origin_lat) for x, y in coords]
+    area = 0.0
+    for (x1, y1), (x2, y2) in zip(local, local[1:]):
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2_000_000.0
 
 
 @dataclass(frozen=True)

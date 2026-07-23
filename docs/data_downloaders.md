@@ -227,10 +227,10 @@ project config and creates the DEM acquisition artifacts in one step:
 ohqbuild prepare-dem --config configs/SligoCreek.yaml
 ```
 
-The command currently supports `outlet_buffer`, `oriented_outlet_buffer`, and
-`polygon` acquisition methods. When both `tile_index` and `tile_manifest` are
-configured, it also selects the intersecting DEM tile records and writes the
-manifest. A machine-readable summary is written to
+The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
+`upstream_network`, and `polygon` acquisition methods. When both `tile_index` and
+`tile_manifest` are configured, it also selects the intersecting DEM tile records
+and writes the manifest. A machine-readable summary is written to
 `dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
 
 After delineation, `validate-dem` reads the same config to run the boundary
@@ -276,9 +276,28 @@ ohqbuild dem-tile-manifest \
   --out intermediate/dem_download_manifest.json
 ```
 
-Later, an upstream-network method can create the same acquisition-area output
-file from snapped NHD flowlines, and a UI can preview both the acquisition
-polygon and the intersecting tile footprints before downloading.
+The `upstream_network` method can create the same acquisition-area output file
+from reference flowlines in GeoJSON. It is intentionally lightweight: it collects
+flowline vertices within `upstream_trace_distance_km` of the outlet, computes an
+oriented principal-axis rectangle or axis-aligned envelope, then applies
+upstream/downstream/lateral safety margins. This is not a full NHD topological
+trace yet, but it gives elongated basins such as Sligo Creek a better initial DEM
+area than a circular outlet buffer:
+
+```yaml
+dem_acquisition:
+  method: upstream_network
+  flowline_path: hydro/NHDFlowline.geojson
+  envelope_type: oriented_rectangle
+  upstream_trace_distance_km: 40
+  upstream_margin_km: 5
+  downstream_margin_km: 3
+  lateral_margin_km: 4
+```
+
+A future NHD tracing implementation can replace the lightweight vertex selection
+behind the same `dem_acquisition.acquisition_area` output contract, so the
+downloader, tile manifest, materializer, and UI handoffs do not need to change.
 
 The DEM merger can also consume an explicit download manifest instead of scanning
 the whole source tree:

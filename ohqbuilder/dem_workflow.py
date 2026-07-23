@@ -12,6 +12,7 @@ from .dem_acquisition import (
     DemTileManifest,
     build_dem_tile_manifest,
     create_outlet_buffer_area,
+    create_upstream_network_area,
 )
 
 
@@ -108,12 +109,27 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
             lateral_km=float(dem_acquisition.get("lateral_km", 5.0)),
             azimuth_deg=azimuth,
         )
+    elif method == "upstream_network":
+        flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
+        if not flowline_value:
+            raise DemWorkflowError("dem_acquisition.flowline_path is required for upstream_network.")
+        acquisition_result = create_upstream_network_area(
+            _required_float(outlet, "longitude", "outlet"),
+            _required_float(outlet, "latitude", "outlet"),
+            _resolve(flowline_value, base),
+            acquisition_path,
+            upstream_trace_distance_km=float(dem_acquisition.get("upstream_trace_distance_km", 40.0)),
+            upstream_margin_km=float(dem_acquisition.get("upstream_margin_km", 5.0)),
+            downstream_margin_km=float(dem_acquisition.get("downstream_margin_km", 3.0)),
+            lateral_margin_km=float(dem_acquisition.get("lateral_margin_km", 4.0)),
+            envelope_type=str(dem_acquisition.get("envelope_type", "oriented_rectangle")),
+        )
     elif method == "polygon":
         if not acquisition_path.exists():
             raise DemWorkflowError(f"Configured acquisition polygon does not exist: {acquisition_path}")
     else:
         raise DemWorkflowError(
-            "dem_acquisition.method must be outlet_buffer, oriented_outlet_buffer, or polygon."
+            "dem_acquisition.method must be outlet_buffer, oriented_outlet_buffer, upstream_network, or polygon."
         )
 
     tile_manifest_result: DemTileManifest | None = None
