@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 
@@ -279,6 +278,7 @@ class DemWorkflowDock:
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log)
+        self.process = None
         self.widget.setWidget(self.panel)
 
     def __getattr__(self, name):
@@ -345,18 +345,40 @@ class DemWorkflowDock:
         self.log.append(f"Wrote DEM acquisition area from canvas extent: {area_path}")
 
     def run_command(self, command: str) -> None:
+        from qgis.PyQt.QtCore import QProcess
+
+        if self.process is not None and self.process.state() != QProcess.NotRunning:
+            self.log.append("A workflow command is already running; wait for it to finish first.")
+            return
         try:
             argv = _command_for_workflow(command, self.config.text())
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")
             return
         self.log.append("$ " + " ".join(argv))
-        process = subprocess.run(argv, capture_output=True, text=True, check=False)
-        if process.stdout:
-            self.log.append(process.stdout)
-        if process.stderr:
-            self.log.append(process.stderr)
-        self.log.append(f"[{command} exited with {process.returncode}]")
+        self.process = QProcess(self.widget)
+        self.process.readyReadStandardOutput.connect(self._append_process_stdout)
+        self.process.readyReadStandardError.connect(self._append_process_stderr)
+        self.process.finished.connect(lambda code, status, value=command: self._command_finished(value, code, status))
+        self.process.start(argv[0], argv[1:])
+
+    def _append_process_stdout(self) -> None:
+        if self.process is None:
+            return
+        text = bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        if text:
+            self.log.append(text.rstrip())
+
+    def _append_process_stderr(self) -> None:
+        if self.process is None:
+            return
+        text = bytes(self.process.readAllStandardError()).decode("utf-8", errors="replace")
+        if text:
+            self.log.append(text.rstrip())
+
+    def _command_finished(self, command: str, code: int, status) -> None:
+        self.log.append(f"[{command} exited with {code}]")
+        self.process = None
 
     def load_configured_layers(self) -> None:
         from qgis.core import QgsProject, QgsVectorLayer

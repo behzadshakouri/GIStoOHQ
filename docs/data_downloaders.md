@@ -412,3 +412,5 @@ next to the manifest and loads that as a preview layer.
 The QGIS dock now builds command-specific `ohqbuild` calls from the selected project config instead of appending `--config` to every button action. `Prepare DEM` and `Validate DEM` still call the config-driven commands, while `Download DEM Tiles` resolves `dem_acquisition.tile_manifest` and a raw DEM directory before calling `download-dem-manifest`. `Materialize Inputs` resolves the project root, site name, optional source directory, target CRS, and DEM manifest before calling `materialize-inputs`.
 
 This keeps the dock as a thin controller while avoiding invalid CLI invocations for commands that intentionally use explicit manifest/root arguments rather than a project config flag.
+
+The QGIS dock executes backend commands with `QProcess`, so long-running DEM downloads or materialization steps stream stdout/stderr to the dock log without blocking the QGIS interface. The dock also prevents starting a second backend step while one is still running.

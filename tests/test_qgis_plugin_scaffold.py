@@ -104,3 +104,12 @@ def test_qgis_plugin_download_command_requires_manifest(tmp_path):
         assert "tile_manifest" in str(exc)
     else:
         raise AssertionError("Expected QgisDockConfigError")
+
+
+def test_qgis_plugin_runs_commands_with_qprocess():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "QProcess" in dock
+    assert "readyReadStandardOutput" in dock
+    assert "readyReadStandardError" in dock
+    assert "A workflow command is already running" in dock
