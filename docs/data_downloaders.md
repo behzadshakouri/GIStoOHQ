@@ -313,6 +313,15 @@ ohqbuild materialize-inputs \
   --target-crs EPSG:26918
 ```
 
+
+If the tile manifest contains `url` entries, the downloader can materialize those
+records to a raw DEM folder and update the manifest with local `tiles` paths:
+
+```bash
+ohqbuild download-dem-manifest \
+  --manifest intermediate/dem_download_manifest.json \
+  --out-dir dem/raw
+```
 Using the acquisition polygon for tile selection and the manifest for DEM
 materialization keeps the downloader, merger, cropper, delineator, and future UI
 independent while avoiding accidental inclusion of derived rasters such as

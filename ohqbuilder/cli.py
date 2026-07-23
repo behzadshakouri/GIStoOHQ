@@ -11,7 +11,7 @@ from .dem_acquisition import (
     expand_acquisition_bounds,
     validate_watershed_within_acquisition,
 )
-from .dem_downloader import parse_products, process_csv
+from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config
 from .doctor import run_doctor
@@ -136,6 +136,14 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--points-dir", default=None, help="Base directory for point shapefiles; defaults to --download when set.")
     dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
     dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
+
+    manifest_download = sub.add_parser(
+        "download-dem-manifest",
+        help="Download URL-backed DEM manifest items and update tile paths.",
+    )
+    manifest_download.add_argument("--manifest", required=True, help="DEM manifest JSON with URL-backed items.")
+    manifest_download.add_argument("--out-dir", required=True, help="Directory for downloaded raw DEM tiles.")
+    manifest_download.add_argument("--updated-manifest", default=None, help="Optional output manifest path; defaults to updating --manifest.")
 
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
@@ -533,6 +541,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Downloaded DEM/hydrography under: {result.download_dir}")
         print(f"Wrote HSG data: {result.hsg.vector_path}")
         print(f"Wrote soil texture data: {result.texture.vector_path}")
+        return 0
+    if args.command == "download-dem-manifest":
+        try:
+            result = download_dem_manifest(
+                args.manifest,
+                args.out_dir,
+                updated_manifest_path=args.updated_manifest,
+            )
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"download-dem-manifest failed: {exc}")
+            return 2
+        print(f"Wrote DEM manifest: {result.manifest_path}")
+        print(f"Downloaded tile count: {result.downloaded}")
+        print(f"Skipped existing tile count: {result.skipped}")
+        print(f"Materialized tile count: {result.tile_count}")
         return 0
     if args.command == "download-hsg":
         try:
