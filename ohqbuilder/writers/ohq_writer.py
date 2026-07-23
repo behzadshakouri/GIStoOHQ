@@ -545,14 +545,11 @@ class OHQWriter:
             )
 
         if missing_coordinates:
-            # Backward-compatible fallback for minimal, non-GIS unit-test models.
-            # Real GIS workflows still populate projected coordinates before rendering.
-            for index, name in enumerate(subbasin_by_name):
-                catchment_positions.setdefault(name, (0.0, float(index) * 240.0))
-            for index, name in enumerate(active_reaches):
-                reach_positions.setdefault(name, (420.0, float(index) * 240.0))
-            if outlet_x is None or outlet_y is None:
-                outlet_x, outlet_y = (840.0, 0.0)
+            raise ValueError(
+                "Cannot write a spatially referenced OHQ model. "
+                "All emitted blocks require real projected coordinates:\n  "
+                + "\n  ".join(missing_coordinates)
+            )
 
         # Preserve the real GIS geometry, but fit the emitted OHQ block
         # coordinates into a compact canvas so blocks remain legible when the
