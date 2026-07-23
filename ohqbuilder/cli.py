@@ -13,7 +13,7 @@ from .dem_acquisition import (
 )
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
-from .dem_workflow import DemWorkflowError, prepare_dem_from_config
+from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -254,6 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Create DEM acquisition area and tile manifest from a project config.",
     )
     prepare_dem.add_argument("--config", required=True, help="YAML/JSON project config.")
+
+    validate_dem = sub.add_parser(
+        "validate-dem",
+        help="Validate watershed clearance from a project config and optionally expand DEM area.",
+    )
+    validate_dem.add_argument("--config", required=True, help="YAML/JSON project config.")
 
     bounds = sub.add_parser(
         "watershed-bounds",
@@ -580,6 +586,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote tile manifest: {result.tile_manifest.output_path}")
             print(f"Selected tile count: {result.tile_manifest.selected_count}")
         return 0
+    if args.command == "validate-dem":
+        try:
+            result = validate_dem_from_config(args.config)
+        except (DemWorkflowError, DemAcquisitionError, ValueError) as exc:
+            print(f"validate-dem failed: {exc}")
+            return 2
+        print(f"Wrote DEM validation summary: {result.summary_path}")
+        print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
+        print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+        if result.expanded_area:
+            print(f"Wrote expanded acquisition area: {result.expanded_area.output_path}")
+        return 0 if result.is_valid else 3
     if args.command == "watershed-bounds":
         try:
             result = resolve_materialization_bounds(

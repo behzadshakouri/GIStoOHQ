@@ -82,3 +82,68 @@ def test_cli_prepare_dem_runs_config_workflow(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Wrote DEM workflow summary:" in out
     assert "Selected tile count: 1" in out
+
+
+def test_validate_dem_from_config_writes_summary_and_expansion(tmp_path):
+    from ohqbuilder.dem_workflow import validate_dem_from_config
+
+    acquisition = tmp_path / "area.geojson"
+    watershed = tmp_path / "watershed.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    watershed.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("watershed", (-77.099, 38.94, -76.95, 39.08))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+dem_acquisition:
+  acquisition_area: area.geojson
+  watershed_boundary: watershed.geojson
+  expanded_acquisition_area: expanded.geojson
+  validation_summary: validation.json
+  boundary_safety_distance_m: 500
+  expansion_distance_km: 5
+  auto_expand: true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = validate_dem_from_config(config)
+
+    assert not result.is_valid
+    assert result.touched_edges == ("west",)
+    assert result.expanded_area is not None
+    summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
+    assert summary["expanded_acquisition_area"] == "expanded.geojson"
+
+
+def test_cli_validate_dem_runs_config_workflow(tmp_path, capsys):
+    acquisition = tmp_path / "area.geojson"
+    watershed = tmp_path / "watershed.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    watershed.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("watershed", (-77.0, 38.95, -76.95, 39.0))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({
+        "dem_acquisition": {
+            "acquisition_area": "area.geojson",
+            "watershed_boundary": "watershed.geojson",
+            "validation_summary": "validation.json",
+            "boundary_safety_distance_m": 500,
+        }
+    }), encoding="utf-8")
+
+    assert main(["validate-dem", "--config", str(config)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Boundary validation: OK" in out
+    assert (tmp_path / "validation.json").exists()

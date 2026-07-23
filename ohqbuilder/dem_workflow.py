@@ -151,3 +151,70 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         summary["acquisition_bounds"] = tile_manifest_result.acquisition_bounds
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return DemWorkflowPlanResult(path, acquisition_result, tile_manifest_result, summary_path)
+
+
+@dataclass(frozen=True)
+class DemWorkflowValidationResult:
+    is_valid: bool
+    touched_edges: tuple[str, ...]
+    expanded_area: DemAcquisitionArea | None
+    summary_path: Path
+
+
+def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationResult:
+    """Validate delineated watershed clearance and optionally expand DEM area."""
+
+    path = Path(config_path).expanduser().resolve()
+    base = path.parent
+    config = _read_config(path)
+    dem_acquisition = _section(config, "dem_acquisition")
+    watershed_value = dem_acquisition.get("watershed_boundary")
+    acquisition_value = dem_acquisition.get("acquisition_area")
+    if not watershed_value:
+        raise DemWorkflowError("dem_acquisition.watershed_boundary is required for validate-dem.")
+    if not acquisition_value:
+        raise DemWorkflowError("dem_acquisition.acquisition_area is required for validate-dem.")
+
+    from .dem_acquisition import expand_acquisition_bounds, validate_watershed_within_acquisition
+
+    validation = validate_watershed_within_acquisition(
+        _resolve(watershed_value, base),
+        _resolve(acquisition_value, base),
+        safety_distance_m=float(dem_acquisition.get("boundary_safety_distance_m", 500.0)),
+    )
+    expanded_area: DemAcquisitionArea | None = None
+    if not validation.is_valid and dem_acquisition.get("auto_expand", False):
+        expanded_value = dem_acquisition.get("expanded_acquisition_area")
+        if not expanded_value:
+            raise DemWorkflowError(
+                "dem_acquisition.expanded_acquisition_area is required when auto_expand is true."
+            )
+        expanded_area = expand_acquisition_bounds(
+            _resolve(acquisition_value, base),
+            _resolve(expanded_value, base),
+            validation.touched_edges,
+            expansion_distance_km=float(dem_acquisition.get("expansion_distance_km", 5.0)),
+        )
+
+    summary_path = _resolve(
+        dem_acquisition.get("validation_summary")
+        or "intermediate/dem_boundary_validation_summary.json",
+        base,
+    )
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "config": str(path),
+        "is_valid": validation.is_valid,
+        "touched_edges": validation.touched_edges,
+        "distances_m": validation.distances_m,
+        "expanded_acquisition_area": _relativize(expanded_area.output_path, base)
+        if expanded_area
+        else None,
+    }
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return DemWorkflowValidationResult(
+        validation.is_valid,
+        validation.touched_edges,
+        expanded_area,
+        summary_path,
+    )

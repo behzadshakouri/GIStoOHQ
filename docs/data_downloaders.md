@@ -233,6 +233,14 @@ configured, it also selects the intersecting DEM tile records and writes the
 manifest. A machine-readable summary is written to
 `dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
 
+After delineation, `validate-dem` reads the same config to run the boundary
+clearance check and, when `auto_expand` is true, writes the configured expanded
+acquisition polygon for the next attempt:
+
+```bash
+ohqbuild validate-dem --config configs/SligoCreek.yaml
+```
+
 ## Outlet-first DEM acquisition areas
 
 A watershed boundary is not available until after a DEM has been downloaded,
