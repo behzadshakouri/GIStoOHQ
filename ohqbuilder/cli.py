@@ -240,6 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--site", required=True)
     materialize.add_argument("--source-dir", default=None)
     materialize.add_argument("--target-crs", default=None)
+    materialize.add_argument("--dem-manifest", default=None, help="DEM tile manifest with explicit raw raster paths.")
     materialize.add_argument("--clip-bounds", default=None, help="Optional minx,miny,maxx,maxy materialization bounds.")
     materialize.add_argument("--clip-bounds-crs", default="EPSG:4326", help="CRS for --clip-bounds; defaults to EPSG:4326.")
     materialize.add_argument("--clip-center-lat", type=float, default=None, help="Latitude for auto materialization bounds.")
@@ -545,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
                 clip_center_lat=args.clip_center_lat,
                 clip_buffer_m=args.clip_buffer,
                 clip_buffer_scale=args.clip_buffer_scale,
+                dem_manifest=args.dem_manifest,
             )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"materialize-inputs failed: {exc}")

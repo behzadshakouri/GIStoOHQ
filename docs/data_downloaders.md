@@ -278,6 +278,18 @@ ohqbuild materialize-dem \
   --dst-crs EPSG:26918
 ```
 
+The all-source materialization command accepts the same DEM manifest when DEM
+and hydrography are materialized together:
+
+```bash
+ohqbuild materialize-inputs \
+  --root /path/to/project \
+  --site SligoCreek \
+  --source-dir source_downloads \
+  --dem-manifest intermediate/dem_download_manifest.json \
+  --target-crs EPSG:26918
+```
+
 Using the acquisition polygon for tile selection and the manifest for DEM
 materialization keeps the downloader, merger, cropper, delineator, and future UI
 independent while avoiding accidental inclusion of derived rasters such as

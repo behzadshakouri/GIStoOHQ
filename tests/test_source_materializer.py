@@ -113,6 +113,63 @@ def test_materialize_source_inputs_forwards_user_clip_bounds(monkeypatch, tmp_pa
     assert calls[0][1]["clip_bounds_crs"] == "EPSG:4326"
 
 
+def test_materialize_source_inputs_forwards_dem_manifest(monkeypatch, tmp_path):
+    downloads = tmp_path / "SITE_A" / "source_downloads" / "source-id"
+    (downloads / "hydro").mkdir(parents=True)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"tiles": []}', encoding="utf-8")
+    dem_path = tmp_path / "SITE_A" / "demlr" / "cliped_utm.tif"
+    calls = []
+
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_dem",
+        lambda *args, **kwargs: calls.append(("dem", kwargs))
+        or SimpleNamespace(output_path=dem_path),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_flowlines",
+        lambda *args, **kwargs: calls.append(("hydro", kwargs))
+        or SimpleNamespace(output_path=tmp_path / "flowlines.gpkg"),
+    )
+
+    materialize_source_inputs(
+        tmp_path,
+        "SITE_A",
+        source_dir=downloads.parent,
+        dem_manifest=manifest,
+    )
+
+    assert calls[0][1]["source_dir"] is None
+    assert calls[0][1]["manifest_path"] == manifest
+
+
+def test_cli_materialize_inputs_accepts_dem_manifest(monkeypatch, tmp_path, capsys):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"tiles": []}', encoding="utf-8")
+
+    def fake_materialize_source_inputs(*args, **kwargs):
+        assert kwargs["dem_manifest"] == str(manifest)
+        return SimpleNamespace(
+            dem=SimpleNamespace(output_path=tmp_path / "dem.tif"),
+            hydro=SimpleNamespace(output_path=tmp_path / "flowlines.gpkg"),
+            landcover=None,
+            cn_lookup=None,
+        )
+
+    monkeypatch.setattr(
+        "ohqbuilder.cli.materialize_source_inputs",
+        fake_materialize_source_inputs,
+    )
+
+    assert main([
+        "materialize-inputs",
+        "--root", str(tmp_path),
+        "--site", "SITE_A",
+        "--dem-manifest", str(manifest),
+    ]) == 0
+    assert "Wrote DEM:" in capsys.readouterr().out
+
+
 def test_find_product_dir_rejects_ambiguous_sites(tmp_path):
     (tmp_path / "one" / "hydro").mkdir(parents=True)
     (tmp_path / "two" / "hydro").mkdir(parents=True)
