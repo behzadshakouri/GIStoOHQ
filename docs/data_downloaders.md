@@ -375,3 +375,12 @@ The launcher includes basic config load/save controls and a lightweight GeoJSON
 preview summary for the acquisition area. The preview is intentionally simple in
 this first UI pass; a later QGIS dock can replace it with map-click outlet
 selection and layer rendering while still calling the same backend commands.
+
+## QGIS dock skeleton
+
+A QGIS plugin scaffold is included under `qgis_plugin/gistoohq_dem_workflow` for
+the next UI stage. The dock keeps the same design as the desktop launcher: it
+runs backend `ohqbuild` commands and can load configured GeoJSON outputs into the
+current QGIS project. The first scaffold intentionally avoids custom map tools;
+map-click outlet selection should be added after command execution and layer
+loading are stable.
