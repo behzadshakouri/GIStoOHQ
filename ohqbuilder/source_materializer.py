@@ -83,6 +83,7 @@ def materialize_source_inputs(
     clip_center_lat: float | None = None,
     clip_buffer_m: float | None = None,
     clip_buffer_scale: float = 1.2,
+    dem_manifest: str | Path | None = None,
 ) -> SourceMaterializeResult:
     """Merge/project the DEM and extract/clip hydrography in one stage."""
 
@@ -102,13 +103,15 @@ def materialize_source_inputs(
             clip_buffer_m,
             scale=clip_buffer_scale,
         )
+    dem_source_dir = None if dem_manifest else find_product_dir(downloads, "demlr")
     dem = materialize_dem(
         root_path,
         site,
-        source_dir=find_product_dir(downloads, "demlr"),
+        source_dir=dem_source_dir,
         dst_crs=target_crs,
         clip_bounds=selected_bounds,
         clip_bounds_crs=clip_bounds_crs,
+        manifest_path=dem_manifest,
     )
     hydro = materialize_flowlines(
         root_path,

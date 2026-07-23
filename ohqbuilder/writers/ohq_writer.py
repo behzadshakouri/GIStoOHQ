@@ -489,12 +489,6 @@ class OHQWriter:
                 active_reach_names.add(target)
                 pending.append(target)
 
-        channel_edges = [
-            (source, target)
-            for source, target in reach_targets.items()
-            if target in reach_names
-        ]
-
         active_reaches = [
             name for name in reach_by_name if name in active_reach_names
         ]

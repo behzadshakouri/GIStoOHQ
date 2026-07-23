@@ -217,3 +217,310 @@ materializes and clips the downloaded NHD flowlines before GIS preparation.
 ```bash
 python3 run.py config.json
 ```
+
+## Config-driven DEM preparation
+
+For terminal workflows and future UI launchers, `prepare-dem` reads the shared
+project config and creates the DEM acquisition artifacts in one step.
+
+
+You can create a starter config from the terminal instead of editing every field
+by hand:
+
+```bash
+ohqbuild init-dem-config \
+  --config configs/SligoCreek.yaml \
+  --site SligoCreek \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --tile-index indexes/usgs_3dep_tiles.geojson \
+  --target-crs EPSG:26918
+```
+
+If `--target-crs` is omitted, the initializer infers a NAD83 UTM CRS from the outlet coordinates; for Sligo Creek, that is `EPSG:26918`. The generated config is ready for `ohqbuild prepare-dem --config configs/SligoCreek.yaml` after the referenced flowline and tile-index files exist.
+
+
+```bash
+ohqbuild prepare-dem --config configs/SligoCreek.yaml
+```
+
+
+For the most direct terminal path, use `run-dem-prep`. Without flags it runs the
+prepare step; with `--download` it also downloads URL-backed manifest records;
+with `--materialize` it forwards the DEM manifest into `materialize-inputs`;
+with `--validate` it runs the boundary check when a watershed boundary already
+exists:
+
+```bash
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download --materialize
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --validate
+```
+
+For shell-script users, the same direct path is wrapped by scripts that use `ohqbuild` when installed and fall back to `python -m ohqbuilder.cli` from a source checkout:
+
+```bash
+scripts/run_dem_prep.sh configs/SligoCreek.yaml --download --materialize
+```
+
+A small no-network Sligo Creek demo config is included for smoke testing the
+prepare path and manifest selection without downloading DEM rasters:
+
+```bash
+scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml
+```
+
+The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
+`upstream_network`, and `polygon` acquisition methods. When both `tile_index` and
+`tile_manifest` are configured, it also selects the intersecting DEM tile records
+and writes the manifest. A machine-readable summary is written to
+`dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
+The summary includes raw/snapped outlet artifact paths and snap distance when
+outlet snapping runs, so UI progress panels can report exactly which point was
+used for acquisition.
+
+After delineation, `validate-dem` reads the same config to run the boundary
+clearance check and, when `auto_expand` is true, writes the configured expanded
+acquisition polygon for the next attempt:
+
+```bash
+ohqbuild validate-dem --config configs/SligoCreek.yaml
+```
+
+## Outlet-first DEM acquisition areas
+
+A watershed boundary is not available until after a DEM has been downloaded,
+merged, projected, and delineated. For outlet-first projects, GIStoOHQ therefore
+uses an explicit **DEM acquisition area** as the handoff object between UI or
+terminal input and the downloader. The first implementation supports an
+outlet-based rectangular polygon that can be axis-aligned or oriented along a
+known upstream azimuth:
+
+```bash
+ohqbuild dem-acquisition-area \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --out intermediate/dem_acquisition_area.geojson \
+  --upstream-km 35 \
+  --downstream-km 3 \
+  --lateral-km 4 \
+  --azimuth 20
+```
+
+For an elongated watershed such as Sligo Creek, the upstream/downstream/lateral
+margins produce a long acquisition polygon instead of a large circular buffer.
+The downloader should select DEM tiles by intersecting tile footprints with this
+polygon. The `dem-tile-manifest` command performs that handoff for GeoJSON tile
+indexes and writes the selected tile records to a manifest. It checks polygon
+intersection rather than accepting every footprint whose bounding box overlaps
+the area:
+
+```bash
+ohqbuild dem-tile-manifest \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --tile-index indexes/usgs_3dep_tiles.geojson \
+  --out intermediate/dem_download_manifest.json
+```
+
+The `upstream_network` method can create the same acquisition-area output file
+from reference flowlines in GeoJSON. `prepare-dem` always writes the raw outlet
+point to `outlet.raw_path` (defaulting to `inputs/outlet_raw.geojson`) for map
+preview and auditability. When `outlet.snap_to_flowline` is enabled and
+a flowline path is configured, `prepare-dem` first snaps the outlet to the nearest
+flowline segment within `outlet.snap_distance_m` and writes
+`outlet.snapped_path` (defaulting to `inputs/outlet_snapped.geojson`). It then
+collects flowline vertices within `upstream_trace_distance_km` of the snapped
+outlet, computes an oriented principal-axis rectangle or axis-aligned envelope,
+and applies upstream/downstream/lateral safety margins. This is not a full NHD
+topological trace yet, but it gives elongated basins such as Sligo Creek a better
+initial DEM area than a circular outlet buffer:
+
+You can also snap the outlet as a separate inspectable step:
+
+```bash
+ohqbuild dem-snap-outlet \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --out inputs/outlet_snapped.geojson \
+  --snap-distance-m 500
+```
+
+
+```yaml
+dem_acquisition:
+  method: upstream_network
+  flowline_path: hydro/NHDFlowline.geojson
+  envelope_type: oriented_rectangle
+  upstream_trace_distance_km: 40
+  upstream_margin_km: 5
+  downstream_margin_km: 3
+  lateral_margin_km: 4
+```
+
+The same lightweight envelope can be generated directly without a project config:
+
+```bash
+ohqbuild dem-upstream-network-area \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --out intermediate/dem_acquisition_area.geojson \
+  --upstream-trace-km 40 \
+  --upstream-margin-km 5 \
+  --downstream-margin-km 3 \
+  --lateral-margin-km 4
+```
+
+A future NHD tracing implementation can replace the lightweight vertex selection
+behind the same `dem_acquisition.acquisition_area` output contract, so the
+downloader, tile manifest, materializer, and UI handoffs do not need to change.
+
+The DEM merger can also consume an explicit download manifest instead of scanning
+the whole source tree:
+
+```json
+{
+  "site": "SligoCreek",
+  "tiles": [
+    "../dem/raw/tile_01.tif",
+    "../dem/raw/tile_02.tif"
+  ]
+}
+```
+
+```bash
+ohqbuild materialize-dem \
+  --root /path/to/project \
+  --site SligoCreek \
+  --manifest intermediate/dem_download_manifest.json \
+  --dst-crs EPSG:26918
+```
+
+The all-source materialization command accepts the same DEM manifest when DEM
+and hydrography are materialized together:
+
+```bash
+ohqbuild materialize-inputs \
+  --root /path/to/project \
+  --site SligoCreek \
+  --source-dir source_downloads \
+  --dem-manifest intermediate/dem_download_manifest.json \
+  --target-crs EPSG:26918
+```
+
+
+If the tile manifest contains `url` entries, the downloader can materialize those
+records to a raw DEM folder and update the manifest with local `tiles` paths:
+
+```bash
+ohqbuild download-dem-manifest \
+  --manifest intermediate/dem_download_manifest.json \
+  --out-dir dem/raw
+```
+Using the acquisition polygon for tile selection and the manifest for DEM
+materialization keeps the downloader, merger, cropper, delineator, and future UI
+independent while avoiding accidental inclusion of derived rasters such as
+`merged_dem_utm.tif` as new merge inputs.
+
+## Boundary validation and directional expansion
+
+After watershed delineation, the workflow should reject a DEM extent when the
+watershed is too close to an acquisition boundary. The lightweight terminal/UI
+check is:
+
+```bash
+ohqbuild dem-boundary-check \
+  --watershed intermediate/watershed_boundary.geojson \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --safety-distance-m 500
+```
+
+A non-zero status of `3` means the watershed is too close to one or more DEM
+edges and the acquisition area should be expanded before downloading or merging
+again. Expand only the touched directions instead of growing a circular buffer:
+
+```bash
+ohqbuild dem-expand-area \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --out intermediate/dem_acquisition_area_attempt2.geojson \
+  --edges north,west \
+  --expansion-distance-km 5
+```
+
+This gives the future UI the same control loop as the terminal workflow:
+preview extent, download selected tiles, delineate, validate boundary clearance,
+and expand directionally only when needed.
+
+## Lightweight DEM workflow UI
+
+A first desktop launcher is available for users who prefer buttons and a log
+window over typing each command manually:
+
+```bash
+ohqbuild ui
+# or
+scripts/run_dem_ui.sh
+```
+
+When the bundled Sligo Creek demo exists, the launcher opens with
+`examples/SligoCreek/dem_workflow.example.yaml` as the default config so users can
+press **load config**, then **run-dem-prep** for a no-network smoke test.
+
+The launcher is intentionally thin. It does not implement hydrology itself; it
+builds and runs the same backend commands used by terminal workflows:
+`prepare-dem`, `run-dem-prep`, `download-dem-manifest`, `materialize-inputs`,
+and `validate-dem`.
+This keeps the UI, shell workflow, and future QGIS plugin on the same config and
+artifact contract.
+
+The launcher includes basic config load/save controls, an **init-dem-config**
+button for creating a starter config at the selected path, and a lightweight
+GeoJSON preview summary for the acquisition area. The preview is intentionally
+simple in this first UI pass; the QGIS dock adds map-click outlet selection and
+layer rendering while still calling the same backend commands.
+
+## QGIS dock skeleton
+
+A QGIS plugin scaffold is included under `qgis_plugin/gistoohq_dem_workflow` for
+the next UI stage. The dock keeps the same design as the desktop launcher: it
+runs backend `ohqbuild` commands, including the direct `run-dem-prep` path, and
+can load configured GeoJSON outputs into the current QGIS project. The first
+scaffold intentionally avoids custom map tools;
+map-click outlet selection should be added after command execution and layer
+loading are stable.
+
+The QGIS scaffold now includes a first outlet-picking hook. The dock can activate
+a map-click tool, transform the clicked canvas coordinate to EPSG:4326, and write
+`outlet.longitude`, `outlet.latitude`, and `outlet.input_crs` back to the selected
+project config. This is the first step toward replacing manual longitude/latitude
+entry with map interaction.
+
+The dock also includes a first manual-area helper: **Use Canvas Extent as DEM
+Area** writes the current QGIS map canvas extent to the configured acquisition
+GeoJSON and changes `dem_acquisition.method` to `polygon`. This provides a simple
+area-only/expert path before a full polygon drawing tool is implemented.
+
+A first drawn-polygon hook is also scaffolded. **Draw DEM Area Polygon** lets the
+QGIS dock collect clicked vertices and write them to the same acquisition GeoJSON
+path used by the backend. This keeps manual polygon input, canvas-extent input,
+and config-driven `prepare-dem` on the same `dem_acquisition.acquisition_area`
+contract.
+
+Layer loading now includes outlet and DEM tile preview support. If
+`outlet.raw_path` or `outlet.snapped_path` exists, the QGIS dock loads those
+points so users can compare the clicked outlet with the snapped delineation
+point. If `tile_index` exists, the QGIS dock loads it with the other configured
+layers; if `tile_manifest` contains selected item bounds, the dock writes a
+temporary selected-tile-footprints GeoJSON next to the manifest and loads that as
+a preview layer.
+
+### QGIS backend command resolution
+
+The QGIS dock now builds command-specific `ohqbuild` calls from the selected project config instead of appending `--config` to every button action. `Prepare DEM` and `Validate DEM` still call the config-driven commands, while `Download DEM Tiles` resolves `dem_acquisition.tile_manifest` and a raw DEM directory before calling `download-dem-manifest`. `Materialize Inputs` resolves the project root, site name, optional source directory, target CRS, and DEM manifest before calling `materialize-inputs`.
+
+This keeps the dock as a thin controller while avoiding invalid CLI invocations for commands that intentionally use explicit manifest/root arguments rather than a project config flag.
+
+The QGIS dock executes backend commands with `QProcess`, so long-running DEM downloads or materialization steps stream stdout/stderr to the dock log without blocking the QGIS interface. The dock also prevents starting a second backend step while one is still running.

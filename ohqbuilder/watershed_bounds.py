@@ -102,6 +102,7 @@ def expand_bounds(
     *,
     margin_fraction: float = DEFAULT_MARGIN_FRACTION,
     minimum_margin_m: float = DEFAULT_MINIMUM_MARGIN_M,
+    scale: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Expand geographic bounds with an adaptive, uniform physical margin.
 
@@ -115,6 +116,22 @@ def expand_bounds(
     """
 
     minx, miny, maxx, maxy = bounds
+
+    if scale is not None:
+        if scale < 0.0:
+            raise ValueError("scale must be greater than or equal to zero.")
+        if scale == 1.0:
+            return bounds
+        center_x = (minx + maxx) / 2.0
+        center_y = (miny + maxy) / 2.0
+        half_width = (maxx - minx) * scale / 2.0
+        half_height = (maxy - miny) * scale / 2.0
+        return (
+            center_x - half_width,
+            center_y - half_height,
+            center_x + half_width,
+            center_y + half_height,
+        )
 
     if minx > maxx or miny > maxy:
         raise WatershedBoundsError(f"Invalid bounds ordering: {bounds!r}")
@@ -154,6 +171,7 @@ def resolve_nldi_basin_bounds(
     lat: float,
     margin_fraction: float = DEFAULT_MARGIN_FRACTION,
     minimum_margin_m: float = DEFAULT_MINIMUM_MARGIN_M,
+    safety_scale: float | None = None,
     timeout: float = 20.0,
 ) -> WatershedBoundsResult:
     """Resolve upstream basin bounds from the USGS NLDI web API."""
@@ -192,6 +210,7 @@ def resolve_nldi_basin_bounds(
         raw_bounds,
         margin_fraction=margin_fraction,
         minimum_margin_m=minimum_margin_m,
+        scale=safety_scale,
     )
 
     return WatershedBoundsResult(

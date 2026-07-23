@@ -22,5 +22,41 @@
   "download_dir": null,
   "max_tiles": null,
   "max_file_size_mb": 512.0,
-  "target_crs": null
+  "target_crs": null,
+  "spatial_input": {
+    "mode": "outlet"
+  },
+  "outlet": {
+    "longitude": null,
+    "latitude": null,
+    "input_crs": "EPSG:4326",
+    "raw_path": "inputs/outlet_raw.geojson",
+    "snap_to_flowline": true,
+    "snap_distance_m": 500,
+    "snapped_path": "inputs/outlet_snapped.geojson"
+  },
+  "dem_acquisition": {
+    "method": "upstream_network",
+    "acquisition_area": "intermediate/dem_acquisition_area.geojson",
+    "tile_index": "indexes/usgs_3dep_tiles.geojson",
+    "tile_manifest": "intermediate/dem_download_manifest.json",
+    "flowline_path": "hydro/NHDFlowline.geojson",
+    "envelope_type": "oriented_rectangle",
+    "upstream_trace_distance_km": 40,
+    "upstream_margin_km": 5,
+    "downstream_margin_km": 3,
+    "lateral_margin_km": 4,
+    "upstream_km": 35,
+    "downstream_km": 3,
+    "lateral_km": 4,
+    "auto_expand": true,
+    "directional_expansion": true,
+    "boundary_safety_distance_m": 500,
+    "final_watershed_buffer_m": 1000,
+    "expanded_acquisition_area": "intermediate/dem_acquisition_area_attempt2.geojson",
+    "expansion_distance_km": 5,
+    "summary": "intermediate/dem_workflow_summary.json",
+    "watershed_boundary": "intermediate/watershed_boundary.geojson",
+    "validation_summary": "intermediate/dem_boundary_validation_summary.json"
+  }
 }
