@@ -36,6 +36,7 @@
   "dem_acquisition": {
     "method": "oriented_outlet_buffer",
     "acquisition_area": "intermediate/dem_acquisition_area.geojson",
+    "tile_index": "indexes/usgs_3dep_tiles.geojson",
     "tile_manifest": "intermediate/dem_download_manifest.json",
     "upstream_km": 35,
     "downstream_km": 3,

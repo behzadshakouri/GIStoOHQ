@@ -56,3 +56,69 @@ def test_cli_dem_acquisition_area(tmp_path, capsys):
     assert "Wrote acquisition area:" in text
     assert "oriented_outlet_buffer" in text
     assert out.exists()
+
+
+def _feature(name, bounds, **props):
+    minx, miny, maxx, maxy = bounds
+    merged = {"name": name, **props}
+    return {
+        "type": "Feature",
+        "properties": merged,
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]
+            ]],
+        },
+    }
+
+
+def test_build_dem_tile_manifest_selects_intersecting_tiles(tmp_path):
+    from ohqbuilder.dem_acquisition import build_dem_tile_manifest
+
+    acquisition = tmp_path / "area.geojson"
+    index = tmp_path / "tile_index.geojson"
+    out = tmp_path / "manifest.json"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    index.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [
+            _feature("inside", (-77.0, 39.0, -76.95, 39.05), path="dem/raw/tile_01.tif", url="https://example.test/tile_01.tif"),
+            _feature("outside", (-76.0, 39.0, -75.9, 39.1), path="dem/raw/tile_02.tif"),
+        ],
+    }), encoding="utf-8")
+
+    result = build_dem_tile_manifest(acquisition, index, out)
+
+    manifest = json.loads(out.read_text(encoding="utf-8"))
+    assert result.selected_count == 1
+    assert manifest["tiles"] == ["dem/raw/tile_01.tif"]
+    assert manifest["items"][0]["url"] == "https://example.test/tile_01.tif"
+
+
+def test_cli_dem_tile_manifest(tmp_path, capsys):
+    acquisition = tmp_path / "area.geojson"
+    index = tmp_path / "tile_index.geojson"
+    out = tmp_path / "manifest.json"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    index.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("inside", (-77.0, 39.0, -76.95, 39.05), path="tile.tif")],
+    }), encoding="utf-8")
+
+    assert main([
+        "dem-tile-manifest",
+        "--acquisition-area", str(acquisition),
+        "--tile-index", str(index),
+        "--out", str(out),
+    ]) == 0
+
+    text = capsys.readouterr().out
+    assert "Selected tile count: 1" in text
+    assert out.exists()

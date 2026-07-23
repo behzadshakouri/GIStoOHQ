@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .dem_acquisition import DemAcquisitionError, create_outlet_buffer_area
+from .dem_acquisition import DemAcquisitionError, build_dem_tile_manifest, create_outlet_buffer_area
 from .dem_downloader import parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .doctor import run_doctor
@@ -165,6 +165,16 @@ def build_parser() -> argparse.ArgumentParser:
     area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
     area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
     area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
+
+    manifest = sub.add_parser(
+        "dem-tile-manifest",
+        help="Select DEM tile-index features intersecting a DEM acquisition polygon.",
+    )
+    manifest.add_argument("--acquisition-area", required=True, help="GeoJSON acquisition polygon from dem-acquisition-area or UI drawing.")
+    manifest.add_argument("--tile-index", required=True, help="GeoJSON tile footprint/index file with URL/path properties.")
+    manifest.add_argument("--out", required=True, help="Output DEM download manifest JSON.")
+    manifest.add_argument("--url-field", default="url", help="Tile-index property containing the download URL.")
+    manifest.add_argument("--path-field", default="path", help="Tile-index property containing the local raw tile path.")
 
     fetch = sub.add_parser(
         "fetch-phase1-inputs",
@@ -595,6 +605,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Mode: {result.mode}")
         print(f"Area: {result.area_km2:g} km^2")
         print(f"Bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+    if args.command == "dem-tile-manifest":
+        try:
+            result = build_dem_tile_manifest(
+                args.acquisition_area,
+                args.tile_index,
+                args.out,
+                url_field=args.url_field,
+                path_field=args.path_field,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-tile-manifest failed: {exc}")
+            return 2
+        print(f"Wrote DEM tile manifest: {result.output_path}")
+        print(f"Selected tile count: {result.selected_count}")
+        minx, miny, maxx, maxy = result.acquisition_bounds
+        print(f"Acquisition bounds: {minx},{miny},{maxx},{maxy}")
         return 0
     if args.command == "fetch-phase1-inputs":
         try:

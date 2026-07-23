@@ -241,9 +241,19 @@ ohqbuild dem-acquisition-area \
 For an elongated watershed such as Sligo Creek, the upstream/downstream/lateral
 margins produce a long acquisition polygon instead of a large circular buffer.
 The downloader should select DEM tiles by intersecting tile footprints with this
-polygon. Later, an upstream-network method can create the same output file from
-snapped NHD flowlines, and a UI can preview both the acquisition polygon and the
-intersecting tile footprints before downloading.
+polygon. The `dem-tile-manifest` command performs that handoff for GeoJSON tile
+indexes and writes the selected tile records to a manifest:
+
+```bash
+ohqbuild dem-tile-manifest \
+  --acquisition-area intermediate/dem_acquisition_area.geojson \
+  --tile-index indexes/usgs_3dep_tiles.geojson \
+  --out intermediate/dem_download_manifest.json
+```
+
+Later, an upstream-network method can create the same acquisition-area output
+file from snapped NHD flowlines, and a UI can preview both the acquisition
+polygon and the intersecting tile footprints before downloading.
 
 The DEM merger can also consume an explicit download manifest instead of scanning
 the whole source tree:
