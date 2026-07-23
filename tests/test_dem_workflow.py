@@ -344,3 +344,33 @@ dem_acquisition:
     assert "Wrote DEM workflow summary:" in out
     assert "Wrote acquisition area:" in out
     assert (tmp_path / "intermediate" / "dem_acquisition_area.geojson").exists()
+
+
+def test_cli_run_dem_prep_can_validate_existing_watershed(tmp_path, capsys):
+    acquisition = tmp_path / "area.geojson"
+    watershed = tmp_path / "watershed.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    watershed.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("watershed", (-77.0, 38.95, -76.95, 39.0))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({
+        "outlet": {"longitude": -76.95, "latitude": 39.0},
+        "dem_acquisition": {
+            "method": "polygon",
+            "acquisition_area": "area.geojson",
+            "watershed_boundary": "watershed.geojson",
+            "validation_summary": "validation.json",
+            "boundary_safety_distance_m": 500,
+        },
+    }), encoding="utf-8")
+
+    assert main(["run-dem-prep", "--config", str(config), "--validate"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Boundary validation: OK" in out
+    assert (tmp_path / "validation.json").exists()

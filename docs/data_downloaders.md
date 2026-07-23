@@ -248,12 +248,15 @@ ohqbuild prepare-dem --config configs/SligoCreek.yaml
 
 For the most direct terminal path, use `run-dem-prep`. Without flags it runs the
 prepare step; with `--download` it also downloads URL-backed manifest records;
-with `--materialize` it forwards the DEM manifest into `materialize-inputs`:
+with `--materialize` it forwards the DEM manifest into `materialize-inputs`;
+with `--validate` it runs the boundary check when a watershed boundary already
+exists:
 
 ```bash
 ohqbuild run-dem-prep --config configs/SligoCreek.yaml
 ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download
 ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download --materialize
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --validate
 ```
 
 The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,

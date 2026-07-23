@@ -304,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_dem_prep.add_argument("--config", required=True, help="YAML/JSON project config.")
     run_dem_prep.add_argument("--download", action="store_true", help="Download URL-backed DEM manifest tiles after prepare-dem.")
     run_dem_prep.add_argument("--materialize", action="store_true", help="Run materialize-inputs after optional download.")
+    run_dem_prep.add_argument("--validate", action="store_true", help="Run validate-dem after prepare/download/materialize.")
 
     prepare_dem = sub.add_parser(
         "prepare-dem",
@@ -732,6 +733,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(f"Wrote DEM: {materialized.dem.output_path}")
                 print(f"Wrote flowlines: {materialized.hydro.output_path}")
+            if args.validate:
+                validation = validate_dem_from_config(args.config)
+                print(f"Wrote DEM validation summary: {validation.summary_path}")
+                print(f"Boundary validation: {'OK' if validation.is_valid else 'EXPAND'}")
+                print(f"Touched edges: {','.join(validation.touched_edges) if validation.touched_edges else 'none'}")
+                if validation.expanded_area:
+                    print(f"Wrote expanded acquisition area: {validation.expanded_area.output_path}")
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"run-dem-prep failed: {exc}")
             return 2
