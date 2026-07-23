@@ -22,6 +22,93 @@ class DemAcquisitionArea:
     area_km2: float
 
 
+@dataclass(frozen=True)
+class SnappedOutlet:
+    raw_lon: float
+    raw_lat: float
+    snapped_lon: float
+    snapped_lat: float
+    distance_m: float
+    output_path: Path | None = None
+
+
+def _closest_point_on_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> tuple[float, float]:
+    dx = bx - ax
+    dy = by - ay
+    length2 = dx * dx + dy * dy
+    if length2 == 0:
+        return ax, ay
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
+    return ax + t * dx, ay + t * dy
+
+
+def _write_geojson_point(path: Path, lon: float, lat: float, properties: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    feature = {
+        "type": "FeatureCollection",
+        "name": path.stem,
+        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+        "features": [{
+            "type": "Feature",
+            "properties": properties,
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        }],
+    }
+    path.write_text(json.dumps(feature, indent=2), encoding="utf-8")
+
+
+def snap_outlet_to_flowlines(
+    lon: float,
+    lat: float,
+    flowline_path: str | Path,
+    *,
+    snap_distance_m: float = 500.0,
+    output_path: str | Path | None = None,
+) -> SnappedOutlet:
+    """Snap an outlet point to the nearest EPSG:4326 GeoJSON flowline segment."""
+
+    if snap_distance_m <= 0:
+        raise DemAcquisitionError("snap_distance_m must be positive.")
+    flowline = Path(flowline_path).expanduser().resolve()
+    data = json.loads(flowline.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise DemAcquisitionError(f"Expected GeoJSON flowlines: {flowline}")
+    best: tuple[float, float, float] | None = None
+    for feature in _geojson_features(data, flowline):
+        points = _feature_points(feature)
+        if len(points) < 2:
+            continue
+        local = [_lonlat_to_local_m(point_lon, point_lat, lon, lat) for point_lon, point_lat in points]
+        for (ax, ay), (bx, by) in zip(local, local[1:]):
+            sx, sy = _closest_point_on_segment(0.0, 0.0, ax, ay, bx, by)
+            distance = math.hypot(sx, sy)
+            if best is None or distance < best[2]:
+                snapped_lon, snapped_lat = _local_m_to_lonlat(sx, sy, lon, lat)
+                best = (snapped_lon, snapped_lat, distance)
+    if best is None:
+        raise DemAcquisitionError("No line segments found in flowline GeoJSON for outlet snapping.")
+    snapped_lon, snapped_lat, distance = best
+    if distance > snap_distance_m:
+        raise DemAcquisitionError(
+            f"Nearest flowline is {distance:g} m from outlet, beyond snap_distance_m={snap_distance_m:g}."
+        )
+    output = Path(output_path).expanduser().resolve() if output_path is not None else None
+    if output is not None:
+        _write_geojson_point(
+            output,
+            snapped_lon,
+            snapped_lat,
+            {
+                "raw_lon": lon,
+                "raw_lat": lat,
+                "snap_distance_m": distance,
+                "max_snap_distance_m": snap_distance_m,
+                "flowline_path": str(flowline),
+            },
+        )
+    return SnappedOutlet(lon, lat, snapped_lon, snapped_lat, distance, output)
+
+
 def _degrees_per_meter(lat: float) -> tuple[float, float]:
     lat_deg = 1.0 / METERS_PER_DEGREE
     lon_deg = 1.0 / (METERS_PER_DEGREE * max(0.1, abs(math.cos(math.radians(lat)))))

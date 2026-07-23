@@ -31,7 +31,8 @@
     "latitude": null,
     "input_crs": "EPSG:4326",
     "snap_to_flowline": true,
-    "snap_distance_m": 500
+    "snap_distance_m": 500,
+    "snapped_path": "inputs/outlet_snapped.geojson"
   },
   "dem_acquisition": {
     "method": "upstream_network",

@@ -295,12 +295,27 @@ ohqbuild dem-tile-manifest \
 ```
 
 The `upstream_network` method can create the same acquisition-area output file
-from reference flowlines in GeoJSON. It is intentionally lightweight: it collects
-flowline vertices within `upstream_trace_distance_km` of the outlet, computes an
-oriented principal-axis rectangle or axis-aligned envelope, then applies
-upstream/downstream/lateral safety margins. This is not a full NHD topological
-trace yet, but it gives elongated basins such as Sligo Creek a better initial DEM
-area than a circular outlet buffer:
+from reference flowlines in GeoJSON. When `outlet.snap_to_flowline` is enabled and
+a flowline path is configured, `prepare-dem` first snaps the outlet to the nearest
+flowline segment within `outlet.snap_distance_m` and writes
+`outlet.snapped_path` (defaulting to `inputs/outlet_snapped.geojson`). It then
+collects flowline vertices within `upstream_trace_distance_km` of the snapped
+outlet, computes an oriented principal-axis rectangle or axis-aligned envelope,
+and applies upstream/downstream/lateral safety margins. This is not a full NHD
+topological trace yet, but it gives elongated basins such as Sligo Creek a better
+initial DEM area than a circular outlet buffer:
+
+You can also snap the outlet as a separate inspectable step:
+
+```bash
+ohqbuild dem-snap-outlet \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --out inputs/outlet_snapped.geojson \
+  --snap-distance-m 500
+```
+
 
 ```yaml
 dem_acquisition:

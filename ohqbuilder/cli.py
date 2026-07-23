@@ -9,6 +9,7 @@ from .dem_acquisition import (
     build_dem_tile_manifest,
     create_outlet_buffer_area,
     create_upstream_network_area,
+    snap_outlet_to_flowlines,
     expand_acquisition_bounds,
     validate_watershed_within_acquisition,
 )
@@ -181,6 +182,16 @@ def build_parser() -> argparse.ArgumentParser:
     area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
     area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
     area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
+
+    snap = sub.add_parser(
+        "dem-snap-outlet",
+        help="Snap an outlet point to the nearest GeoJSON flowline segment.",
+    )
+    snap.add_argument("--lat", type=float, required=True, help="Raw outlet latitude in EPSG:4326.")
+    snap.add_argument("--lon", type=float, required=True, help="Raw outlet longitude in EPSG:4326.")
+    snap.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines.")
+    snap.add_argument("--out", required=True, help="Output GeoJSON path for the snapped outlet point.")
+    snap.add_argument("--snap-distance-m", type=float, default=500.0, help="Maximum allowed snap distance in meters.")
 
     network_area = sub.add_parser(
         "dem-upstream-network-area",
@@ -743,6 +754,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Bounds: {minx},{miny},{maxx},{maxy}")
         return 0
 
+
+    if args.command == "dem-snap-outlet":
+        try:
+            result = snap_outlet_to_flowlines(
+                args.lon,
+                args.lat,
+                args.flowlines,
+                snap_distance_m=args.snap_distance_m,
+                output_path=args.out,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-snap-outlet failed: {exc}")
+            return 2
+        print(f"Wrote snapped outlet: {result.output_path}")
+        print(f"Snapped outlet: {result.snapped_lon},{result.snapped_lat}")
+        print(f"Snap distance: {result.distance_m:g} m")
+        return 0
     if args.command == "dem-upstream-network-area":
         try:
             result = create_upstream_network_area(

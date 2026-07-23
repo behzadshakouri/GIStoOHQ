@@ -294,3 +294,59 @@ def test_cli_dem_upstream_network_area(tmp_path, capsys):
     assert "Wrote acquisition area:" in text
     assert "upstream_network" in text
     assert out.exists()
+
+
+def test_snap_outlet_to_flowlines_writes_snapped_point(tmp_path):
+    from ohqbuilder.dem_acquisition import snap_outlet_to_flowlines
+
+    flowlines = tmp_path / "flowlines.geojson"
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-77.0, 39.0], [-76.9, 39.0]],
+            },
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "outlet_snapped.geojson"
+
+    result = snap_outlet_to_flowlines(-76.95, 39.001, flowlines, snap_distance_m=200, output_path=out)
+
+    assert result.distance_m < 200
+    assert abs(result.snapped_lat - 39.0) < 0.00001
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["features"][0]["geometry"]["type"] == "Point"
+    assert data["features"][0]["properties"]["raw_lat"] == 39.001
+
+
+def test_cli_dem_snap_outlet(tmp_path, capsys):
+    flowlines = tmp_path / "flowlines.geojson"
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-77.0, 39.0], [-76.9, 39.0]],
+            },
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "snapped.geojson"
+
+    assert main([
+        "dem-snap-outlet",
+        "--lon", "-76.95",
+        "--lat", "39.001",
+        "--flowlines", str(flowlines),
+        "--out", str(out),
+        "--snap-distance-m", "200",
+    ]) == 0
+
+    text = capsys.readouterr().out
+    assert "Wrote snapped outlet:" in text
+    assert "Snap distance:" in text
+    assert out.exists()

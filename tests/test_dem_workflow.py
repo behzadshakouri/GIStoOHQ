@@ -253,3 +253,45 @@ def test_write_dem_config_template_infers_target_crs(tmp_path):
 
     data = json.loads(config.read_text(encoding="utf-8"))
     assert data["site"]["target_crs"] == "EPSG:26918"
+
+
+def test_prepare_dem_from_config_snaps_outlet_before_network_area(tmp_path):
+    flowlines = tmp_path / "hydro" / "flowlines.geojson"
+    flowlines.parent.mkdir()
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-77.0, 39.0], [-76.9, 39.0]],
+            },
+        }],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+outlet:
+  longitude: -76.95
+  latitude: 39.001
+  snap_to_flowline: true
+  snap_distance_m: 200
+  snapped_path: inputs/outlet_snapped.geojson
+dem_acquisition:
+  method: upstream_network
+  flowline_path: hydro/flowlines.geojson
+  acquisition_area: intermediate/dem_acquisition_area.geojson
+  upstream_trace_distance_km: 20
+  upstream_margin_km: 2
+  downstream_margin_km: 1
+  lateral_margin_km: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = prepare_dem_from_config(config)
+
+    assert result.acquisition_area is not None
+    snapped = json.loads((tmp_path / "inputs" / "outlet_snapped.geojson").read_text(encoding="utf-8"))
+    assert abs(snapped["features"][0]["geometry"]["coordinates"][1] - 39.0) < 0.00001

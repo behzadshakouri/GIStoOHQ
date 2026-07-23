@@ -13,6 +13,7 @@ from .dem_acquisition import (
     build_dem_tile_manifest,
     create_outlet_buffer_area,
     create_upstream_network_area,
+    snap_outlet_to_flowlines,
 )
 
 
@@ -87,6 +88,19 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     dem_acquisition = _section(config, "dem_acquisition")
 
     method = str(dem_acquisition.get("method") or dem_acquisition.get("acquisition_mode") or "").lower()
+    flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
+    outlet_lon = _required_float(outlet, "longitude", "outlet") if outlet.get("longitude") is not None else None
+    outlet_lat = _required_float(outlet, "latitude", "outlet") if outlet.get("latitude") is not None else None
+    if outlet.get("snap_to_flowline") and flowline_value and outlet_lon is not None and outlet_lat is not None:
+        snapped = snap_outlet_to_flowlines(
+            outlet_lon,
+            outlet_lat,
+            _resolve(flowline_value, base),
+            snap_distance_m=float(outlet.get("snap_distance_m", 500.0)),
+            output_path=_resolve(outlet.get("snapped_path") or "inputs/outlet_snapped.geojson", base),
+        )
+        outlet_lon = snapped.snapped_lon
+        outlet_lat = snapped.snapped_lat
     acquisition_path_value = dem_acquisition.get("acquisition_area")
     if not acquisition_path_value:
         raise DemWorkflowError("dem_acquisition.acquisition_area is required.")
@@ -94,8 +108,10 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
 
     acquisition_result: DemAcquisitionArea | None = None
     if method in {"outlet_buffer", "oriented_outlet_buffer"}:
-        lon = _required_float(outlet, "longitude", "outlet")
-        lat = _required_float(outlet, "latitude", "outlet")
+        if outlet_lon is None or outlet_lat is None:
+            raise DemWorkflowError("outlet.longitude and outlet.latitude are required.")
+        lon = outlet_lon
+        lat = outlet_lat
         azimuth_value = dem_acquisition.get("azimuth")
         if method == "oriented_outlet_buffer" and azimuth_value is None:
             raise DemWorkflowError("dem_acquisition.azimuth is required for oriented_outlet_buffer.")
@@ -110,12 +126,11 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
             azimuth_deg=azimuth,
         )
     elif method == "upstream_network":
-        flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
         if not flowline_value:
             raise DemWorkflowError("dem_acquisition.flowline_path is required for upstream_network.")
         acquisition_result = create_upstream_network_area(
-            _required_float(outlet, "longitude", "outlet"),
-            _required_float(outlet, "latitude", "outlet"),
+            outlet_lon if outlet_lon is not None else _required_float(outlet, "longitude", "outlet"),
+            outlet_lat if outlet_lat is not None else _required_float(outlet, "latitude", "outlet"),
             _resolve(flowline_value, base),
             acquisition_path,
             upstream_trace_distance_km=float(dem_acquisition.get("upstream_trace_distance_km", 40.0)),
@@ -313,6 +328,7 @@ def write_dem_config_template(
             "input_crs": "EPSG:4326",
             "snap_to_flowline": True,
             "snap_distance_m": 500,
+            "snapped_path": "inputs/outlet_snapped.geojson",
         },
         "dem_acquisition": dem,
     }
