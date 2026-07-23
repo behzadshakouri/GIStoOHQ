@@ -8,6 +8,7 @@ from .dem_acquisition import (
     DemAcquisitionError,
     build_dem_tile_manifest,
     create_outlet_buffer_area,
+    create_upstream_network_area,
     expand_acquisition_bounds,
     validate_watershed_within_acquisition,
 )
@@ -180,6 +181,20 @@ def build_parser() -> argparse.ArgumentParser:
     area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
     area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
     area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
+
+    network_area = sub.add_parser(
+        "dem-upstream-network-area",
+        help="Create a lightweight upstream-flowline DEM acquisition envelope.",
+    )
+    network_area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
+    network_area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
+    network_area.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines used to infer the upstream envelope.")
+    network_area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
+    network_area.add_argument("--upstream-trace-km", type=float, default=40.0, help="Maximum outlet-to-flowline vertex distance to consider.")
+    network_area.add_argument("--upstream-margin-km", type=float, default=5.0, help="Safety margin beyond the upstream flowline extent.")
+    network_area.add_argument("--downstream-margin-km", type=float, default=3.0, help="Safety margin downstream of the outlet.")
+    network_area.add_argument("--lateral-margin-km", type=float, default=4.0, help="Safety margin on both sides of the flowline envelope.")
+    network_area.add_argument("--envelope-type", default="oriented_rectangle", choices=("oriented_rectangle", "axis_aligned_rectangle"))
 
     manifest = sub.add_parser(
         "dem-tile-manifest",
@@ -688,6 +703,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         except DemAcquisitionError as exc:
             print(f"dem-acquisition-area failed: {exc}")
+            return 2
+        minx, miny, maxx, maxy = result.bounds
+        print(f"Wrote acquisition area: {result.output_path}")
+        print(f"Mode: {result.mode}")
+        print(f"Area: {result.area_km2:g} km^2")
+        print(f"Bounds: {minx},{miny},{maxx},{maxy}")
+        return 0
+
+    if args.command == "dem-upstream-network-area":
+        try:
+            result = create_upstream_network_area(
+                args.lon,
+                args.lat,
+                args.flowlines,
+                args.out,
+                upstream_trace_distance_km=args.upstream_trace_km,
+                upstream_margin_km=args.upstream_margin_km,
+                downstream_margin_km=args.downstream_margin_km,
+                lateral_margin_km=args.lateral_margin_km,
+                envelope_type=args.envelope_type,
+            )
+        except DemAcquisitionError as exc:
+            print(f"dem-upstream-network-area failed: {exc}")
             return 2
         minx, miny, maxx, maxy = result.bounds
         print(f"Wrote acquisition area: {result.output_path}")

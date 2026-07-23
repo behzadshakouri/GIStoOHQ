@@ -295,6 +295,20 @@ dem_acquisition:
   lateral_margin_km: 4
 ```
 
+The same lightweight envelope can be generated directly without a project config:
+
+```bash
+ohqbuild dem-upstream-network-area \
+  --lon -76.9765 \
+  --lat 38.9921 \
+  --flowlines hydro/NHDFlowline.geojson \
+  --out intermediate/dem_acquisition_area.geojson \
+  --upstream-trace-km 40 \
+  --upstream-margin-km 5 \
+  --downstream-margin-km 3 \
+  --lateral-margin-km 4
+```
+
 A future NHD tracing implementation can replace the lightweight vertex selection
 behind the same `dem_acquisition.acquisition_area` output contract, so the
 downloader, tile manifest, materializer, and UI handoffs do not need to change.

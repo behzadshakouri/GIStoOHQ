@@ -261,3 +261,36 @@ def test_create_upstream_network_area_writes_oriented_envelope(tmp_path):
     assert props["selected_vertex_count"] == 3
     assert props["envelope_type"] == "oriented_rectangle"
     assert len(data["features"][0]["geometry"]["coordinates"][0]) == 5
+
+
+def test_cli_dem_upstream_network_area(tmp_path, capsys):
+    flowlines = tmp_path / "flowlines.geojson"
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"name": "main"},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-76.9765, 38.9921], [-76.99, 39.06], [-77.0, 39.12]],
+            },
+        }],
+    }), encoding="utf-8")
+    out = tmp_path / "network_area.geojson"
+
+    assert main([
+        "dem-upstream-network-area",
+        "--lon", "-76.9765",
+        "--lat", "38.9921",
+        "--flowlines", str(flowlines),
+        "--out", str(out),
+        "--upstream-trace-km", "20",
+        "--upstream-margin-km", "3",
+        "--downstream-margin-km", "1",
+        "--lateral-margin-km", "2",
+    ]) == 0
+
+    text = capsys.readouterr().out
+    assert "Wrote acquisition area:" in text
+    assert "upstream_network" in text
+    assert out.exists()
