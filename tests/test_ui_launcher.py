@@ -100,3 +100,16 @@ def test_ui_launcher_builds_run_dem_prep_command(tmp_path):
 
     assert command.label == "Run DEM Prep"
     assert command.argv == ("ohqbuild", "run-dem-prep", "--config", str(tmp_path / "config.yaml"))
+
+
+def test_ui_launcher_defaults_to_sligo_example_when_available():
+    from ohqbuilder.ui.launcher import default_config_path
+
+    assert default_config_path() == "examples/SligoCreek/dem_workflow.example.yaml"
+
+
+def test_run_dem_ui_shell_wrapper_exists():
+    script = Path("scripts/run_dem_ui.sh")
+
+    assert script.is_file()
+    assert "ohqbuild ui" in script.read_text(encoding="utf-8")

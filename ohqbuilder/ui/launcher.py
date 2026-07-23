@@ -79,6 +79,13 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
     raise LauncherError(f"Unsupported workflow step: {step}")
 
 
+def default_config_path() -> str:
+    """Return a useful default config path for the launcher."""
+
+    example = Path("examples/SligoCreek/dem_workflow.example.yaml")
+    return str(example) if example.exists() else "config.example.json"
+
+
 def _require_tkinter():
     if importlib.util.find_spec("tkinter") is None:
         raise LauncherError("tkinter is not available in this Python environment.")
@@ -191,7 +198,7 @@ class LauncherApp:
         self.root = tk.Tk()
         self.root.title("GIStoOHQ DEM Workflow Launcher")
         self.messages: queue.Queue[str] = queue.Queue()
-        self.config_var = tk.StringVar(value="config.example.json")
+        self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
         self.root_var = tk.StringVar(value=".")

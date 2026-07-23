@@ -461,7 +461,13 @@ window over typing each command manually:
 
 ```bash
 ohqbuild ui
+# or
+scripts/run_dem_ui.sh
 ```
+
+When the bundled Sligo Creek demo exists, the launcher opens with
+`examples/SligoCreek/dem_workflow.example.yaml` as the default config so users can
+press **load config**, then **run-dem-prep** for a no-network smoke test.
 
 The launcher is intentionally thin. It does not implement hydrology itself; it
 builds and runs the same backend commands used by terminal workflows:
