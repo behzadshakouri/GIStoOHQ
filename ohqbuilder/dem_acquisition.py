@@ -161,21 +161,144 @@ def _geometry_coords(geometry: dict[str, object]) -> list[tuple[float, float]]:
     return points
 
 
-def _bounds_from_geojson(path: Path) -> tuple[float, float, float, float]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+
+def _geojson_features(data: dict[str, object], path: Path) -> list[dict[str, object]]:
+    if data.get("type") == "Feature":
+        return [data]
     features = data.get("features") if isinstance(data, dict) else None
     if not isinstance(features, list) or not features:
-        raise DemAcquisitionError(f"Expected a GeoJSON FeatureCollection with at least one feature: {path}")
-    points: list[tuple[float, float]] = []
-    for feature in features:
-        if not isinstance(feature, dict) or not isinstance(feature.get("geometry"), dict):
-            continue
-        points.extend(_geometry_coords(feature["geometry"]))
-    if not points:
-        raise DemAcquisitionError(f"No geometry coordinates found in: {path}")
+        raise DemAcquisitionError(f"Expected GeoJSON FeatureCollection with at least one feature: {path}")
+    return [feature for feature in features if isinstance(feature, dict)]
+
+
+def _bounds_from_points(points: list[tuple[float, float]]) -> tuple[float, float, float, float]:
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _feature_points(feature: dict[str, object]) -> list[tuple[float, float]]:
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        raise DemAcquisitionError("GeoJSON feature is missing geometry.")
+    return _geometry_coords(geometry)
+
+
+def _bounds_from_geojson_feature(feature: dict[str, object]) -> tuple[float, float, float, float]:
+    return _bounds_from_points(_feature_points(feature))
+
+
+def _polygon_rings(geometry: dict[str, object]) -> list[list[tuple[float, float]]]:
+    gtype = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if gtype == "Polygon" and isinstance(coordinates, list):
+        rings = coordinates
+    elif gtype == "MultiPolygon" and isinstance(coordinates, list):
+        rings = [ring for polygon in coordinates if isinstance(polygon, list) for ring in polygon]
+    else:
+        return []
+    parsed: list[list[tuple[float, float]]] = []
+    for ring in rings:
+        if not isinstance(ring, list):
+            continue
+        points = []
+        for coord in ring:
+            if (
+                isinstance(coord, list)
+                and len(coord) >= 2
+                and isinstance(coord[0], (int, float))
+                and isinstance(coord[1], (int, float))
+            ):
+                points.append((float(coord[0]), float(coord[1])))
+        if len(points) >= 3:
+            parsed.append(points)
+    return parsed
+
+
+def _feature_polygons(feature: dict[str, object]) -> list[list[tuple[float, float]]]:
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return []
+    return _polygon_rings(geometry)
+
+
+def _point_in_ring(point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+    x, y = point
+    inside = False
+    j = len(ring) - 1
+    for i, (xi, yi) in enumerate(ring):
+        xj, yj = ring[j]
+        crosses = (yi > y) != (yj > y)
+        if crosses:
+            x_at_y = (xj - xi) * (y - yi) / ((yj - yi) or 1.0e-12) + xi
+            if x < x_at_y:
+                inside = not inside
+        j = i
+    return inside
+
+
+def _orientation(a, b, c) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _on_segment(a, b, c) -> bool:
+    return (
+        min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+        and min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
+        and abs(_orientation(a, b, c)) < 1.0e-12
+    )
+
+
+def _segments_intersect(a, b, c, d) -> bool:
+    o1 = _orientation(a, b, c)
+    o2 = _orientation(a, b, d)
+    o3 = _orientation(c, d, a)
+    o4 = _orientation(c, d, b)
+    if o1 * o2 < 0 and o3 * o4 < 0:
+        return True
+    return (
+        _on_segment(a, b, c)
+        or _on_segment(a, b, d)
+        or _on_segment(c, d, a)
+        or _on_segment(c, d, b)
+    )
+
+
+def _ring_edges(ring: list[tuple[float, float]]):
+    points = ring if ring[0] == ring[-1] else [*ring, ring[0]]
+    return zip(points, points[1:])
+
+
+def _rings_intersect(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> bool:
+    if any(_point_in_ring(point, b) for point in a):
+        return True
+    if any(_point_in_ring(point, a) for point in b):
+        return True
+    return any(_segments_intersect(a1, a2, b1, b2) for a1, a2 in _ring_edges(a) for b1, b2 in _ring_edges(b))
+
+
+def _features_intersect(acquisition_features: list[dict[str, object]], tile_feature: dict[str, object]) -> bool:
+    tile_polygons = _feature_polygons(tile_feature)
+    acquisition_polygons = [
+        polygon
+        for feature in acquisition_features
+        for polygon in _feature_polygons(feature)
+    ]
+    if acquisition_polygons and tile_polygons:
+        return any(_rings_intersect(a, b) for a in acquisition_polygons for b in tile_polygons)
+    tile_bounds = _bounds_from_geojson_feature(tile_feature)
+    acquisition_points = [point for feature in acquisition_features for point in _feature_points(feature)]
+    return _intersects(_bounds_from_points(acquisition_points), tile_bounds)
+
+def _bounds_from_geojson(path: Path) -> tuple[float, float, float, float]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise DemAcquisitionError(f"Expected GeoJSON object: {path}")
+    features = _geojson_features(data, path)
+    points = [point for feature in features for point in _feature_points(feature)]
+    if not points:
+        raise DemAcquisitionError(f"No geometry coordinates found in: {path}")
+    return _bounds_from_points(points)
 
 
 def _intersects(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
@@ -200,11 +323,15 @@ def build_dem_tile_manifest(
     acquisition_path = Path(acquisition_area).expanduser().resolve()
     index_path = Path(tile_index).expanduser().resolve()
     output = Path(output_path).expanduser().resolve()
+    acquisition_data = json.loads(acquisition_path.read_text(encoding="utf-8"))
+    if not isinstance(acquisition_data, dict):
+        raise DemAcquisitionError(f"Expected GeoJSON acquisition area: {acquisition_path}")
+    acquisition_features = _geojson_features(acquisition_data, acquisition_path)
     acquisition_bounds = _bounds_from_geojson(acquisition_path)
     data = json.loads(index_path.read_text(encoding="utf-8"))
-    features = data.get("features") if isinstance(data, dict) else None
-    if not isinstance(features, list):
-        raise DemAcquisitionError(f"Expected a GeoJSON tile-index FeatureCollection: {index_path}")
+    if not isinstance(data, dict):
+        raise DemAcquisitionError(f"Expected GeoJSON tile-index object: {index_path}")
+    features = _geojson_features(data, index_path)
 
     items: list[dict[str, object]] = []
     tiles: list[str] = []
@@ -213,6 +340,8 @@ def build_dem_tile_manifest(
             continue
         tile_bounds = _bounds_from_geojson_feature(feature)
         if not _intersects(acquisition_bounds, tile_bounds):
+            continue
+        if not _features_intersect(acquisition_features, feature):
             continue
         properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
         url = properties.get(url_field) or properties.get("downloadURL") or properties.get("downloadUrl")
@@ -242,12 +371,3 @@ def build_dem_tile_manifest(
     )
     return DemTileManifest(output, len(items), acquisition_bounds)
 
-
-def _bounds_from_geojson_feature(feature: dict[str, object]) -> tuple[float, float, float, float]:
-    geometry = feature.get("geometry")
-    if not isinstance(geometry, dict):
-        raise DemAcquisitionError("Tile-index feature is missing geometry.")
-    points = _geometry_coords(geometry)
-    xs = [x for x, _ in points]
-    ys = [y for _, y in points]
-    return min(xs), min(ys), max(xs), max(ys)

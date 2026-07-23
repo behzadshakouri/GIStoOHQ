@@ -122,3 +122,33 @@ def test_cli_dem_tile_manifest(tmp_path, capsys):
     text = capsys.readouterr().out
     assert "Selected tile count: 1" in text
     assert out.exists()
+
+
+def test_build_dem_tile_manifest_rejects_bbox_only_overlap(tmp_path):
+    from ohqbuilder.dem_acquisition import build_dem_tile_manifest
+
+    acquisition = tmp_path / "area.geojson"
+    index = tmp_path / "tile_index.geojson"
+    out = tmp_path / "manifest.json"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"name": "upper_left"},
+            "geometry": {"type": "Polygon", "coordinates": [[[0, 1], [0, 2], [1, 2], [0, 1]]]},
+        }],
+    }), encoding="utf-8")
+    index.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"name": "lower_right", "path": "tile.tif"},
+            "geometry": {"type": "Polygon", "coordinates": [[[1, 0], [2, 0], [2, 1], [1, 0]]]},
+        }],
+    }), encoding="utf-8")
+
+    result = build_dem_tile_manifest(acquisition, index, out)
+    manifest = json.loads(out.read_text(encoding="utf-8"))
+
+    assert result.selected_count == 0
+    assert manifest["tiles"] == []

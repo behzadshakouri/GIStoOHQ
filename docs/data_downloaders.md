@@ -242,7 +242,9 @@ For an elongated watershed such as Sligo Creek, the upstream/downstream/lateral
 margins produce a long acquisition polygon instead of a large circular buffer.
 The downloader should select DEM tiles by intersecting tile footprints with this
 polygon. The `dem-tile-manifest` command performs that handoff for GeoJSON tile
-indexes and writes the selected tile records to a manifest:
+indexes and writes the selected tile records to a manifest. It checks polygon
+intersection rather than accepting every footprint whose bounding box overlaps
+the area:
 
 ```bash
 ohqbuild dem-tile-manifest \
