@@ -259,6 +259,12 @@ ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download --materialize
 ohqbuild run-dem-prep --config configs/SligoCreek.yaml --validate
 ```
 
+For shell-script users, the same direct path is wrapped as:
+
+```bash
+scripts/run_dem_prep.sh configs/SligoCreek.yaml --download --materialize
+```
+
 The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
 `upstream_network`, and `polygon` acquisition methods. When both `tile_index` and
 `tile_manifest` are configured, it also selects the intersecting DEM tile records

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from ohqbuilder.cli import main
 from ohqbuilder.dem_workflow import prepare_dem_from_config
@@ -374,3 +375,10 @@ def test_cli_run_dem_prep_can_validate_existing_watershed(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Boundary validation: OK" in out
     assert (tmp_path / "validation.json").exists()
+
+
+def test_run_dem_prep_shell_wrapper_exists():
+    script = Path("scripts/run_dem_prep.sh")
+
+    assert script.is_file()
+    assert "ohqbuild run-dem-prep" in script.read_text(encoding="utf-8")
