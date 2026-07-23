@@ -245,6 +245,17 @@ If `--target-crs` is omitted, the initializer infers a NAD83 UTM CRS from the ou
 ohqbuild prepare-dem --config configs/SligoCreek.yaml
 ```
 
+
+For the most direct terminal path, use `run-dem-prep`. Without flags it runs the
+prepare step; with `--download` it also downloads URL-backed manifest records;
+with `--materialize` it forwards the DEM manifest into `materialize-inputs`:
+
+```bash
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download
+ohqbuild run-dem-prep --config configs/SligoCreek.yaml --download --materialize
+```
+
 The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
 `upstream_network`, and `polygon` acquisition methods. When both `tile_index` and
 `tile_manifest` are configured, it also selects the intersecting DEM tile records

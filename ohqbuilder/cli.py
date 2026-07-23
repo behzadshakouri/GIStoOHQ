@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import yaml
 from pathlib import Path
 
 from .dem_acquisition import (
@@ -296,6 +297,14 @@ def build_parser() -> argparse.ArgumentParser:
     init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to NAD83 UTM inferred from outlet.")
     init_dem.add_argument("--method", default="upstream_network", choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"))
 
+    run_dem_prep = sub.add_parser(
+        "run-dem-prep",
+        help="Run the direct DEM prep path from one config, with optional download/materialization.",
+    )
+    run_dem_prep.add_argument("--config", required=True, help="YAML/JSON project config.")
+    run_dem_prep.add_argument("--download", action="store_true", help="Download URL-backed DEM manifest tiles after prepare-dem.")
+    run_dem_prep.add_argument("--materialize", action="store_true", help="Run materialize-inputs after optional download.")
+
     prepare_dem = sub.add_parser(
         "prepare-dem",
         help="Create DEM acquisition area and tile manifest from a project config.",
@@ -425,6 +434,40 @@ def _legacy_options_from_args(args) -> LegacyWorkflowOptions:
         auto_outlet=not getattr(args, "no_auto_outlet", False),
         start_at=getattr(args, "start_at", None),
     )
+
+
+def _load_cli_config(config_path: str) -> dict:
+    path = Path(config_path).expanduser()
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _cli_site_name(config: dict) -> str:
+    site = config.get("site")
+    if isinstance(site, dict):
+        return str(site.get("name") or ".")
+    return str(site or ".")
+
+
+def _cli_target_crs(config: dict) -> str | None:
+    site = config.get("site")
+    if isinstance(site, dict) and site.get("target_crs") and site.get("target_crs") != "auto":
+        return str(site["target_crs"])
+    value = config.get("target_crs")
+    return str(value) if value and value != "auto" else None
+
+
+def _resolve_cli_path(config_path: str, value, default: str | None = None) -> str | None:
+    raw = value or default
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str(Path(config_path).expanduser().parent / path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -655,6 +698,43 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM config: {path}")
         print("Next: ohqbuild prepare-dem --config " + str(path))
+        return 0
+
+    if args.command == "run-dem-prep":
+        try:
+            result = prepare_dem_from_config(args.config)
+            print(f"Wrote DEM workflow summary: {result.summary_path}")
+            if result.acquisition_area:
+                print(f"Wrote acquisition area: {result.acquisition_area.output_path}")
+            manifest_path = result.tile_manifest.output_path if result.tile_manifest else None
+            if result.tile_manifest:
+                print(f"Wrote tile manifest: {manifest_path}")
+                print(f"Selected tile count: {result.tile_manifest.selected_count}")
+            config = _load_cli_config(args.config)
+            dem = config.get("dem_acquisition", {}) if isinstance(config.get("dem_acquisition"), dict) else {}
+            paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
+            if args.download:
+                if manifest_path is None:
+                    raise DemWorkflowError("run-dem-prep --download requires a tile manifest from prepare-dem.")
+                raw_dem_dir = _resolve_cli_path(args.config, paths.get("raw_dem_dir") or dem.get("raw_dem_dir"), "dem/raw")
+                download_result = download_dem_manifest(manifest_path, raw_dem_dir)
+                print(f"Downloaded tile count: {download_result.downloaded}")
+                print(f"Skipped existing tile count: {download_result.skipped}")
+            if args.materialize:
+                if manifest_path is None:
+                    raise DemWorkflowError("run-dem-prep --materialize requires a tile manifest from prepare-dem.")
+                materialized = materialize_source_inputs(
+                    _resolve_cli_path(args.config, config.get("root"), "."),
+                    _cli_site_name(config),
+                    source_dir=_resolve_cli_path(args.config, config.get("download_dir") or config.get("source_dir")),
+                    target_crs=_cli_target_crs(config),
+                    dem_manifest=str(manifest_path),
+                )
+                print(f"Wrote DEM: {materialized.dem.output_path}")
+                print(f"Wrote flowlines: {materialized.hydro.output_path}")
+        except Exception as exc:  # pragma: no cover - CLI boundary
+            print(f"run-dem-prep failed: {exc}")
+            return 2
         return 0
     if args.command == "prepare-dem":
         try:

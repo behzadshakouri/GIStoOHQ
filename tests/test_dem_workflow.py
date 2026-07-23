@@ -304,3 +304,43 @@ dem_acquisition:
     assert summary["snap_distance_m"] < 200
     snapped = json.loads((tmp_path / "inputs" / "outlet_snapped.geojson").read_text(encoding="utf-8"))
     assert abs(snapped["features"][0]["geometry"]["coordinates"][1] - 39.0) < 0.00001
+
+
+def test_cli_run_dem_prep_runs_prepare_step(tmp_path, capsys):
+    flowlines = tmp_path / "hydro" / "flowlines.geojson"
+    flowlines.parent.mkdir()
+    flowlines.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[-77.0, 39.0], [-76.9, 39.0]],
+            },
+        }],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+outlet:
+  longitude: -76.95
+  latitude: 39.0
+dem_acquisition:
+  method: upstream_network
+  flowline_path: hydro/flowlines.geojson
+  acquisition_area: intermediate/dem_acquisition_area.geojson
+  upstream_trace_distance_km: 20
+  upstream_margin_km: 2
+  downstream_margin_km: 1
+  lateral_margin_km: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run-dem-prep", "--config", str(config)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Wrote DEM workflow summary:" in out
+    assert "Wrote acquisition area:" in out
+    assert (tmp_path / "intermediate" / "dem_acquisition_area.geojson").exists()
