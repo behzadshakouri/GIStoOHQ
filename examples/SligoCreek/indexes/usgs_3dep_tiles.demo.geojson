@@ -6,7 +6,7 @@
       "properties": {
         "name": "demo_tile_sligo_01",
         "path": "dem/raw/demo_tile_sligo_01.tif",
-        "url": "https://example.invalid/demo_tile_sligo_01.tif"
+        "url": "fixtures/demo_tile_sligo_01.tif"
       },
       "geometry": {
         "type": "Polygon",
