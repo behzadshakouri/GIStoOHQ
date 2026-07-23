@@ -8,7 +8,7 @@ Run the prepare path from the repository root:
 scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml
 ```
 
-Expected outputs are written under `examples/SligoCreek/`:
+Expected outputs are written under `examples/SligoCreek/`; generated smoke-test outputs are ignored by the example `.gitignore`:
 
 ```text
 inputs/outlet_raw.geojson
