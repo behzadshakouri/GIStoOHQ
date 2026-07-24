@@ -12,6 +12,7 @@ from ohqbuilder.ui.launcher import (
     geojson_preview_summary,
     load_project_config,
     save_project_config,
+    sligo_demo_reset_args,
     state_from_config,
     state_with_config_defaults,
     update_config_from_state,
@@ -46,6 +47,19 @@ def test_map_click_to_lonlat_moves_east_and_north():
     assert east_lat == pytest.approx(center_lat, abs=0.001)
     assert north_lat > center_lat
     assert north_lon == pytest.approx(center_lon)
+
+
+def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
+    config_path = tmp_path / "examples" / "SligoCreek" / "dem_workflow.example.yaml"
+
+    args = sligo_demo_reset_args(config_path, -76.99778601, 38.96888097)
+
+    assert args["output_path"] == config_path
+    assert args["site"] == "SligoCreekDemo"
+    assert args["lon"] == -76.99778601
+    assert args["lat"] == 38.96888097
+    assert str(args["flowline_path"]) == "hydro/NHDFlowline.demo.geojson"
+    assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):

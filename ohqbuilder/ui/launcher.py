@@ -21,6 +21,13 @@ OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
 MIN_MAP_ZOOM = 1
 MAX_MAP_ZOOM = 19
 
+SLIGO_DEMO_SITE = "SligoCreekDemo"
+SLIGO_DEMO_LON = -76.9765
+SLIGO_DEMO_LAT = 38.9921
+SLIGO_DEMO_CRS = "EPSG:26918"
+SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
+SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
 
 def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
     """Return the cache path for a downloaded OSM tile."""
@@ -316,6 +323,21 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
     )
 
 
+def sligo_demo_reset_args(config_path: str | Path, lon: float | None, lat: float | None) -> dict[str, Any]:
+    """Return arguments for rewriting the bundled Sligo Creek demo config."""
+
+    return {
+        "output_path": Path(config_path).expanduser(),
+        "site": SLIGO_DEMO_SITE,
+        "lon": lon if lon is not None else SLIGO_DEMO_LON,
+        "lat": lat if lat is not None else SLIGO_DEMO_LAT,
+        "flowline_path": SLIGO_DEMO_FLOWLINES,
+        "tile_index": SLIGO_DEMO_TILE_INDEX,
+        "target_crs": SLIGO_DEMO_CRS,
+        "method": "upstream_network",
+    }
+
+
 def geojson_preview_summary(path: str | Path) -> str:
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     features = data.get("features") if isinstance(data, dict) else None
@@ -515,6 +537,7 @@ class LauncherApp:
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
         tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
         tk.Button(buttons, text="pick outlet map", command=self.pick_outlet_map).pack(side="left")
+        tk.Button(buttons, text="reset Sligo demo", command=self.reset_sligo_demo).pack(side="left")
         for step in (
             "init-dem-config",
             "prepare-dem",
@@ -534,6 +557,16 @@ class LauncherApp:
             self.map_picker = MapPicker(self)
         except Exception as exc:  # pragma: no cover - Tk/network UI boundary
             self.messages.put(f"Map picker failed: {exc}\n")
+
+    def reset_sligo_demo(self) -> None:
+        try:
+            from ohqbuilder.dem_workflow import write_dem_config_template
+
+            write_dem_config_template(**sligo_demo_reset_args(self.config_var.get(), self.state().lon, self.state().lat))
+            self.load_config()
+            self.messages.put("Reset Sligo demo config.\n")
+        except Exception as exc:  # pragma: no cover - UI boundary
+            self.messages.put(f"ERROR: {exc}\n")
 
     def state(self) -> LauncherState:
         crs = self.crs_var.get().strip() or None
