@@ -17,6 +17,10 @@ from .dem_acquisition import (
     write_outlet_point,
 )
 
+SLIGO_DEMO_CONFIG_NAME = "dem_workflow.example.yaml"
+SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
+SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
 
 class DemWorkflowError(RuntimeError):
     """Raised when a config-driven DEM workflow cannot be prepared."""
@@ -60,6 +64,16 @@ def _required_float(section: dict[str, Any], key: str, label: str) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise DemWorkflowError(f"{label} must be numeric: {key}") from exc
+
+
+def _is_sligo_demo_config(path: Path) -> bool:
+    return path.name == SLIGO_DEMO_CONFIG_NAME and path.parent.name == "SligoCreek"
+
+
+def _demo_default_path(path: Path, value: Path, explicit: str | Path | None) -> str | Path | None:
+    if explicit is not None:
+        return explicit
+    return value if _is_sligo_demo_config(path) else None
 
 
 def _resolve(path: str | Path, base: Path) -> Path:
@@ -340,6 +354,8 @@ def write_dem_config_template(
         "allow_acquisition_area_watershed_fallback": True,
     }
     if method == "upstream_network":
+        flowline_path = _demo_default_path(path, SLIGO_DEMO_FLOWLINES, flowline_path)
+        tile_index = _demo_default_path(path, SLIGO_DEMO_TILE_INDEX, tile_index)
         if flowline_path is None:
             raise DemWorkflowError("flowline_path is required for upstream_network configs.")
         dem.update({
