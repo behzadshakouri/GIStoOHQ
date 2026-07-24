@@ -49,6 +49,25 @@ def materialize_cn_lookup(root: Path, source: Path | None = None) -> Path:
     return target
 
 
+def demo_hydro_dir(root: Path) -> Path | None:
+    """Return bundled hydro fixtures when downloaded hydro is unavailable."""
+
+    candidate = root / "hydro"
+    return candidate if candidate.is_dir() else None
+
+
+def resolve_hydro_source_dir(root: Path, source_dir: Path) -> Path:
+    """Find downloaded hydro products or fall back to bundled example hydro files."""
+
+    try:
+        return find_product_dir(source_dir, "hydro")
+    except FileNotFoundError:
+        fallback = demo_hydro_dir(root)
+        if fallback is not None:
+            return fallback
+        raise
+
+
 def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | None:
     """Copy a downloaded NLCD raster into the legacy Phase 2 expected path."""
 
@@ -116,7 +135,7 @@ def materialize_source_inputs(
     hydro = materialize_flowlines(
         root_path,
         site,
-        source_dir=find_product_dir(downloads, "hydro"),
+        source_dir=resolve_hydro_source_dir(root_path, downloads),
         dem_path=dem.output_path,
     )
     landcover = materialize_landcover(root_path, site, downloads)

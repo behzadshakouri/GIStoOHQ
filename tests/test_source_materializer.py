@@ -7,6 +7,7 @@ from ohqbuilder.cli import main
 from ohqbuilder.source_materializer import (
     find_product_dir,
     materialize_cn_lookup,
+    resolve_hydro_source_dir,
     materialize_landcover,
     materialize_source_inputs,
 )
@@ -68,6 +69,45 @@ def test_materialize_source_inputs_copies_nlcd_to_legacy_name(monkeypatch, tmp_p
     assert expected.read_bytes() == b"nlcd"
     assert result.cn_lookup == tmp_path / "cn_lookup.csv"
     assert result.cn_lookup.is_file()
+
+
+def test_resolve_hydro_source_dir_falls_back_to_bundled_hydro(tmp_path):
+    downloads = tmp_path / "source_downloads"
+    downloads.mkdir()
+    bundled = tmp_path / "hydro"
+    bundled.mkdir()
+
+    assert resolve_hydro_source_dir(tmp_path, downloads) == bundled
+
+
+def test_materialize_source_inputs_uses_bundled_hydro_when_download_missing(monkeypatch, tmp_path):
+    downloads = tmp_path / "source_downloads"
+    downloads.mkdir()
+    (tmp_path / "hydro").mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"tiles": []}', encoding="utf-8")
+    dem_path = tmp_path / "SITE_A" / "demlr" / "cliped_utm.tif"
+    calls = []
+
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_dem",
+        lambda *args, **kwargs: calls.append(("dem", kwargs))
+        or SimpleNamespace(output_path=dem_path),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_flowlines",
+        lambda *args, **kwargs: calls.append(("hydro", kwargs))
+        or SimpleNamespace(output_path=tmp_path / "flowlines.gpkg"),
+    )
+
+    materialize_source_inputs(
+        tmp_path,
+        "SITE_A",
+        source_dir=downloads,
+        dem_manifest=manifest,
+    )
+
+    assert calls[1][1]["source_dir"] == tmp_path / "hydro"
 
 
 def test_materialize_cn_lookup_copies_table_to_legacy_root(tmp_path):
