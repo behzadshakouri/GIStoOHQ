@@ -287,6 +287,35 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     return updated
 
 
+def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]) -> LauncherState:
+    """Merge launcher form values over config-derived defaults for command execution."""
+
+    config_state = state_from_config(form_state.config_path, config)
+
+    def preferred_path(form_value: Path | None, config_value: Path | None) -> Path | None:
+        return form_value or config_value
+
+    def preferred_text(form_value: str | None, config_value: str | None) -> str | None:
+        if form_value and form_value != ".":
+            return form_value
+        return config_value or form_value
+
+    return LauncherState(
+        config_path=form_state.config_path,
+        manifest_path=preferred_path(form_state.manifest_path, config_state.manifest_path),
+        raw_dem_dir=preferred_path(form_state.raw_dem_dir, config_state.raw_dem_dir),
+        root=preferred_path(form_state.root, config_state.root),
+        site=preferred_text(form_state.site, config_state.site),
+        source_dir=preferred_path(form_state.source_dir, config_state.source_dir),
+        target_crs=preferred_text(form_state.target_crs, config_state.target_crs),
+        lon=form_state.lon if form_state.lon is not None else config_state.lon,
+        lat=form_state.lat if form_state.lat is not None else config_state.lat,
+        method=preferred_text(form_state.method, config_state.method),
+        flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
+        tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
+    )
+
+
 def geojson_preview_summary(path: str | Path) -> str:
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     features = data.get("features") if isinstance(data, dict) else None
@@ -579,8 +608,12 @@ class LauncherApp:
 
     def run_step(self, step: WorkflowStep) -> None:
         try:
-            command = command_for_step(step, self.state())
-        except LauncherError as exc:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            command = command_for_step(step, state)
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
             return
         CommandRunner(command, self.messages).start()

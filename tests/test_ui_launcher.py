@@ -13,6 +13,7 @@ from ohqbuilder.ui.launcher import (
     load_project_config,
     save_project_config,
     state_from_config,
+    state_with_config_defaults,
     update_config_from_state,
 )
 
@@ -45,6 +46,35 @@ def test_map_click_to_lonlat_moves_east_and_north():
     assert east_lat == pytest.approx(center_lat, abs=0.001)
     assert north_lat > center_lat
     assert north_lon == pytest.approx(center_lon)
+
+
+def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config = {
+        "site": {"name": "SligoCreekDemo", "target_crs": "EPSG:26918"},
+        "outlet": {"longitude": -76.9765, "latitude": 38.9921},
+        "dem_acquisition": {
+            "method": "upstream_network",
+            "flowline_path": "hydro/NHDFlowline.demo.geojson",
+            "tile_index": "indexes/usgs_3dep_tiles.demo.geojson",
+            "tile_manifest": "intermediate/dem_download_manifest.json",
+        },
+    }
+    form = LauncherState(
+        config_path=config_path,
+        site=".",
+        lon=-76.99778601,
+        lat=38.96888097,
+        method="upstream_network",
+    )
+
+    merged = state_with_config_defaults(form, config)
+
+    assert merged.site == "SligoCreekDemo"
+    assert merged.lon == -76.99778601
+    assert merged.lat == 38.96888097
+    assert merged.flowline_path == tmp_path / "hydro" / "NHDFlowline.demo.geojson"
+    assert merged.tile_index == tmp_path / "indexes" / "usgs_3dep_tiles.demo.geojson"
 
 
 def test_command_for_init_dem_config():
