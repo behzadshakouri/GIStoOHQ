@@ -5,6 +5,7 @@ import pytest
 from ohqbuilder.ui.launcher import (
     LauncherError,
     LauncherState,
+    clamp_zoom,
     command_for_step,
     map_click_to_lonlat,
     geojson_preview_summary,
@@ -13,6 +14,12 @@ from ohqbuilder.ui.launcher import (
     state_from_config,
     update_config_from_state,
 )
+
+
+def test_clamp_zoom_keeps_osm_zoom_range():
+    assert clamp_zoom(-10) == 1
+    assert clamp_zoom(14) == 14
+    assert clamp_zoom(25) == 19
 
 
 def test_map_click_to_lonlat_returns_center_for_center_click():

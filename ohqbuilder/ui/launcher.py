@@ -16,10 +16,16 @@ import yaml
 
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 MAP_TILE_SIZE = 256
+MIN_MAP_ZOOM = 1
+MAX_MAP_ZOOM = 19
 
 
 def _clamp_lat(lat: float) -> float:
     return max(-85.05112878, min(85.05112878, lat))
+
+
+def clamp_zoom(zoom: int) -> int:
+    return max(MIN_MAP_ZOOM, min(MAX_MAP_ZOOM, zoom))
 
 
 def lonlat_to_tile_fraction(lon: float, lat: float, zoom: int) -> tuple[float, float]:
@@ -302,7 +308,7 @@ class MapPicker:
     def __init__(self, app: "LauncherApp", *, zoom: int = 14, width: int = 768, height: int = 512) -> None:
         self.app = app
         self.tk = app.tk
-        self.zoom = zoom
+        self.zoom = clamp_zoom(zoom)
         self.width = width
         self.height = height
         self.center_lon = float(app.lon_var.get() or -76.9765)
@@ -312,15 +318,26 @@ class MapPicker:
         self.window.title("Pick Outlet on OpenStreetMap")
         self.canvas = self.tk.Canvas(self.window, width=width, height=height)
         self.canvas.pack(fill="both", expand=True)
+        controls = self.tk.Frame(self.window)
+        controls.pack(fill="x")
+        self.tk.Button(controls, text="Zoom +", command=lambda: self._zoom(1)).pack(side="left")
+        self.tk.Button(controls, text="Zoom -", command=lambda: self._zoom(-1)).pack(side="left")
+        self.tk.Button(controls, text="Reload at lon/lat fields", command=self._reload_from_fields).pack(side="left")
         self.status = self.tk.Label(
             self.window,
-            text="Click the map to set outlet lon/lat. OSM tiles require network access.",
+            text="Left-click to set outlet; right-click to recenter. OSM tiles require network access.",
         )
         self.status.pack(fill="x")
         self.canvas.bind("<Button-1>", self._click)
+        self.canvas.bind("<Button-3>", self._recenter)
         self._draw_tiles()
 
     def _draw_tiles(self) -> None:
+        self.canvas.delete("all")
+        self.images = []
+        self.status.config(
+            text=f"Left-click to set outlet; right-click to recenter. Center={self.center_lon:.6f}, {self.center_lat:.6f}; zoom={self.zoom}."
+        )
         center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
         center_tile_x = math.floor(center_x)
         center_tile_y = math.floor(center_y)
@@ -351,12 +368,16 @@ class MapPicker:
         if y < 0 or y >= max_tile:
             raise LauncherError("Tile row is outside the Web Mercator range.")
         url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
-        with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "GIStoOHQ DEM workflow launcher"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
             payload = response.read()
         return self.tk.PhotoImage(data=payload)
 
-    def _click(self, event) -> None:
-        lon, lat = map_click_to_lonlat(
+    def _event_lonlat(self, event) -> tuple[float, float]:
+        return map_click_to_lonlat(
             self.center_lon,
             self.center_lat,
             self.zoom,
@@ -365,10 +386,26 @@ class MapPicker:
             width=self.width,
             height=self.height,
         )
+
+    def _click(self, event) -> None:
+        lon, lat = self._event_lonlat(event)
         self.app.lon_var.set(f"{lon:.8f}")
         self.app.lat_var.set(f"{lat:.8f}")
         self.app.messages.put(f"Picked outlet from OSM map: lon={lon:.8f}, lat={lat:.8f}\n")
         self.window.destroy()
+
+    def _recenter(self, event) -> None:
+        self.center_lon, self.center_lat = self._event_lonlat(event)
+        self._draw_tiles()
+
+    def _zoom(self, delta: int) -> None:
+        self.zoom = clamp_zoom(self.zoom + delta)
+        self._draw_tiles()
+
+    def _reload_from_fields(self) -> None:
+        self.center_lon = float(self.app.lon_var.get() or self.center_lon)
+        self.center_lat = float(self.app.lat_var.get() or self.center_lat)
+        self._draw_tiles()
 
 
 class LauncherApp:
