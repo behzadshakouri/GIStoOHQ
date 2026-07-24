@@ -125,6 +125,34 @@ dem_acquisition:
     assert summary["expanded_acquisition_area"] == "expanded.geojson"
 
 
+def test_validate_dem_from_config_can_fallback_to_acquisition_area(tmp_path):
+    from ohqbuilder.dem_workflow import validate_dem_from_config
+
+    acquisition = tmp_path / "area.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+dem_acquisition:
+  acquisition_area: area.geojson
+  watershed_boundary: missing_watershed.geojson
+  validation_summary: validation.json
+  allow_acquisition_area_watershed_fallback: true
+  auto_expand: false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = validate_dem_from_config(config)
+
+    assert not result.is_valid
+    summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
+    assert summary["used_acquisition_area_watershed_fallback"] is True
+
+
 def test_validate_dem_from_config_reports_missing_watershed(tmp_path):
     from ohqbuilder.dem_workflow import DemWorkflowError, validate_dem_from_config
 

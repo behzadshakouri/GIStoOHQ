@@ -222,17 +222,22 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
 
     watershed_path = _resolve(watershed_value, base)
     acquisition_path = _resolve(acquisition_value, base)
-    if not watershed_path.exists():
-        raise DemWorkflowError(
-            f"Watershed boundary does not exist yet: {watershed_path}. "
-            "Run watershed delineation before validate-dem, or update "
-            "dem_acquisition.watershed_boundary."
-        )
+    used_acquisition_fallback = False
     if not acquisition_path.exists():
         raise DemWorkflowError(
             f"DEM acquisition area does not exist yet: {acquisition_path}. "
             "Run prepare-dem before validate-dem."
         )
+    if not watershed_path.exists():
+        if dem_acquisition.get("allow_acquisition_area_watershed_fallback", False):
+            watershed_path = acquisition_path
+            used_acquisition_fallback = True
+        else:
+            raise DemWorkflowError(
+                f"Watershed boundary does not exist yet: {watershed_path}. "
+                "Run watershed delineation before validate-dem, or update "
+                "dem_acquisition.watershed_boundary."
+            )
 
     validation = validate_watershed_within_acquisition(
         watershed_path,
@@ -267,6 +272,7 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
         "expanded_acquisition_area": _relativize(expanded_area.output_path, base)
         if expanded_area
         else None,
+        "used_acquisition_area_watershed_fallback": used_acquisition_fallback,
     }
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return DemWorkflowValidationResult(
@@ -328,6 +334,7 @@ def write_dem_config_template(
         "boundary_safety_distance_m": 500,
         "expansion_distance_km": 5,
         "final_watershed_buffer_m": 1000,
+        "allow_acquisition_area_watershed_fallback": True,
     }
     if method == "upstream_network":
         if flowline_path is None:
