@@ -478,6 +478,26 @@ def test_download_dem_manifest_copies_project_relative_local_url(tmp_path):
     assert data["items"][0]["path"] == str(copied.resolve())
 
 
+def test_download_dem_manifest_materializes_data_url(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "inline", "url": "data:application/octet-stream;base64,SUlJKg==", "path": "dem/raw/inline.tif"},
+        ]
+    }), encoding="utf-8")
+
+    result = download_dem_manifest(manifest, tmp_path / "raw")
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    target = tmp_path / "raw" / "inline.tif"
+    assert result.downloaded == 1
+    assert result.tile_count == 1
+    assert target.read_bytes() == b"III*"
+    assert data["tiles"] == [str(target.resolve())]
+
+
 def test_cli_download_dem_manifest(monkeypatch, tmp_path, capsys):
     from ohqbuilder.cli import main
 

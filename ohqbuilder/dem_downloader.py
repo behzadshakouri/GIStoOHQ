@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import json
 import math
@@ -726,6 +727,20 @@ def download_dem_manifest(
                 return candidate.resolve()
         return candidates[0].resolve()
 
+    def write_data_url(url: str, target: Path) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "data":
+            return False
+        header, separator, payload = url.partition(",")
+        if not separator:
+            raise ValueError("DEM manifest data URL must contain a comma separator.")
+        if ";base64" in header.lower():
+            content = base64.b64decode(payload, validate=True)
+        else:
+            content = urllib.parse.unquote_to_bytes(payload)
+        target.write_bytes(content)
+        return True
+
     fetch = downloader or default_downloader
     downloaded = 0
     skipped = 0
@@ -747,13 +762,16 @@ def download_dem_manifest(
         if target.exists():
             skipped += 1
         else:
-            source = local_source(url)
-            if source is not None:
-                if not source.exists():
-                    raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
-                shutil.copy2(source, target)
+            if write_data_url(url, target):
+                pass
             else:
-                fetch(url, target)
+                source = local_source(url)
+                if source is not None:
+                    if not source.exists():
+                        raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
+                    shutil.copy2(source, target)
+                else:
+                    fetch(url, target)
             downloaded += 1
         item["path"] = str(target)
         tiles.append(str(target))
