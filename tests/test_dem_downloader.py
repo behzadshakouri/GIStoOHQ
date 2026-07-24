@@ -498,6 +498,26 @@ def test_download_dem_manifest_materializes_data_url(tmp_path):
     assert data["tiles"] == [str(target.resolve())]
 
 
+def test_download_dem_manifest_replaces_stale_data_url_output(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "inline", "url": "data:application/octet-stream;base64,SUlJKg==", "path": "dem/raw/inline.tif"},
+        ]
+    }), encoding="utf-8")
+    target = tmp_path / "raw" / "inline.tif"
+    target.parent.mkdir(parents=True)
+    target.write_text("stale invalid raster", encoding="utf-8")
+
+    result = download_dem_manifest(manifest, tmp_path / "raw")
+
+    assert result.downloaded == 1
+    assert result.skipped == 0
+    assert target.read_bytes() == b"III*"
+
+
 def test_cli_download_dem_manifest(monkeypatch, tmp_path, capsys):
     from ohqbuilder.cli import main
 

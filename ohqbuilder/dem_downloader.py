@@ -727,19 +727,16 @@ def download_dem_manifest(
                 return candidate.resolve()
         return candidates[0].resolve()
 
-    def write_data_url(url: str, target: Path) -> bool:
+    def data_url_content(url: str) -> bytes | None:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "data":
-            return False
+            return None
         header, separator, payload = url.partition(",")
         if not separator:
             raise ValueError("DEM manifest data URL must contain a comma separator.")
         if ";base64" in header.lower():
-            content = base64.b64decode(payload, validate=True)
-        else:
-            content = urllib.parse.unquote_to_bytes(payload)
-        target.write_bytes(content)
-        return True
+            return base64.b64decode(payload, validate=True)
+        return urllib.parse.unquote_to_bytes(payload)
 
     fetch = downloader or default_downloader
     downloaded = 0
@@ -759,19 +756,23 @@ def download_dem_manifest(
         else:
             target = destination / _filename_from_url(url, f"dem_tile_{index + 1}.tif")
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
+        inline_content = data_url_content(url)
+        if inline_content is not None:
+            if target.exists() and target.read_bytes() == inline_content:
+                skipped += 1
+            else:
+                target.write_bytes(inline_content)
+                downloaded += 1
+        elif target.exists():
             skipped += 1
         else:
-            if write_data_url(url, target):
-                pass
+            source = local_source(url)
+            if source is not None:
+                if not source.exists():
+                    raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
+                shutil.copy2(source, target)
             else:
-                source = local_source(url)
-                if source is not None:
-                    if not source.exists():
-                        raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
-                    shutil.copy2(source, target)
-                else:
-                    fetch(url, target)
+                fetch(url, target)
             downloaded += 1
         item["path"] = str(target)
         tiles.append(str(target))
