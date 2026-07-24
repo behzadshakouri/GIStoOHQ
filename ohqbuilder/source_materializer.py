@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import shutil
 
-from .dem_materializer import DemMaterializeResult, materialize_dem, bounds_from_lonlat_buffer, parse_bounds
+from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
 
 
@@ -28,7 +28,6 @@ def find_product_dir(source_dir: str | Path, product: str) -> Path:
         names = ", ".join(str(path) for path in matches)
         raise ValueError(f"Multiple downloaded {product} directories found: {names}")
     return matches[0]
-
 
 
 def bundled_cn_lookup_path() -> Path:
@@ -89,6 +88,7 @@ def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | Non
     if aux.exists():
         shutil.copyfile(aux, target.with_name(target.name + ".aux.xml"))
     return target
+
 
 def materialize_source_inputs(
     root: str | Path,

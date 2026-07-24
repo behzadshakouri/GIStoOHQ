@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-
-
 def _hydro_archive_date(path: Path) -> str:
     matches = re.findall(r"(?:19|20)\d{6}", path.name)
     if matches:
@@ -57,6 +55,7 @@ def _preferred_hydro_archives(paths: list[Path]) -> list[Path]:
         if path_score > current_score:
             latest[key] = path
     return sorted(latest.values(), key=lambda path: (path.stat().st_size if path.exists() else 10**18, path.name))
+
 
 def _flowline_vector_candidates(sources: Path, workspace: Path) -> list[Path]:
     vector_patterns = ("*.shp", "*.geojson", "*.gpkg")

@@ -73,7 +73,6 @@ def test_materialize_source_inputs_copies_nlcd_to_legacy_name(monkeypatch, tmp_p
 
 def test_resolve_hydro_source_dir_falls_back_to_bundled_hydro(tmp_path):
     downloads = tmp_path / "source_downloads"
-    downloads.mkdir()
     bundled = tmp_path / "hydro"
     bundled.mkdir()
 
