@@ -47,8 +47,9 @@ scripts/run_dem_ui.sh
 
 The Tk launcher includes an OpenStreetMap tile picker for choosing the outlet
 coordinate interactively. It uses public OSM raster tiles when network access is
-available, supports zooming and right-click recentering, and writes the clicked
-coordinate back to the outlet longitude/latitude fields. The QGIS plugin uses the
+available, caches tiles after first load, supports zooming and right-click
+recentering, and writes the clicked coordinate back to the outlet
+longitude/latitude fields. The QGIS plugin uses the
 active QGIS map canvas instead, so users can pick points against any basemap or
 GIS layers they have loaded there.
 

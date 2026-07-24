@@ -8,12 +8,17 @@ from ohqbuilder.ui.launcher import (
     clamp_zoom,
     command_for_step,
     map_click_to_lonlat,
+    osm_tile_cache_path,
     geojson_preview_summary,
     load_project_config,
     save_project_config,
     state_from_config,
     update_config_from_state,
 )
+
+
+def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
+    assert osm_tile_cache_path(14, 4688, 6260, cache_dir=tmp_path) == tmp_path / "14" / "4688" / "6260.png"
 
 
 def test_clamp_zoom_keeps_osm_zoom_range():

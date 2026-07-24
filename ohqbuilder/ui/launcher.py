@@ -6,6 +6,7 @@ import json
 import math
 import queue
 import subprocess
+import tempfile
 import threading
 import urllib.request
 from dataclasses import dataclass
@@ -16,8 +17,15 @@ import yaml
 
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 MAP_TILE_SIZE = 256
+OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
 MIN_MAP_ZOOM = 1
 MAX_MAP_ZOOM = 19
+
+
+def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
+    """Return the cache path for a downloaded OSM tile."""
+
+    return cache_dir / str(zoom) / str(x) / f"{y}.png"
 
 
 def _clamp_lat(lat: float) -> float:
@@ -325,7 +333,7 @@ class MapPicker:
         self.tk.Button(controls, text="Reload at lon/lat fields", command=self._reload_from_fields).pack(side="left")
         self.status = self.tk.Label(
             self.window,
-            text="Left-click to set outlet; right-click to recenter. OSM tiles require network access.",
+            text="Left-click to set outlet; right-click to recenter. OSM tiles are cached after first load.",
         )
         self.status.pack(fill="x")
         self.canvas.bind("<Button-1>", self._click)
@@ -336,7 +344,7 @@ class MapPicker:
         self.canvas.delete("all")
         self.images = []
         self.status.config(
-            text=f"Left-click to set outlet; right-click to recenter. Center={self.center_lon:.6f}, {self.center_lat:.6f}; zoom={self.zoom}."
+            text=f"Left-click to set outlet; right-click to recenter. Center={self.center_lon:.6f}, {self.center_lat:.6f}; zoom={self.zoom}. © OpenStreetMap contributors"
         )
         center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
         center_tile_x = math.floor(center_x)
@@ -367,13 +375,19 @@ class MapPicker:
         x = x % max_tile
         if y < 0 or y >= max_tile:
             raise LauncherError("Tile row is outside the Web Mercator range.")
-        url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
-        request = urllib.request.Request(
-            url,
-            headers={"User-Agent": "GIStoOHQ DEM workflow launcher"},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
-            payload = response.read()
+        cache_path = osm_tile_cache_path(self.zoom, x, y)
+        if cache_path.exists():
+            payload = cache_path.read_bytes()
+        else:
+            url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
+            request = urllib.request.Request(
+                url,
+                headers={"User-Agent": "GIStoOHQ DEM workflow launcher"},
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+                payload = response.read()
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(payload)
         return self.tk.PhotoImage(data=payload)
 
     def _event_lonlat(self, event) -> tuple[float, float]:
