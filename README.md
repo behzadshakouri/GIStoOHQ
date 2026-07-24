@@ -51,7 +51,9 @@ available, caches tiles after first load, supports zooming and right-click
 recentering, and writes the clicked coordinate back to the outlet
 longitude/latitude fields. The QGIS plugin uses the
 active QGIS map canvas instead, so users can pick points against any basemap or
-GIS layers they have loaded there.
+GIS layers they have loaded there. If the demo YAML is left with merge-conflict
+markers after a branch update, use **reset Sligo demo** in the Tk launcher to
+rewrite the bundled demo config while preserving the current outlet coordinate.
 
 For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
 

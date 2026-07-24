@@ -21,6 +21,13 @@ OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
 MIN_MAP_ZOOM = 1
 MAX_MAP_ZOOM = 19
 
+SLIGO_DEMO_SITE = "SligoCreekDemo"
+SLIGO_DEMO_LON = -76.9765
+SLIGO_DEMO_LAT = 38.9921
+SLIGO_DEMO_CRS = "EPSG:26918"
+SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
+SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
 
 def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
     """Return the cache path for a downloaded OSM tile."""
@@ -194,12 +201,23 @@ def _require_tkinter():
     return importlib.import_module("tkinter")
 
 
+def _config_text(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    if any(marker in text for marker in ("<<<<<<<", "=======", ">>>>>>>")):
+        raise LauncherError(
+            f"Config file contains unresolved merge-conflict markers: {path}. "
+            "Resolve the conflict markers before loading or running workflow commands."
+        )
+    return text
+
+
 def load_project_config(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).expanduser()
+    text = _config_text(path)
     if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(text)
     else:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(text)
     if not isinstance(data, dict):
         raise LauncherError("Project config must be a mapping.")
     return data
@@ -274,6 +292,50 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     updated["root"] = str(state.root or ".")
     updated["download_dir"] = str(state.source_dir or "source_downloads")
     return updated
+
+
+def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]) -> LauncherState:
+    """Merge launcher form values over config-derived defaults for command execution."""
+
+    config_state = state_from_config(form_state.config_path, config)
+
+    def preferred_path(form_value: Path | None, config_value: Path | None) -> Path | None:
+        return form_value or config_value
+
+    def preferred_text(form_value: str | None, config_value: str | None) -> str | None:
+        if form_value and form_value != ".":
+            return form_value
+        return config_value or form_value
+
+    return LauncherState(
+        config_path=form_state.config_path,
+        manifest_path=preferred_path(form_state.manifest_path, config_state.manifest_path),
+        raw_dem_dir=preferred_path(form_state.raw_dem_dir, config_state.raw_dem_dir),
+        root=preferred_path(form_state.root, config_state.root),
+        site=preferred_text(form_state.site, config_state.site),
+        source_dir=preferred_path(form_state.source_dir, config_state.source_dir),
+        target_crs=preferred_text(form_state.target_crs, config_state.target_crs),
+        lon=form_state.lon if form_state.lon is not None else config_state.lon,
+        lat=form_state.lat if form_state.lat is not None else config_state.lat,
+        method=preferred_text(form_state.method, config_state.method),
+        flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
+        tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
+    )
+
+
+def sligo_demo_reset_args(config_path: str | Path, lon: float | None, lat: float | None) -> dict[str, Any]:
+    """Return arguments for rewriting the bundled Sligo Creek demo config."""
+
+    return {
+        "output_path": Path(config_path).expanduser(),
+        "site": SLIGO_DEMO_SITE,
+        "lon": lon if lon is not None else SLIGO_DEMO_LON,
+        "lat": lat if lat is not None else SLIGO_DEMO_LAT,
+        "flowline_path": SLIGO_DEMO_FLOWLINES,
+        "tile_index": SLIGO_DEMO_TILE_INDEX,
+        "target_crs": SLIGO_DEMO_CRS,
+        "method": "upstream_network",
+    }
 
 
 def geojson_preview_summary(path: str | Path) -> str:
@@ -376,9 +438,7 @@ class MapPicker:
         if y < 0 or y >= max_tile:
             raise LauncherError("Tile row is outside the Web Mercator range.")
         cache_path = osm_tile_cache_path(self.zoom, x, y)
-        if cache_path.exists():
-            payload = cache_path.read_bytes()
-        else:
+        if not cache_path.exists():
             url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
             request = urllib.request.Request(
                 url,
@@ -388,7 +448,7 @@ class MapPicker:
                 payload = response.read()
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(payload)
-        return self.tk.PhotoImage(data=payload)
+        return self.tk.PhotoImage(file=str(cache_path))
 
     def _event_lonlat(self, event) -> tuple[float, float]:
         return map_click_to_lonlat(
@@ -444,6 +504,8 @@ class LauncherApp:
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
         self._build()
+        if Path(self.config_var.get()).exists():
+            self.load_config()
         self._poll_messages()
 
     def _build(self) -> None:
@@ -473,6 +535,7 @@ class LauncherApp:
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
         tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
         tk.Button(buttons, text="pick outlet map", command=self.pick_outlet_map).pack(side="left")
+        tk.Button(buttons, text="reset Sligo demo", command=self.reset_sligo_demo).pack(side="left")
         for step in (
             "init-dem-config",
             "prepare-dem",
@@ -492,6 +555,16 @@ class LauncherApp:
             self.map_picker = MapPicker(self)
         except Exception as exc:  # pragma: no cover - Tk/network UI boundary
             self.messages.put(f"Map picker failed: {exc}\n")
+
+    def reset_sligo_demo(self) -> None:
+        try:
+            from ohqbuilder.dem_workflow import write_dem_config_template
+
+            write_dem_config_template(**sligo_demo_reset_args(self.config_var.get(), self.state().lon, self.state().lat))
+            self.load_config()
+            self.messages.put("Reset Sligo demo config.\n")
+        except Exception as exc:  # pragma: no cover - UI boundary
+            self.messages.put(f"ERROR: {exc}\n")
 
     def state(self) -> LauncherState:
         crs = self.crs_var.get().strip() or None
@@ -566,8 +639,12 @@ class LauncherApp:
 
     def run_step(self, step: WorkflowStep) -> None:
         try:
-            command = command_for_step(step, self.state())
-        except LauncherError as exc:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            command = command_for_step(step, state)
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
             return
         CommandRunner(command, self.messages).start()

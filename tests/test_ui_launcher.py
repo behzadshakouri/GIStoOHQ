@@ -12,7 +12,9 @@ from ohqbuilder.ui.launcher import (
     geojson_preview_summary,
     load_project_config,
     save_project_config,
+    sligo_demo_reset_args,
     state_from_config,
+    state_with_config_defaults,
     update_config_from_state,
 )
 
@@ -45,6 +47,48 @@ def test_map_click_to_lonlat_moves_east_and_north():
     assert east_lat == pytest.approx(center_lat, abs=0.001)
     assert north_lat > center_lat
     assert north_lon == pytest.approx(center_lon)
+
+
+def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
+    config_path = tmp_path / "examples" / "SligoCreek" / "dem_workflow.example.yaml"
+
+    args = sligo_demo_reset_args(config_path, -76.99778601, 38.96888097)
+
+    assert args["output_path"] == config_path
+    assert args["site"] == "SligoCreekDemo"
+    assert args["lon"] == -76.99778601
+    assert args["lat"] == 38.96888097
+    assert str(args["flowline_path"]) == "hydro/NHDFlowline.demo.geojson"
+    assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
+
+
+def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config = {
+        "site": {"name": "SligoCreekDemo", "target_crs": "EPSG:26918"},
+        "outlet": {"longitude": -76.9765, "latitude": 38.9921},
+        "dem_acquisition": {
+            "method": "upstream_network",
+            "flowline_path": "hydro/NHDFlowline.demo.geojson",
+            "tile_index": "indexes/usgs_3dep_tiles.demo.geojson",
+            "tile_manifest": "intermediate/dem_download_manifest.json",
+        },
+    }
+    form = LauncherState(
+        config_path=config_path,
+        site=".",
+        lon=-76.99778601,
+        lat=38.96888097,
+        method="upstream_network",
+    )
+
+    merged = state_with_config_defaults(form, config)
+
+    assert merged.site == "SligoCreekDemo"
+    assert merged.lon == -76.99778601
+    assert merged.lat == 38.96888097
+    assert merged.flowline_path == tmp_path / "hydro" / "NHDFlowline.demo.geojson"
+    assert merged.tile_index == tmp_path / "indexes" / "usgs_3dep_tiles.demo.geojson"
 
 
 def test_command_for_init_dem_config():
@@ -144,6 +188,22 @@ def test_command_for_materialize_inputs_includes_manifest():
 def test_download_dem_manifest_requires_paths():
     with pytest.raises(LauncherError, match="Manifest path"):
         command_for_step("download-dem-manifest", LauncherState(config_path=Path("config.yaml")))
+
+
+def test_load_project_config_rejects_conflict_markers(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "dem_acquisition:\n"
+        "<<<<<<< Updated upstream\n"
+        "  method: upstream_network\n"
+        "=======\n"
+        "  method: polygon\n"
+        ">>>>>>> branch\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LauncherError, match="unresolved merge-conflict markers"):
+        load_project_config(config)
 
 
 def test_ui_config_load_state_update_and_save(tmp_path):
