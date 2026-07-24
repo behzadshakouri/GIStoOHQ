@@ -438,9 +438,7 @@ class MapPicker:
         if y < 0 or y >= max_tile:
             raise LauncherError("Tile row is outside the Web Mercator range.")
         cache_path = osm_tile_cache_path(self.zoom, x, y)
-        if cache_path.exists():
-            payload = cache_path.read_bytes()
-        else:
+        if not cache_path.exists():
             url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
             request = urllib.request.Request(
                 url,
@@ -450,7 +448,7 @@ class MapPicker:
                 payload = response.read()
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(payload)
-        return self.tk.PhotoImage(data=payload)
+        return self.tk.PhotoImage(file=str(cache_path))
 
     def _event_lonlat(self, event) -> tuple[float, float]:
         return map_click_to_lonlat(
