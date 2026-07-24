@@ -45,6 +45,11 @@ back to `python -m ohqbuilder.cli ui`, so it works before packaging:
 scripts/run_dem_ui.sh
 ```
 
+The Tk launcher includes an OpenStreetMap tile picker for choosing the outlet
+coordinate interactively. It uses public OSM raster tiles when network access is
+available; the QGIS plugin uses the active QGIS map canvas instead, so users can
+pick points against any basemap or GIS layers they have loaded there.
+
 For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
 
 ```bash

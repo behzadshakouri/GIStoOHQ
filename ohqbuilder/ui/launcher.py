@@ -3,14 +3,62 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import math
 import queue
 import subprocess
 import threading
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+
+OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAP_TILE_SIZE = 256
+
+
+def _clamp_lat(lat: float) -> float:
+    return max(-85.05112878, min(85.05112878, lat))
+
+
+def lonlat_to_tile_fraction(lon: float, lat: float, zoom: int) -> tuple[float, float]:
+    """Return fractional Web Mercator tile coordinates for lon/lat."""
+
+    lat = _clamp_lat(lat)
+    n = 2 ** zoom
+    x = (lon + 180.0) / 360.0 * n
+    lat_rad = math.radians(lat)
+    y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
+    return x, y
+
+
+def tile_fraction_to_lonlat(x: float, y: float, zoom: int) -> tuple[float, float]:
+    """Return lon/lat for fractional Web Mercator tile coordinates."""
+
+    n = 2 ** zoom
+    lon = x / n * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y / n))))
+    return lon, lat
+
+
+def map_click_to_lonlat(
+    center_lon: float,
+    center_lat: float,
+    zoom: int,
+    canvas_x: int,
+    canvas_y: int,
+    *,
+    width: int = 768,
+    height: int = 512,
+) -> tuple[float, float]:
+    """Convert a click on the Tk OSM preview canvas to lon/lat."""
+
+    center_x, center_y = lonlat_to_tile_fraction(center_lon, center_lat, zoom)
+    dx_tiles = (canvas_x - width / 2.0) / MAP_TILE_SIZE
+    dy_tiles = (canvas_y - height / 2.0) / MAP_TILE_SIZE
+    return tile_fraction_to_lonlat(center_x + dx_tiles, center_y + dy_tiles, zoom)
+
 
 WorkflowStep = Literal[
     "init-dem-config",
@@ -248,6 +296,81 @@ class CommandRunner(threading.Thread):
         self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
 
 
+class MapPicker:
+    """Small OpenStreetMap tile picker for choosing an outlet in the Tk launcher."""
+
+    def __init__(self, app: "LauncherApp", *, zoom: int = 14, width: int = 768, height: int = 512) -> None:
+        self.app = app
+        self.tk = app.tk
+        self.zoom = zoom
+        self.width = width
+        self.height = height
+        self.center_lon = float(app.lon_var.get() or -76.9765)
+        self.center_lat = float(app.lat_var.get() or 38.9921)
+        self.images = []
+        self.window = self.tk.Toplevel(app.root)
+        self.window.title("Pick Outlet on OpenStreetMap")
+        self.canvas = self.tk.Canvas(self.window, width=width, height=height)
+        self.canvas.pack(fill="both", expand=True)
+        self.status = self.tk.Label(
+            self.window,
+            text="Click the map to set outlet lon/lat. OSM tiles require network access.",
+        )
+        self.status.pack(fill="x")
+        self.canvas.bind("<Button-1>", self._click)
+        self._draw_tiles()
+
+    def _draw_tiles(self) -> None:
+        center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
+        center_tile_x = math.floor(center_x)
+        center_tile_y = math.floor(center_y)
+        origin_x = self.width / 2.0 - (center_x - center_tile_x) * MAP_TILE_SIZE
+        origin_y = self.height / 2.0 - (center_y - center_tile_y) * MAP_TILE_SIZE
+        radius_x = math.ceil(self.width / MAP_TILE_SIZE / 2) + 1
+        radius_y = math.ceil(self.height / MAP_TILE_SIZE / 2) + 1
+        for dx in range(-radius_x, radius_x + 1):
+            for dy in range(-radius_y, radius_y + 1):
+                tile_x = center_tile_x + dx
+                tile_y = center_tile_y + dy
+                try:
+                    image = self._tile_image(tile_x, tile_y)
+                except Exception as exc:  # pragma: no cover - network/UI boundary
+                    self.status.config(text=f"Could not load OSM tile: {exc}")
+                    continue
+                self.images.append(image)
+                self.canvas.create_image(
+                    origin_x + dx * MAP_TILE_SIZE,
+                    origin_y + dy * MAP_TILE_SIZE,
+                    anchor="nw",
+                    image=image,
+                )
+
+    def _tile_image(self, x: int, y: int):
+        max_tile = 2 ** self.zoom
+        x = x % max_tile
+        if y < 0 or y >= max_tile:
+            raise LauncherError("Tile row is outside the Web Mercator range.")
+        url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
+        with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310
+            payload = response.read()
+        return self.tk.PhotoImage(data=payload)
+
+    def _click(self, event) -> None:
+        lon, lat = map_click_to_lonlat(
+            self.center_lon,
+            self.center_lat,
+            self.zoom,
+            event.x,
+            event.y,
+            width=self.width,
+            height=self.height,
+        )
+        self.app.lon_var.set(f"{lon:.8f}")
+        self.app.lat_var.set(f"{lat:.8f}")
+        self.app.messages.put(f"Picked outlet from OSM map: lon={lon:.8f}, lat={lat:.8f}\n")
+        self.window.destroy()
+
+
 class LauncherApp:
     """Small Tk-based launcher that writes no workflow logic of its own."""
 
@@ -298,6 +421,7 @@ class LauncherApp:
         tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
         tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
+        tk.Button(buttons, text="pick outlet map", command=self.pick_outlet_map).pack(side="left")
         for step in (
             "init-dem-config",
             "prepare-dem",
@@ -311,6 +435,12 @@ class LauncherApp:
         self.log.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 1, weight=1)
+
+    def pick_outlet_map(self) -> None:
+        try:
+            self.map_picker = MapPicker(self)
+        except Exception as exc:  # pragma: no cover - Tk/network UI boundary
+            self.messages.put(f"Map picker failed: {exc}\n")
 
     def state(self) -> LauncherState:
         crs = self.crs_var.get().strip() or None

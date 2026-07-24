@@ -6,12 +6,33 @@ from ohqbuilder.ui.launcher import (
     LauncherError,
     LauncherState,
     command_for_step,
+    map_click_to_lonlat,
     geojson_preview_summary,
     load_project_config,
     save_project_config,
     state_from_config,
     update_config_from_state,
 )
+
+
+def test_map_click_to_lonlat_returns_center_for_center_click():
+    lon, lat = map_click_to_lonlat(-76.9765, 38.9921, 14, 384, 256)
+
+    assert lon == pytest.approx(-76.9765)
+    assert lat == pytest.approx(38.9921)
+
+
+def test_map_click_to_lonlat_moves_east_and_north():
+    center_lon = -76.9765
+    center_lat = 38.9921
+
+    east_lon, east_lat = map_click_to_lonlat(center_lon, center_lat, 14, 484, 256)
+    north_lon, north_lat = map_click_to_lonlat(center_lon, center_lat, 14, 384, 156)
+
+    assert east_lon > center_lon
+    assert east_lat == pytest.approx(center_lat, abs=0.001)
+    assert north_lat > center_lat
+    assert north_lon == pytest.approx(center_lon)
 
 
 def test_command_for_init_dem_config():
