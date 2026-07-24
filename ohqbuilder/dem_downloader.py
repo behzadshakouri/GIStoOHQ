@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import json
 import math
@@ -706,6 +707,37 @@ def download_dem_manifest(
     def default_downloader(url: str, target: Path) -> None:
         urllib.request.urlretrieve(url, target)  # noqa: S310
 
+    def local_source(url: str) -> Path | None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme == "file":
+            source = Path(urllib.request.url2pathname(parsed.path)).expanduser()
+            return source.resolve() if source.exists() else source
+        if parsed.scheme or parsed.netloc:
+            return None
+        raw_source = Path(urllib.parse.unquote(url)).expanduser()
+        candidates = [raw_source]
+        if not raw_source.is_absolute():
+            candidates = [
+                Path.cwd() / raw_source,
+                manifest.parent / raw_source,
+                manifest.parent.parent / raw_source,
+            ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        return candidates[0].resolve()
+
+    def data_url_content(url: str) -> bytes | None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "data":
+            return None
+        header, separator, payload = url.partition(",")
+        if not separator:
+            raise ValueError("DEM manifest data URL must contain a comma separator.")
+        if ";base64" in header.lower():
+            return base64.b64decode(payload, validate=True)
+        return urllib.parse.unquote_to_bytes(payload)
+
     fetch = downloader or default_downloader
     downloaded = 0
     skipped = 0
@@ -724,10 +756,23 @@ def download_dem_manifest(
         else:
             target = destination / _filename_from_url(url, f"dem_tile_{index + 1}.tif")
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
+        inline_content = data_url_content(url)
+        if inline_content is not None:
+            if target.exists() and target.read_bytes() == inline_content:
+                skipped += 1
+            else:
+                target.write_bytes(inline_content)
+                downloaded += 1
+        elif target.exists():
             skipped += 1
         else:
-            fetch(url, target)
+            source = local_source(url)
+            if source is not None:
+                if not source.exists():
+                    raise FileNotFoundError(f"DEM manifest local tile does not exist: {source}")
+                shutil.copy2(source, target)
+            else:
+                fetch(url, target)
             downloaded += 1
         item["path"] = str(target)
         tiles.append(str(target))

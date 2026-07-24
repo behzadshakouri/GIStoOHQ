@@ -19,6 +19,21 @@ def _feature(name, bounds, **props):
     }
 
 
+def test_prepare_dem_reports_invalid_yaml_without_traceback(tmp_path):
+    from ohqbuilder.dem_workflow import DemWorkflowError, prepare_dem_from_config
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "dem_acquisition:\n"
+        "<<<<<<< Updated upstream\n"
+        "  method: upstream_network\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DemWorkflowError, match="Could not parse DEM workflow config"):
+        prepare_dem_from_config(config)
+
+
 def test_prepare_dem_from_config_writes_area_manifest_and_summary(tmp_path):
     tile_index = tmp_path / "indexes" / "tiles.geojson"
     tile_index.parent.mkdir()
@@ -123,6 +138,34 @@ dem_acquisition:
     assert result.expanded_area is not None
     summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
     assert summary["expanded_acquisition_area"] == "expanded.geojson"
+
+
+def test_validate_dem_from_config_can_fallback_to_acquisition_area(tmp_path):
+    from ohqbuilder.dem_workflow import validate_dem_from_config
+
+    acquisition = tmp_path / "area.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+dem_acquisition:
+  acquisition_area: area.geojson
+  watershed_boundary: missing_watershed.geojson
+  validation_summary: validation.json
+  allow_acquisition_area_watershed_fallback: true
+  auto_expand: false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = validate_dem_from_config(config)
+
+    assert not result.is_valid
+    summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
+    assert summary["used_acquisition_area_watershed_fallback"] is True
 
 
 def test_validate_dem_from_config_reports_missing_watershed(tmp_path):
