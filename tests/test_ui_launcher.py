@@ -8,6 +8,7 @@ from ohqbuilder.ui.launcher import (
     clamp_zoom,
     command_for_step,
     map_click_to_lonlat,
+    nearest_point_on_lines,
     osm_tile_cache_path,
     geojson_preview_summary,
     load_project_config,
@@ -20,7 +21,10 @@ from ohqbuilder.ui.launcher import (
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
-    assert osm_tile_cache_path(14, 4688, 6260, cache_dir=tmp_path) == tmp_path / "14" / "4688" / "6260.png"
+    assert (
+        osm_tile_cache_path(14, 4688, 6260, cache_dir=tmp_path)
+        == tmp_path / "14" / "4688" / "6260.png"
+    )
 
 
 def test_clamp_zoom_keeps_osm_zoom_range():
@@ -47,6 +51,15 @@ def test_map_click_to_lonlat_moves_east_and_north():
     assert east_lat == pytest.approx(center_lat, abs=0.001)
     assert north_lat > center_lat
     assert north_lon == pytest.approx(center_lon)
+
+
+def test_nearest_point_on_lines_snaps_map_pick_to_demo_flowline():
+    lines = [[[-76.9765, 38.9921], [-76.9850, 39.0200]]]
+
+    lon, lat = nearest_point_on_lines(-76.9712, 38.9749, lines)
+
+    assert lon == pytest.approx(-76.9765)
+    assert lat == pytest.approx(38.9921)
 
 
 def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
