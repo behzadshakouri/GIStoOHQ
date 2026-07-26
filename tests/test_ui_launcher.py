@@ -14,6 +14,7 @@ from ohqbuilder.ui.launcher import (
     load_project_config,
     save_project_config,
     sligo_demo_reset_args,
+    snapped_outlet,
     state_from_config,
     state_with_config_defaults,
     update_config_from_state,
@@ -156,6 +157,29 @@ def test_command_for_init_dem_config_keeps_config_relative_paths(tmp_path):
 
     assert "hydro/flowlines.geojson" in command.argv
     assert "indexes/tiles.geojson" in command.argv
+
+
+def test_command_for_init_dem_config_snaps_outlet_to_flowline(tmp_path):
+    flowlines = tmp_path / "flowlines.geojson"
+    flowlines.write_text(
+        '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},'
+        '"geometry":{"type":"LineString","coordinates":[[-76.9765,38.9921],[-76.985,39.02]]}}]}',
+        encoding="utf-8",
+    )
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        site="SligoCreek",
+        lon=-76.98216483,
+        lat=38.9882974,
+        flowline_path=flowlines,
+        method="upstream_network",
+    )
+
+    assert snapped_outlet(state) == pytest.approx((-76.9765, 38.9921))
+    command = command_for_step("init-dem-config", state)
+
+    assert command.argv[command.argv.index("--lon") + 1] == "-76.9765"
+    assert command.argv[command.argv.index("--lat") + 1] == "38.9921"
 
 
 def test_command_for_init_dem_config_requires_outlet():

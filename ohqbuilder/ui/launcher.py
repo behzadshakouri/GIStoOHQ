@@ -167,6 +167,24 @@ def _path_for_config_value(path: Path, config_path: Path) -> str:
         return str(path)
 
 
+def snapped_outlet(state: LauncherState) -> tuple[float, float]:
+    """Snap an upstream-network outlet to its configured GeoJSON flowline."""
+
+    assert state.lon is not None and state.lat is not None
+    if state.method != "upstream_network" or state.flowline_path is None:
+        return state.lon, state.lat
+    flowline_path = state.flowline_path.expanduser()
+    if not flowline_path.is_absolute() and not flowline_path.exists():
+        flowline_path = state.config_path.expanduser().parent / flowline_path
+    if flowline_path.suffix.lower() not in {".geojson", ".json"} or not flowline_path.is_file():
+        return state.lon, state.lat
+    try:
+        nearest = nearest_point_on_lines(state.lon, state.lat, geojson_lines(flowline_path))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return state.lon, state.lat
+    return nearest or (state.lon, state.lat)
+
+
 def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowCommand:
     """Build the backend command that the UI should execute for a workflow step."""
 
@@ -175,6 +193,7 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             raise LauncherError(
                 "Site, outlet longitude, and outlet latitude are required for init-dem-config."
             )
+        lon, lat = snapped_outlet(state)
         argv = [
             "ohqbuild",
             "init-dem-config",
@@ -183,9 +202,9 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             "--site",
             state.site,
             "--lon",
-            str(state.lon),
+            str(lon),
             "--lat",
-            str(state.lat),
+            str(lat),
         ]
         if state.flowline_path is not None:
             argv.extend(
