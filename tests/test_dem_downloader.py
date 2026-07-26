@@ -452,6 +452,72 @@ def test_download_dem_manifest_updates_tile_paths(tmp_path):
     assert calls[0][0] == "https://example.test/tile_01.tif"
 
 
+def test_download_dem_manifest_copies_project_relative_local_url(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    project = tmp_path / "project"
+    source = project / "fixtures" / "tile_01.tif"
+    source.parent.mkdir(parents=True)
+    source.write_text("local dem", encoding="utf-8")
+    manifest = project / "intermediate" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "tile one", "url": "fixtures/tile_01.tif", "path": "dem/raw/tile_01.tif"},
+        ]
+    }), encoding="utf-8")
+
+    result = download_dem_manifest(manifest, project / "dem" / "raw")
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    copied = project / "dem" / "raw" / "tile_01.tif"
+    assert result.downloaded == 1
+    assert result.tile_count == 1
+    assert copied.read_text(encoding="utf-8") == "local dem"
+    assert data["tiles"] == [str(copied.resolve())]
+    assert data["items"][0]["path"] == str(copied.resolve())
+
+
+def test_download_dem_manifest_materializes_data_url(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "inline", "url": "data:application/octet-stream;base64,SUlJKg==", "path": "dem/raw/inline.tif"},
+        ]
+    }), encoding="utf-8")
+
+    result = download_dem_manifest(manifest, tmp_path / "raw")
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    target = tmp_path / "raw" / "inline.tif"
+    assert result.downloaded == 1
+    assert result.tile_count == 1
+    assert target.read_bytes() == b"III*"
+    assert data["tiles"] == [str(target.resolve())]
+
+
+def test_download_dem_manifest_replaces_stale_data_url_output(tmp_path):
+    from ohqbuilder.dem_downloader import download_dem_manifest
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "items": [
+            {"title": "inline", "url": "data:application/octet-stream;base64,SUlJKg==", "path": "dem/raw/inline.tif"},
+        ]
+    }), encoding="utf-8")
+    target = tmp_path / "raw" / "inline.tif"
+    target.parent.mkdir(parents=True)
+    target.write_text("stale invalid raster", encoding="utf-8")
+
+    result = download_dem_manifest(manifest, tmp_path / "raw")
+
+    assert result.downloaded == 1
+    assert result.skipped == 0
+    assert target.read_bytes() == b"III*"
+
+
 def test_cli_download_dem_manifest(monkeypatch, tmp_path, capsys):
     from ohqbuilder.cli import main
 

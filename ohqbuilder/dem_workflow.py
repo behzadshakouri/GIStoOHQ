@@ -17,6 +17,10 @@ from .dem_acquisition import (
     write_outlet_point,
 )
 
+SLIGO_DEMO_CONFIG_NAME = "dem_workflow.example.yaml"
+SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
+SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
 
 class DemWorkflowError(RuntimeError):
     """Raised when a config-driven DEM workflow cannot be prepared."""
@@ -33,10 +37,13 @@ class DemWorkflowPlanResult:
 def _read_config(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise DemWorkflowError(f"Config file not found: {path}")
-    if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        if path.suffix.lower() == ".json":
+            data = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+        raise DemWorkflowError(f"Could not parse DEM workflow config {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise DemWorkflowError("DEM workflow config must be a mapping.")
     return data
@@ -57,6 +64,16 @@ def _required_float(section: dict[str, Any], key: str, label: str) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise DemWorkflowError(f"{label} must be numeric: {key}") from exc
+
+
+def _is_sligo_demo_config(path: Path) -> bool:
+    return path.name == SLIGO_DEMO_CONFIG_NAME and path.parent.name == "SligoCreek"
+
+
+def _demo_default_path(path: Path, value: Path, explicit: str | Path | None) -> str | Path | None:
+    if explicit is not None:
+        return explicit
+    return value if _is_sligo_demo_config(path) else None
 
 
 def _resolve(path: str | Path, base: Path) -> Path:
@@ -222,17 +239,22 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
 
     watershed_path = _resolve(watershed_value, base)
     acquisition_path = _resolve(acquisition_value, base)
-    if not watershed_path.exists():
-        raise DemWorkflowError(
-            f"Watershed boundary does not exist yet: {watershed_path}. "
-            "Run watershed delineation before validate-dem, or update "
-            "dem_acquisition.watershed_boundary."
-        )
+    used_acquisition_fallback = False
     if not acquisition_path.exists():
         raise DemWorkflowError(
             f"DEM acquisition area does not exist yet: {acquisition_path}. "
             "Run prepare-dem before validate-dem."
         )
+    if not watershed_path.exists():
+        if dem_acquisition.get("allow_acquisition_area_watershed_fallback", False):
+            watershed_path = acquisition_path
+            used_acquisition_fallback = True
+        else:
+            raise DemWorkflowError(
+                f"Watershed boundary does not exist yet: {watershed_path}. "
+                "Run watershed delineation before validate-dem, or update "
+                "dem_acquisition.watershed_boundary."
+            )
 
     validation = validate_watershed_within_acquisition(
         watershed_path,
@@ -267,6 +289,7 @@ def validate_dem_from_config(config_path: str | Path) -> DemWorkflowValidationRe
         "expanded_acquisition_area": _relativize(expanded_area.output_path, base)
         if expanded_area
         else None,
+        "used_acquisition_area_watershed_fallback": used_acquisition_fallback,
     }
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return DemWorkflowValidationResult(
@@ -328,8 +351,11 @@ def write_dem_config_template(
         "boundary_safety_distance_m": 500,
         "expansion_distance_km": 5,
         "final_watershed_buffer_m": 1000,
+        "allow_acquisition_area_watershed_fallback": True,
     }
     if method == "upstream_network":
+        flowline_path = _demo_default_path(path, SLIGO_DEMO_FLOWLINES, flowline_path)
+        tile_index = _demo_default_path(path, SLIGO_DEMO_TILE_INDEX, tile_index)
         if flowline_path is None:
             raise DemWorkflowError("flowline_path is required for upstream_network configs.")
         dem.update({
