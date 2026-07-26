@@ -3,14 +3,123 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import math
 import queue
 import subprocess
+import tempfile
 import threading
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+
+OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAP_TILE_SIZE = 256
+OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
+MIN_MAP_ZOOM = 1
+MAX_MAP_ZOOM = 19
+
+SLIGO_DEMO_SITE = "SligoCreekDemo"
+SLIGO_DEMO_LON = -76.9765
+SLIGO_DEMO_LAT = 38.9921
+SLIGO_DEMO_CRS = "EPSG:26918"
+SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
+SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
+
+def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
+    """Return the cache path for a downloaded OSM tile."""
+
+    return cache_dir / str(zoom) / str(x) / f"{y}.png"
+
+
+def _clamp_lat(lat: float) -> float:
+    return max(-85.05112878, min(85.05112878, lat))
+
+
+def clamp_zoom(zoom: int) -> int:
+    return max(MIN_MAP_ZOOM, min(MAX_MAP_ZOOM, zoom))
+
+
+def lonlat_to_tile_fraction(lon: float, lat: float, zoom: int) -> tuple[float, float]:
+    """Return fractional Web Mercator tile coordinates for lon/lat."""
+
+    lat = _clamp_lat(lat)
+    n = 2**zoom
+    x = (lon + 180.0) / 360.0 * n
+    lat_rad = math.radians(lat)
+    y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
+    return x, y
+
+
+def tile_fraction_to_lonlat(x: float, y: float, zoom: int) -> tuple[float, float]:
+    """Return lon/lat for fractional Web Mercator tile coordinates."""
+
+    n = 2**zoom
+    lon = x / n * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y / n))))
+    return lon, lat
+
+
+def map_click_to_lonlat(
+    center_lon: float,
+    center_lat: float,
+    zoom: int,
+    canvas_x: int,
+    canvas_y: int,
+    *,
+    width: int = 768,
+    height: int = 512,
+) -> tuple[float, float]:
+    """Convert a click on the Tk OSM preview canvas to lon/lat."""
+
+    center_x, center_y = lonlat_to_tile_fraction(center_lon, center_lat, zoom)
+    dx_tiles = (canvas_x - width / 2.0) / MAP_TILE_SIZE
+    dy_tiles = (canvas_y - height / 2.0) / MAP_TILE_SIZE
+    return tile_fraction_to_lonlat(center_x + dx_tiles, center_y + dy_tiles, zoom)
+
+
+def nearest_point_on_lines(
+    lon: float, lat: float, lines: list[list[list[float]]]
+) -> tuple[float, float] | None:
+    """Return the nearest point on GeoJSON line segments in lon/lat space."""
+    nearest: tuple[float, float] | None = None
+    nearest_distance = math.inf
+    latitude_scale = math.cos(math.radians(lat))
+    for line in lines:
+        for start, end in zip(line, line[1:]):
+            x1, y1 = (float(start[0]) - lon) * latitude_scale, float(start[1]) - lat
+            x2, y2 = (float(end[0]) - lon) * latitude_scale, float(end[1]) - lat
+            dx, dy = x2 - x1, y2 - y1
+            length_squared = dx * dx + dy * dy
+            fraction = (
+                0.0
+                if length_squared == 0
+                else max(0.0, min(1.0, -(x1 * dx + y1 * dy) / length_squared))
+            )
+            candidate_x = x1 + fraction * dx
+            candidate_y = y1 + fraction * dy
+            distance = candidate_x * candidate_x + candidate_y * candidate_y
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest = (lon + candidate_x / latitude_scale, lat + candidate_y)
+    return nearest
+
+
+def geojson_lines(path: Path) -> list[list[list[float]]]:
+    """Read LineString and MultiLineString coordinates from a GeoJSON file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    lines: list[list[list[float]]] = []
+    for feature in data.get("features", []):
+        geometry = feature.get("geometry") or {}
+        if geometry.get("type") == "LineString":
+            lines.append(geometry.get("coordinates", []))
+        elif geometry.get("type") == "MultiLineString":
+            lines.extend(geometry.get("coordinates", []))
+    return lines
+
 
 WorkflowStep = Literal[
     "init-dem-config",
@@ -58,12 +167,33 @@ def _path_for_config_value(path: Path, config_path: Path) -> str:
         return str(path)
 
 
+def snapped_outlet(state: LauncherState) -> tuple[float, float]:
+    """Snap an upstream-network outlet to its configured GeoJSON flowline."""
+
+    assert state.lon is not None and state.lat is not None
+    if state.method != "upstream_network" or state.flowline_path is None:
+        return state.lon, state.lat
+    flowline_path = state.flowline_path.expanduser()
+    if not flowline_path.is_absolute() and not flowline_path.exists():
+        flowline_path = state.config_path.expanduser().parent / flowline_path
+    if flowline_path.suffix.lower() not in {".geojson", ".json"} or not flowline_path.is_file():
+        return state.lon, state.lat
+    try:
+        nearest = nearest_point_on_lines(state.lon, state.lat, geojson_lines(flowline_path))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return state.lon, state.lat
+    return nearest or (state.lon, state.lat)
+
+
 def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowCommand:
     """Build the backend command that the UI should execute for a workflow step."""
 
     if step == "init-dem-config":
         if not state.site or state.lon is None or state.lat is None:
-            raise LauncherError("Site, outlet longitude, and outlet latitude are required for init-dem-config.")
+            raise LauncherError(
+                "Site, outlet longitude, and outlet latitude are required for init-dem-config."
+            )
+        lon, lat = snapped_outlet(state)
         argv = [
             "ohqbuild",
             "init-dem-config",
@@ -72,28 +202,40 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             "--site",
             state.site,
             "--lon",
-            str(state.lon),
+            str(lon),
             "--lat",
-            str(state.lat),
+            str(lat),
         ]
         if state.flowline_path is not None:
-            argv.extend(("--flowlines", _path_for_config_value(state.flowline_path, state.config_path)))
+            argv.extend(
+                ("--flowlines", _path_for_config_value(state.flowline_path, state.config_path))
+            )
         if state.tile_index is not None:
-            argv.extend(("--tile-index", _path_for_config_value(state.tile_index, state.config_path)))
+            argv.extend(
+                ("--tile-index", _path_for_config_value(state.tile_index, state.config_path))
+            )
         if state.target_crs:
             argv.extend(("--target-crs", state.target_crs))
         if state.method:
             argv.extend(("--method", state.method))
         return WorkflowCommand("Initialize DEM Config", tuple(argv))
     if step == "prepare-dem":
-        return WorkflowCommand("Prepare DEM", ("ohqbuild", "prepare-dem", "--config", str(state.config_path)))
+        return WorkflowCommand(
+            "Prepare DEM", ("ohqbuild", "prepare-dem", "--config", str(state.config_path))
+        )
     if step == "run-dem-prep":
-        return WorkflowCommand("Run DEM Prep", ("ohqbuild", "run-dem-prep", "--config", str(state.config_path)))
+        return WorkflowCommand(
+            "Run DEM Prep", ("ohqbuild", "run-dem-prep", "--config", str(state.config_path))
+        )
     if step == "validate-dem":
-        return WorkflowCommand("Validate DEM", ("ohqbuild", "validate-dem", "--config", str(state.config_path)))
+        return WorkflowCommand(
+            "Validate DEM", ("ohqbuild", "validate-dem", "--config", str(state.config_path))
+        )
     if step == "download-dem-manifest":
         if state.manifest_path is None or state.raw_dem_dir is None:
-            raise LauncherError("Manifest path and raw DEM directory are required for DEM download.")
+            raise LauncherError(
+                "Manifest path and raw DEM directory are required for DEM download."
+            )
         return WorkflowCommand(
             "Download DEM Tiles",
             (
@@ -132,12 +274,23 @@ def _require_tkinter():
     return importlib.import_module("tkinter")
 
 
+def _config_text(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    if any(marker in text for marker in ("<<<<<<<", "=======", ">>>>>>>")):
+        raise LauncherError(
+            f"Config file contains unresolved merge-conflict markers: {path}. "
+            "Resolve the conflict markers before loading or running workflow commands."
+        )
+    return text
+
+
 def load_project_config(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).expanduser()
+    text = _config_text(path)
     if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(text)
     else:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(text)
     if not isinstance(data, dict):
         raise LauncherError("Project config must be a mapping.")
     return data
@@ -180,10 +333,12 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         source_dir=path_value(config.get("download_dir") or "source_downloads"),
         target_crs=str(site_config.get("target_crs") or config.get("target_crs") or "") or None,
         lon=float(config.get("outlet", {}).get("longitude"))
-        if isinstance(config.get("outlet"), dict) and config.get("outlet", {}).get("longitude") is not None
+        if isinstance(config.get("outlet"), dict)
+        and config.get("outlet", {}).get("longitude") is not None
         else None,
         lat=float(config.get("outlet", {}).get("latitude"))
-        if isinstance(config.get("outlet"), dict) and config.get("outlet", {}).get("latitude") is not None
+        if isinstance(config.get("outlet"), dict)
+        and config.get("outlet", {}).get("latitude") is not None
         else None,
         method=str(dem.get("method") or "") or None,
         flowline_path=path_value(dem.get("flowline_path")),
@@ -214,16 +369,64 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     return updated
 
 
+def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]) -> LauncherState:
+    """Merge launcher form values over config-derived defaults for command execution."""
+
+    config_state = state_from_config(form_state.config_path, config)
+
+    def preferred_path(form_value: Path | None, config_value: Path | None) -> Path | None:
+        return form_value or config_value
+
+    def preferred_text(form_value: str | None, config_value: str | None) -> str | None:
+        if form_value and form_value != ".":
+            return form_value
+        return config_value or form_value
+
+    return LauncherState(
+        config_path=form_state.config_path,
+        manifest_path=preferred_path(form_state.manifest_path, config_state.manifest_path),
+        raw_dem_dir=preferred_path(form_state.raw_dem_dir, config_state.raw_dem_dir),
+        root=preferred_path(form_state.root, config_state.root),
+        site=preferred_text(form_state.site, config_state.site),
+        source_dir=preferred_path(form_state.source_dir, config_state.source_dir),
+        target_crs=preferred_text(form_state.target_crs, config_state.target_crs),
+        lon=form_state.lon if form_state.lon is not None else config_state.lon,
+        lat=form_state.lat if form_state.lat is not None else config_state.lat,
+        method=preferred_text(form_state.method, config_state.method),
+        flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
+        tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
+    )
+
+
+def sligo_demo_reset_args(
+    config_path: str | Path, lon: float | None, lat: float | None
+) -> dict[str, Any]:
+    """Return arguments for rewriting the bundled Sligo Creek demo config."""
+
+    return {
+        "output_path": Path(config_path).expanduser(),
+        "site": SLIGO_DEMO_SITE,
+        "lon": lon if lon is not None else SLIGO_DEMO_LON,
+        "lat": lat if lat is not None else SLIGO_DEMO_LAT,
+        "flowline_path": SLIGO_DEMO_FLOWLINES,
+        "tile_index": SLIGO_DEMO_TILE_INDEX,
+        "target_crs": SLIGO_DEMO_CRS,
+        "method": "upstream_network",
+    }
+
+
 def geojson_preview_summary(path: str | Path) -> str:
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     features = data.get("features") if isinstance(data, dict) else None
     if not isinstance(features, list):
         raise LauncherError("Preview file must be a GeoJSON FeatureCollection.")
-    geometry_types = sorted({
-        feature.get("geometry", {}).get("type", "Unknown")
-        for feature in features
-        if isinstance(feature, dict) and isinstance(feature.get("geometry"), dict)
-    })
+    geometry_types = sorted(
+        {
+            feature.get("geometry", {}).get("type", "Unknown")
+            for feature in features
+            if isinstance(feature, dict) and isinstance(feature.get("geometry"), dict)
+        }
+    )
     return f"{len(features)} feature(s); geometry: {', '.join(geometry_types) or 'none'}"
 
 
@@ -248,6 +451,155 @@ class CommandRunner(threading.Thread):
         self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
 
 
+class MapPicker:
+    """Small OpenStreetMap tile picker for choosing an outlet in the Tk launcher."""
+
+    def __init__(
+        self, app: "LauncherApp", *, zoom: int = 14, width: int = 768, height: int = 512
+    ) -> None:
+        self.app = app
+        self.tk = app.tk
+        self.zoom = clamp_zoom(zoom)
+        self.width = width
+        self.height = height
+        self.center_lon = float(app.lon_var.get() or -76.9765)
+        self.center_lat = float(app.lat_var.get() or 38.9921)
+        self.images = []
+        self.flowlines = self._load_flowlines()
+        self.window = self.tk.Toplevel(app.root)
+        self.window.title("Pick Outlet on OpenStreetMap")
+        self.canvas = self.tk.Canvas(self.window, width=width, height=height)
+        self.canvas.pack(fill="both", expand=True)
+        controls = self.tk.Frame(self.window)
+        controls.pack(fill="x")
+        self.tk.Button(controls, text="Zoom +", command=lambda: self._zoom(1)).pack(side="left")
+        self.tk.Button(controls, text="Zoom -", command=lambda: self._zoom(-1)).pack(side="left")
+        self.tk.Button(
+            controls, text="Reload at lon/lat fields", command=self._reload_from_fields
+        ).pack(side="left")
+        self.status = self.tk.Label(
+            self.window,
+            text="Left-click to set outlet; selections snap to the configured flowline.",
+        )
+        self.status.pack(fill="x")
+        self.canvas.bind("<Button-1>", self._click)
+        self.canvas.bind("<Button-3>", self._recenter)
+        self._draw_tiles()
+
+    def _load_flowlines(self) -> list[list[list[float]]]:
+        try:
+            config = load_project_config(self.app.config_var.get())
+            state = state_from_config(self.app.config_var.get(), config)
+            if state.flowline_path and state.flowline_path.suffix.lower() in {".geojson", ".json"}:
+                return geojson_lines(state.flowline_path)
+        except (OSError, ValueError, json.JSONDecodeError, yaml.YAMLError, LauncherError):
+            pass
+        return []
+
+    def _draw_tiles(self) -> None:
+        self.canvas.delete("all")
+        self.images = []
+        self.status.config(
+            text=f"Left-click to set outlet; right-click to recenter. Center={self.center_lon:.6f}, {self.center_lat:.6f}; zoom={self.zoom}. © OpenStreetMap contributors"
+        )
+        center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
+        center_tile_x = math.floor(center_x)
+        center_tile_y = math.floor(center_y)
+        origin_x = self.width / 2.0 - (center_x - center_tile_x) * MAP_TILE_SIZE
+        origin_y = self.height / 2.0 - (center_y - center_tile_y) * MAP_TILE_SIZE
+        radius_x = math.ceil(self.width / MAP_TILE_SIZE / 2) + 1
+        radius_y = math.ceil(self.height / MAP_TILE_SIZE / 2) + 1
+        for dx in range(-radius_x, radius_x + 1):
+            for dy in range(-radius_y, radius_y + 1):
+                tile_x = center_tile_x + dx
+                tile_y = center_tile_y + dy
+                try:
+                    image = self._tile_image(tile_x, tile_y)
+                except Exception as exc:  # pragma: no cover - network/UI boundary
+                    self.status.config(text=f"Could not load OSM tile: {exc}")
+                    continue
+                self.images.append(image)
+                self.canvas.create_image(
+                    origin_x + dx * MAP_TILE_SIZE,
+                    origin_y + dy * MAP_TILE_SIZE,
+                    anchor="nw",
+                    image=image,
+                )
+        self._draw_flowlines()
+
+    def _draw_flowlines(self) -> None:
+        center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
+        for line in self.flowlines:
+            points = []
+            for lon, lat, *_ in line:
+                tile_x, tile_y = lonlat_to_tile_fraction(float(lon), float(lat), self.zoom)
+                points.extend(
+                    (
+                        self.width / 2.0 + (tile_x - center_x) * MAP_TILE_SIZE,
+                        self.height / 2.0 + (tile_y - center_y) * MAP_TILE_SIZE,
+                    )
+                )
+            if len(points) >= 4:
+                self.canvas.create_line(*points, fill="#00ffff", width=4)
+
+    def _tile_image(self, x: int, y: int):
+        max_tile = 2**self.zoom
+        x = x % max_tile
+        if y < 0 or y >= max_tile:
+            raise LauncherError("Tile row is outside the Web Mercator range.")
+        cache_path = osm_tile_cache_path(self.zoom, x, y)
+        if not cache_path.exists():
+            url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
+            request = urllib.request.Request(
+                url,
+                headers={"User-Agent": "GIStoOHQ DEM workflow launcher"},
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+                payload = response.read()
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(payload)
+        return self.tk.PhotoImage(file=str(cache_path))
+
+    def _event_lonlat(self, event) -> tuple[float, float]:
+        return map_click_to_lonlat(
+            self.center_lon,
+            self.center_lat,
+            self.zoom,
+            event.x,
+            event.y,
+            width=self.width,
+            height=self.height,
+        )
+
+    def _click(self, event) -> None:
+        lon, lat = self._event_lonlat(event)
+        snapped = nearest_point_on_lines(lon, lat, self.flowlines)
+        if snapped is not None:
+            lon, lat = snapped
+        self.app.lon_var.set(f"{lon:.8f}")
+        self.app.lat_var.set(f"{lat:.8f}")
+        action = (
+            "Picked and snapped outlet to flowline"
+            if snapped is not None
+            else "Picked outlet from OSM map"
+        )
+        self.app.messages.put(f"{action}: lon={lon:.8f}, lat={lat:.8f}\n")
+        self.window.destroy()
+
+    def _recenter(self, event) -> None:
+        self.center_lon, self.center_lat = self._event_lonlat(event)
+        self._draw_tiles()
+
+    def _zoom(self, delta: int) -> None:
+        self.zoom = clamp_zoom(self.zoom + delta)
+        self._draw_tiles()
+
+    def _reload_from_fields(self) -> None:
+        self.center_lon = float(self.app.lon_var.get() or self.center_lon)
+        self.center_lat = float(self.app.lat_var.get() or self.center_lat)
+        self._draw_tiles()
+
+
 class LauncherApp:
     """Small Tk-based launcher that writes no workflow logic of its own."""
 
@@ -270,6 +622,8 @@ class LauncherApp:
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
         self._build()
+        if Path(self.config_var.get()).exists():
+            self.load_config()
         self._poll_messages()
 
     def _build(self) -> None:
@@ -297,7 +651,11 @@ class LauncherApp:
         buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=8)
         tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
         tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
-        tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(side="left")
+        tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(
+            side="left"
+        )
+        tk.Button(buttons, text="pick outlet map", command=self.pick_outlet_map).pack(side="left")
+        tk.Button(buttons, text="reset Sligo demo", command=self.reset_sligo_demo).pack(side="left")
         for step in (
             "init-dem-config",
             "prepare-dem",
@@ -306,11 +664,31 @@ class LauncherApp:
             "materialize-inputs",
             "validate-dem",
         ):
-            tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(side="left")
+            tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(
+                side="left"
+            )
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 1, weight=1)
+
+    def pick_outlet_map(self) -> None:
+        try:
+            self.map_picker = MapPicker(self)
+        except Exception as exc:  # pragma: no cover - Tk/network UI boundary
+            self.messages.put(f"Map picker failed: {exc}\n")
+
+    def reset_sligo_demo(self) -> None:
+        try:
+            from ohqbuilder.dem_workflow import write_dem_config_template
+
+            write_dem_config_template(
+                **sligo_demo_reset_args(self.config_var.get(), self.state().lon, self.state().lat)
+            )
+            self.load_config()
+            self.messages.put("Reset Sligo demo config.\n")
+        except Exception as exc:  # pragma: no cover - UI boundary
+            self.messages.put(f"ERROR: {exc}\n")
 
     def state(self) -> LauncherState:
         crs = self.crs_var.get().strip() or None
@@ -338,7 +716,6 @@ class LauncherApp:
             tile_index=optional_path(self.tile_index_var.get()),
         )
 
-
     def apply_state(self, state: LauncherState) -> None:
         self.config_var.set(str(state.config_path))
         self.manifest_var.set(str(state.manifest_path or ""))
@@ -363,8 +740,14 @@ class LauncherApp:
 
     def save_config(self) -> None:
         try:
-            current = load_project_config(self.config_var.get()) if Path(self.config_var.get()).exists() else {}
-            save_project_config(self.config_var.get(), update_config_from_state(current, self.state()))
+            current = (
+                load_project_config(self.config_var.get())
+                if Path(self.config_var.get()).exists()
+                else {}
+            )
+            save_project_config(
+                self.config_var.get(), update_config_from_state(current, self.state())
+            )
             self.messages.put("Saved config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
@@ -372,7 +755,11 @@ class LauncherApp:
     def preview_acquisition(self) -> None:
         try:
             config = load_project_config(self.config_var.get())
-            dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
+            dem = (
+                config.get("dem_acquisition")
+                if isinstance(config.get("dem_acquisition"), dict)
+                else {}
+            )
             area = dem.get("acquisition_area")
             if not isinstance(area, str) or not area:
                 raise LauncherError("dem_acquisition.acquisition_area is not configured.")
@@ -385,8 +772,12 @@ class LauncherApp:
 
     def run_step(self, step: WorkflowStep) -> None:
         try:
-            command = command_for_step(step, self.state())
-        except LauncherError as exc:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            command = command_for_step(step, state)
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
             return
         CommandRunner(command, self.messages).start()

@@ -5,13 +5,104 @@ import pytest
 from ohqbuilder.ui.launcher import (
     LauncherError,
     LauncherState,
+    clamp_zoom,
     command_for_step,
+    map_click_to_lonlat,
+    nearest_point_on_lines,
+    osm_tile_cache_path,
     geojson_preview_summary,
     load_project_config,
     save_project_config,
+    sligo_demo_reset_args,
+    snapped_outlet,
     state_from_config,
+    state_with_config_defaults,
     update_config_from_state,
 )
+
+
+def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
+    assert (
+        osm_tile_cache_path(14, 4688, 6260, cache_dir=tmp_path)
+        == tmp_path / "14" / "4688" / "6260.png"
+    )
+
+
+def test_clamp_zoom_keeps_osm_zoom_range():
+    assert clamp_zoom(-10) == 1
+    assert clamp_zoom(14) == 14
+    assert clamp_zoom(25) == 19
+
+
+def test_map_click_to_lonlat_returns_center_for_center_click():
+    lon, lat = map_click_to_lonlat(-76.9765, 38.9921, 14, 384, 256)
+
+    assert lon == pytest.approx(-76.9765)
+    assert lat == pytest.approx(38.9921)
+
+
+def test_map_click_to_lonlat_moves_east_and_north():
+    center_lon = -76.9765
+    center_lat = 38.9921
+
+    east_lon, east_lat = map_click_to_lonlat(center_lon, center_lat, 14, 484, 256)
+    north_lon, north_lat = map_click_to_lonlat(center_lon, center_lat, 14, 384, 156)
+
+    assert east_lon > center_lon
+    assert east_lat == pytest.approx(center_lat, abs=0.001)
+    assert north_lat > center_lat
+    assert north_lon == pytest.approx(center_lon)
+
+
+def test_nearest_point_on_lines_snaps_map_pick_to_demo_flowline():
+    lines = [[[-76.9765, 38.9921], [-76.9850, 39.0200]]]
+
+    lon, lat = nearest_point_on_lines(-76.9712, 38.9749, lines)
+
+    assert lon == pytest.approx(-76.9765)
+    assert lat == pytest.approx(38.9921)
+
+
+def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
+    config_path = tmp_path / "examples" / "SligoCreek" / "dem_workflow.example.yaml"
+
+    args = sligo_demo_reset_args(config_path, -76.99778601, 38.96888097)
+
+    assert args["output_path"] == config_path
+    assert args["site"] == "SligoCreekDemo"
+    assert args["lon"] == -76.99778601
+    assert args["lat"] == 38.96888097
+    assert str(args["flowline_path"]) == "hydro/NHDFlowline.demo.geojson"
+    assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
+
+
+def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config = {
+        "site": {"name": "SligoCreekDemo", "target_crs": "EPSG:26918"},
+        "outlet": {"longitude": -76.9765, "latitude": 38.9921},
+        "dem_acquisition": {
+            "method": "upstream_network",
+            "flowline_path": "hydro/NHDFlowline.demo.geojson",
+            "tile_index": "indexes/usgs_3dep_tiles.demo.geojson",
+            "tile_manifest": "intermediate/dem_download_manifest.json",
+        },
+    }
+    form = LauncherState(
+        config_path=config_path,
+        site=".",
+        lon=-76.99778601,
+        lat=38.96888097,
+        method="upstream_network",
+    )
+
+    merged = state_with_config_defaults(form, config)
+
+    assert merged.site == "SligoCreekDemo"
+    assert merged.lon == -76.99778601
+    assert merged.lat == 38.96888097
+    assert merged.flowline_path == tmp_path / "hydro" / "NHDFlowline.demo.geojson"
+    assert merged.tile_index == tmp_path / "indexes" / "usgs_3dep_tiles.demo.geojson"
 
 
 def test_command_for_init_dem_config():
@@ -68,6 +159,29 @@ def test_command_for_init_dem_config_keeps_config_relative_paths(tmp_path):
     assert "indexes/tiles.geojson" in command.argv
 
 
+def test_command_for_init_dem_config_snaps_outlet_to_flowline(tmp_path):
+    flowlines = tmp_path / "flowlines.geojson"
+    flowlines.write_text(
+        '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},'
+        '"geometry":{"type":"LineString","coordinates":[[-76.9765,38.9921],[-76.985,39.02]]}}]}',
+        encoding="utf-8",
+    )
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        site="SligoCreek",
+        lon=-76.98216483,
+        lat=38.9882974,
+        flowline_path=flowlines,
+        method="upstream_network",
+    )
+
+    assert snapped_outlet(state) == pytest.approx((-76.9765, 38.9921))
+    command = command_for_step("init-dem-config", state)
+
+    assert command.argv[command.argv.index("--lon") + 1] == "-76.9765"
+    assert command.argv[command.argv.index("--lat") + 1] == "38.9921"
+
+
 def test_command_for_init_dem_config_requires_outlet():
     with pytest.raises(LauncherError, match="outlet longitude"):
         command_for_step("init-dem-config", LauncherState(config_path=Path("config.yaml")))
@@ -111,6 +225,22 @@ def test_command_for_materialize_inputs_includes_manifest():
 def test_download_dem_manifest_requires_paths():
     with pytest.raises(LauncherError, match="Manifest path"):
         command_for_step("download-dem-manifest", LauncherState(config_path=Path("config.yaml")))
+
+
+def test_load_project_config_rejects_conflict_markers(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "dem_acquisition:\n"
+        "<<<<<<< Updated upstream\n"
+        "  method: upstream_network\n"
+        "=======\n"
+        "  method: polygon\n"
+        ">>>>>>> branch\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LauncherError, match="unresolved merge-conflict markers"):
+        load_project_config(config)
 
 
 def test_ui_config_load_state_update_and_save(tmp_path):
