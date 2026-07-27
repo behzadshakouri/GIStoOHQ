@@ -184,6 +184,7 @@ WorkflowStep = Literal[
     "check-inputs",
     "build-ohq",
     "run-to-ohq",
+    "full-run",
 ]
 
 
@@ -222,11 +223,19 @@ class LauncherState:
 def _path_for_config_value(path: Path, config_path: Path) -> str:
     """Return a path string suitable for writing into ``config_path``."""
 
-    config_dir = config_path.expanduser().parent
+    config_dir = config_path.expanduser().resolve().parent
+    candidate = path.expanduser()
+    if not candidate.is_absolute():
+        cwd_candidate = candidate.resolve()
+        try:
+            cwd_candidate.relative_to(config_dir)
+            candidate = cwd_candidate
+        except ValueError:
+            candidate = config_dir / candidate
     try:
-        return str(path.expanduser().relative_to(config_dir))
+        return str(candidate.resolve().relative_to(config_dir)) or "."
     except ValueError:
-        return str(path)
+        return str(candidate.resolve())
 
 
 def snapped_outlet(state: LauncherState) -> tuple[float, float]:
@@ -320,6 +329,30 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         if state.manifest_path is not None:
             argv.extend(("--dem-manifest", str(state.manifest_path)))
         return WorkflowCommand("Materialize Inputs", tuple(argv))
+    if step == "full-run":
+        if state.root is None or not state.site or state.lon is None or state.lat is None:
+            raise LauncherError(
+                "Root, site, and verified outlet coordinates are required for full-run."
+            )
+        argv = [
+            "ohqbuild",
+            "full-run",
+            "--root",
+            str(state.root),
+            "--site",
+            state.site,
+            "--lon",
+            str(state.lon),
+            "--lat",
+            str(state.lat),
+            "--project-name",
+            state.site,
+        ]
+        if state.target_crs:
+            argv.extend(("--target-crs", state.target_crs))
+        if state.source_dir is not None:
+            argv.extend(("--download-dir", str(state.source_dir)))
+        return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
     if step in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for OHQ workflow commands.")
@@ -404,7 +437,7 @@ def _set_nested(config: dict[str, Any], section: str, key: str, value: Any) -> N
 
 
 def state_from_config(config_path: str | Path, config: dict[str, Any]) -> LauncherState:
-    base = Path(config_path).expanduser().parent
+    base = Path(config_path).expanduser().resolve().parent
     dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
     site_config = config.get("site") if isinstance(config.get("site"), dict) else {}
     paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
@@ -413,7 +446,14 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         if not isinstance(value, str) or not value:
             return None
         path = Path(value).expanduser()
-        return path if path.is_absolute() else base / path
+        if path.is_absolute():
+            return path
+        cwd_candidate = path.resolve()
+        try:
+            cwd_candidate.relative_to(base)
+            return cwd_candidate
+        except ValueError:
+            return base / path
 
     return LauncherState(
         config_path=Path(config_path).expanduser(),
@@ -439,8 +479,13 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
 
 def update_config_from_state(config: dict[str, Any], state: LauncherState) -> dict[str, Any]:
     updated = dict(config)
-    _set_nested(updated, "dem_acquisition", "tile_manifest", str(state.manifest_path or ""))
-    _set_nested(updated, "paths", "raw_dem_dir", str(state.raw_dem_dir or ""))
+    config_path = state.config_path
+
+    def path_text(value: Path | None, fallback: str = "") -> str:
+        return _path_for_config_value(value, config_path) if value is not None else fallback
+
+    _set_nested(updated, "dem_acquisition", "tile_manifest", path_text(state.manifest_path))
+    _set_nested(updated, "paths", "raw_dem_dir", path_text(state.raw_dem_dir))
     if state.site:
         _set_nested(updated, "site", "name", state.site)
     if state.target_crs:
@@ -452,11 +497,11 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     if state.method:
         _set_nested(updated, "dem_acquisition", "method", state.method)
     if state.flowline_path is not None:
-        _set_nested(updated, "dem_acquisition", "flowline_path", str(state.flowline_path))
+        _set_nested(updated, "dem_acquisition", "flowline_path", path_text(state.flowline_path))
     if state.tile_index is not None:
-        _set_nested(updated, "dem_acquisition", "tile_index", str(state.tile_index))
-    updated["root"] = str(state.root or ".")
-    updated["download_dir"] = str(state.source_dir or "source_downloads")
+        _set_nested(updated, "dem_acquisition", "tile_index", path_text(state.tile_index))
+    updated["root"] = path_text(state.root, ".")
+    updated["download_dir"] = path_text(state.source_dir, "source_downloads")
     return updated
 
 
@@ -741,7 +786,9 @@ class MapPicker:
             self.selection_points.append((lon, lat))
             self._draw_tiles()
             if self.mode.get() == "Rectangle" and len(self.selection_points) == 2:
-                self._finish_area()
+                self.status.config(
+                    text="Rectangle ready. Review the yellow boundary, then click Finish area."
+                )
             return
         snapped = nearest_point_on_lines(lon, lat, self.flowlines)
         if snapped is not None:
@@ -883,6 +930,7 @@ class LauncherApp:
             ("Check inputs", "check-inputs"),
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
+            ("FULL RUN: download all data to OHQ", "full-run"),
         ):
             tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)

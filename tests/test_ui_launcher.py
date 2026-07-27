@@ -286,6 +286,44 @@ paths:
     assert load_project_config(output)["site"]["name"] == "SligoCreek"
 
 
+def test_update_config_keeps_project_paths_relative_without_duplicate_prefix(tmp_path):
+    config_path = tmp_path / "examples" / "SligoCreek" / "config.yaml"
+    state = LauncherState(
+        config_path=config_path,
+        root=config_path.parent,
+        source_dir=config_path.parent / "source_downloads",
+        manifest_path=config_path.parent / "intermediate" / "manifest.json",
+        raw_dem_dir=config_path.parent / "dem" / "raw",
+        flowline_path=config_path.parent / "hydro" / "flowlines.geojson",
+        tile_index=config_path.parent / "indexes" / "tiles.geojson",
+    )
+
+    updated = update_config_from_state({}, state)
+
+    assert updated["root"] == "."
+    assert updated["download_dir"] == "source_downloads"
+    assert updated["dem_acquisition"]["flowline_path"] == "hydro/flowlines.geojson"
+    assert updated["dem_acquisition"]["tile_index"] == "indexes/tiles.geojson"
+    assert updated["dem_acquisition"]["tile_manifest"] == "intermediate/manifest.json"
+    assert updated["paths"]["raw_dem_dir"] == "dem/raw"
+
+
+def test_state_from_config_repairs_repo_relative_project_prefix(monkeypatch, tmp_path):
+    project = tmp_path / "examples" / "SligoCreek"
+    flowline = project / "hydro" / "flowlines.geojson"
+    flowline.parent.mkdir(parents=True)
+    flowline.write_text("{}", encoding="utf-8")
+    config_path = project / "config.yaml"
+    monkeypatch.chdir(tmp_path)
+
+    state = state_from_config(
+        config_path,
+        {"dem_acquisition": {"flowline_path": "examples/SligoCreek/hydro/flowlines.geojson"}},
+    )
+
+    assert state.flowline_path == flowline
+
+
 def test_geojson_preview_summary(tmp_path):
     geojson = tmp_path / "area.geojson"
     geojson.write_text(
@@ -370,6 +408,28 @@ def test_continue_to_ohq_prepares_hydrology_before_combined_run():
 
     assert command.argv == ("ohqbuild", "prepare-hydrology", "--root", "project", "--site", "Demo")
     assert command.followup_argv == (("ohqbuild", "run", "--root", "project", "--site", "Demo"),)
+
+
+def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Demo",
+        source_dir=tmp_path / "source_downloads",
+        target_crs="EPSG:26918",
+        lon=-76.99,
+        lat=38.94,
+    )
+
+    command = command_for_step("full-run", state)
+
+    assert command.argv[:2] == ("ohqbuild", "full-run")
+    assert command.argv[command.argv.index("--lon") + 1] == "-76.99"
+    assert command.argv[command.argv.index("--lat") + 1] == "38.94"
+    assert command.argv[command.argv.index("--target-crs") + 1] == "EPSG:26918"
+    assert command.argv[command.argv.index("--download-dir") + 1] == str(
+        tmp_path / "source_downloads"
+    )
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

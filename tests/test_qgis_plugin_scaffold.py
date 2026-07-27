@@ -52,6 +52,7 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
 {
   "root": "project-root",
   "site": {"name": "SligoCreek", "target_crs": "EPSG:26918"},
+  "outlet": {"longitude": -76.97, "latitude": 38.99},
   "download_dir": "downloads",
   "dem_acquisition": {
     "tile_manifest": "intermediate/dem_download_manifest.json",
@@ -90,6 +91,12 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
         "--dem-manifest",
         str(tmp_path / "intermediate/dem_download_manifest.json"),
     ]
+    full_run = _command_for_workflow("full-run", str(config))
+    assert full_run[:2] == ["ohqbuild", "full-run"]
+    assert full_run[full_run.index("--lon") + 1] == "-76.97"
+    assert full_run[full_run.index("--lat") + 1] == "38.99"
+    assert "--target-crs" in full_run
+    assert "--download-dir" in full_run
 
 
 def test_qgis_plugin_download_command_requires_manifest(tmp_path):
@@ -129,3 +136,11 @@ def test_qgis_plugin_has_direct_dem_prep_button():
 
     assert "Run Direct DEM Prep" in dock
     assert "run-dem-prep" in dock
+
+
+def test_qgis_plugin_exposes_full_download_to_ohq_workflow():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "FULL RUN: Download All Data to OHQ" in dock
+    assert 'command == "full-run"' in dock
+    assert "prepare-hydrology" in dock
