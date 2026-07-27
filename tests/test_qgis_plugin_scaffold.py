@@ -11,6 +11,26 @@ def test_qgis_plugin_scaffold_files_exist():
     assert "GIStoOHQ DEM Workflow" in (root / "metadata.txt").read_text(encoding="utf-8")
 
 
+def test_qgis_plugin_update_script_refreshes_link_and_bytecode():
+    script = Path("scripts/update_qgis_plugin.sh")
+    source = script.read_text(encoding="utf-8")
+
+    assert script.is_file()
+    assert "install_qgis_plugin.sh" in source
+    assert "__pycache__" in source
+    assert "'*.pyc'" in source
+    assert "disable and re-enable the plugin" in source
+
+
+def test_qgis_plugin_registers_an_actual_qdockwidget():
+    plugin = Path("qgis_plugin/gistoohq_dem_workflow/plugin.py").read_text(encoding="utf-8")
+
+    assert "self.dock_content = DemWorkflowDock(self.iface)" in plugin
+    assert "self.dock = self.dock_content.widget" in plugin
+    assert "addDockWidget(Qt.RightDockWidgetArea, self.dock)" in plugin
+    assert "addDockWidget(Qt.RightDockWidgetArea, self.dock_content)" not in plugin
+
+
 def test_qgis_plugin_dock_has_outlet_capture_hook():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
 
@@ -52,8 +72,10 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
 {
   "root": "project-root",
   "site": {"name": "SligoCreek", "target_crs": "EPSG:26918"},
+  "outlet": {"longitude": -76.97, "latitude": 38.99},
   "download_dir": "downloads",
   "dem_acquisition": {
+    "acquisition_area": "intermediate/area.geojson",
     "tile_manifest": "intermediate/dem_download_manifest.json",
     "raw_dem_dir": "dem/raw"
   }
@@ -61,6 +83,8 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
 """.strip(),
         encoding="utf-8",
     )
+    (tmp_path / "intermediate").mkdir()
+    (tmp_path / "intermediate" / "area.geojson").write_text("{}", encoding="utf-8")
 
     assert _command_for_workflow("prepare-dem", str(config)) == [
         "ohqbuild",
@@ -90,6 +114,15 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
         "--dem-manifest",
         str(tmp_path / "intermediate/dem_download_manifest.json"),
     ]
+    full_run = _command_for_workflow("full-run", str(config))
+    assert full_run[:2] == ["ohqbuild", "full-run"]
+    assert full_run[full_run.index("--lon") + 1] == "-76.97"
+    assert full_run[full_run.index("--lat") + 1] == "38.99"
+    assert "--target-crs" in full_run
+    assert "--download-dir" in full_run
+    assert full_run[full_run.index("--acquisition-area") + 1] == str(
+        tmp_path / "intermediate/area.geojson"
+    )
 
 
 def test_qgis_plugin_download_command_requires_manifest(tmp_path):
@@ -129,3 +162,13 @@ def test_qgis_plugin_has_direct_dem_prep_button():
 
     assert "Run Direct DEM Prep" in dock
     assert "run-dem-prep" in dock
+
+
+def test_qgis_plugin_exposes_full_download_to_ohq_workflow():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "FULL RUN: Download All Data to OHQ" in dock
+    assert 'command == "full-run"' in dock
+    assert "prepare-hydrology" in dock
+    assert "Build HEC-HMS" in dock
+    assert "Validate HEC-HMS" in dock
