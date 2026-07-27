@@ -45,6 +45,69 @@ back to `python -m ohqbuilder.cli ui`, so it works before packaging:
 scripts/run_dem_ui.sh
 ```
 
+The Tk launcher includes a multi-basemap tile picker for choosing the outlet
+coordinate interactively. Choose OpenStreetMap roads, Esri World Imagery satellite
+imagery, or OpenTopoMap topography from the **Basemap** menu. Tiles are cached in
+separate provider directories, and the displayed attribution changes with the
+selected source. The launcher intentionally does not scrape undocumented Google
+tile URLs; Google layers can be configured in QGIS with the user's licensed Google
+Maps service. The picker supports zooming and right-click
+recentering, and writes the clicked coordinate back to the outlet
+longitude/latitude fields. The QGIS plugin uses the
+active QGIS map canvas instead, so users can pick points against any basemap or
+GIS layers they have loaded there. If the demo YAML is left with merge-conflict
+markers after a branch update, use **reset Sligo demo** in the Tk launcher to
+rewrite the bundled demo config while preserving the current outlet coordinate.
+The cyan/blue line in the Tk map is the configured hydrography flowline overlay;
+it is used for outlet snapping and visual channel reference, not as a rectangle edge.
+The same map window can draw a rectangular acquisition area with two clicks or a
+custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
+as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
+the **Create final OHQ file** section exposes the existing `prepare-hydrology`,
+`prepare-inputs`, `check-inputs`, and `build` terminal stages.
+**Continue automatically to OHQ** first creates `flow_dir.tif` and `flow_acc.tif`,
+then runs the combined `ohqbuild run` workflow, which creates the outlet before
+running the GIS phases and final build. The launcher prevents overlapping commands,
+so each stage finishes before another can start; **STOP** terminates the active
+command and its child process group when a long download or GIS run must be cancelled.
+For a new real site, **FULL RUN: download all data to OHQ** invokes the terminal
+`full-run` pipeline with the form's verified outlet, root, site, CRS, and download
+directory. That pipeline downloads DEM, hydrography, roads, land cover, Atlas 14,
+hydrologic soil groups, and soil texture; mosaics/clips the GIS sources; runs
+hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/network
+inputs; and writes the final OHQ file. QGIS processing and internet access are
+required for this production path.
+When a rectangle, polygon, or expanded acquisition GeoJSON is active, full-run uses
+its bounds both to enlarge every source-data query and to clip the materialized DEM
+and hydrography. The outlet remains the routing outlet; the drawn area controls data
+coverage rather than replacing the outlet. If the drawn area excludes the outlet,
+full-run expands the clipping bounds with a 500 m outlet safety margin so the DEM,
+flow-direction, and flow-accumulation rasters remain consistent with the outlet.
+The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
+validation, and build stages, using the outlet selected on the active QGIS canvas.
+For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
+enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
+[`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and
+basemap setup.
+Use **Browse…** beside config and path fields to switch projects or folders. The
+launcher also includes **Open Sligo example** and **Open John McCormack example**;
+generated inputs, downloads, site outputs, and the final OHQ are written beneath the
+selected Root shown in the form.
+**Open generated layers in QGIS** starts the installed `qgis` executable and loads
+all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products beneath the
+selected site's `demlr` and `outputs` directories, including the source DEM,
+routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
+become available.
+**RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
+hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
+exist, avoiding manual execution of downstream stages before their prerequisites.
+After phase 1 and phase 2 produce topology, subbasins, reaches, and junctions, the
+**Build HEC-HMS** button writes native `.hms`, `.basin`, `.met`, `.control`, and
+`.run` files under `<Root>/<Site>/outputs/hec_hms`; **Validate HEC-HMS** checks all
+project references. Production full-run now creates both the OHQ and HEC-HMS file set.
+If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
+repeat preparation/download; the status is a refinement request rather than a crash.
+
 For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
 
 ```bash
@@ -76,7 +139,11 @@ ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
 ```
 
 The final file is written to `<ROOT>/<SITE>/outputs/<SITE>.ohq` unless `--out`
-is supplied. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
+is supplied. A review-ready `watershed_report.html` is written beside the OHQ file
+with watershed counts, subbasin area, CN, slope, longest flow path, Tc, lag, and
+links to the OHQ and HEC-HMS artifacts. The snapped outlet layer also records its
+movement and a GREEN/YELLOW/RED quality rating so large automatic adjustments are
+visible in QGIS. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
 maximum-file-size, target-CRS, and soil-resolution options. The downloader checks
 existing files against TNM size metadata, skips valid cached files, and
 redownloads incomplete/corrupt files.
