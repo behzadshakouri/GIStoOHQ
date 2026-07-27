@@ -23,6 +23,11 @@ Then use **Pick outlet**, **Draw rectangle**, or **Draw polygon**. For a rectang
 click one corner and then the opposite corner; the area is saved after the second
 click. For a polygon, click at least three vertices and select **Finish area**.
 
+This starter intentionally has no local DEM tile index. Do not use **Download DEM
+Tiles** or **Materialize Inputs** before source products exist. After verifying the
+outlet/area, click **RUN RECOMMENDED NEXT STEP** (which selects **FULL RUN** for a
+new project) or click **FULL RUN: download all data to OHQ** directly.
+
 For a network-enabled, end-to-end production run using the verified outlet, use:
 
 ```bash

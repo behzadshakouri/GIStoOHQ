@@ -167,6 +167,25 @@ def use_expanded_acquisition(config_path: Path, config: dict[str, Any]) -> Path:
         expanded = config_path.parent / expanded
     if not expanded.is_file():
         raise LauncherError(f"Expanded acquisition area does not exist yet: {expanded}")
+    summary_value = (
+        dem.get("validation_summary") or "intermediate/dem_boundary_validation_summary.json"
+    )
+    summary_path = Path(summary_value).expanduser()
+    if not summary_path.is_absolute():
+        summary_path = config_path.parent / summary_path
+    if not summary_path.is_file() or summary_path.stat().st_mtime < config_path.stat().st_mtime:
+        raise LauncherError(
+            "No current DEM validation produced this expanded area. Run validate-dem first."
+        )
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary_expanded = summary.get("expanded_acquisition_area")
+    if (
+        not summary_expanded
+        or (config_path.parent / summary_expanded).resolve() != expanded.resolve()
+    ):
+        raise LauncherError(
+            "The validation summary does not reference the configured expanded area."
+        )
     dem["acquisition_area"] = _path_for_config_value(expanded, config_path)
     dem["method"] = "polygon"
     return expanded
@@ -570,7 +589,24 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
         return (
             "No DEM manifest exists. Configure a tile index and run prepare-dem, or use FULL RUN."
         )
-    if step == "prepare-hydrology" and state.root is not None and state.site:
+    if step == "materialize-inputs" and state.manifest_path is None:
+        source = state.source_dir
+        if source is None or not source.is_dir() or not any(source.rglob("demlr")):
+            return (
+                "No downloaded DEM products exist. Use FULL RUN to download and materialize data."
+            )
+    if step == "validate-dem" and state.root is not None:
+        config = load_project_config(state.config_path)
+        dem = (
+            config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
+        )
+        watershed = dem.get("watershed_boundary")
+        watershed_path = Path(watershed) if isinstance(watershed, str) else None
+        if watershed_path is not None and not watershed_path.is_absolute():
+            watershed_path = state.config_path.parent / watershed_path
+        if watershed_path is None or not watershed_path.is_file():
+            return "Watershed boundary is missing. Run FULL RUN or Prepare GIS inputs before validate-dem."
+    if step in {"prepare-hydrology", "run-to-ohq"} and state.root is not None and state.site:
         site = state.root / state.site
         if not (site / "demlr" / "cliped_utm.tif").is_file():
             return "Materialized DEM is missing. Run materialize-inputs or FULL RUN first."
@@ -593,6 +629,26 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
         ):
             return "Phase 1/2 model inputs are missing. Run Prepare GIS inputs first."
     return None
+
+
+def recommended_workflow_step(state: LauncherState) -> WorkflowStep:
+    """Choose the next useful action from files already present in a project."""
+    if state.root is None or not state.site:
+        return "full-run"
+    site = state.root / state.site
+    outputs = site / "outputs"
+    if not (site / "demlr" / "cliped_utm.tif").is_file():
+        return "full-run"
+    if not (outputs / "flow_dir.tif").is_file() or not (outputs / "flow_acc.tif").is_file():
+        return "prepare-hydrology"
+    if any(
+        not (outputs / name).is_file()
+        for name in ("topology.gpkg", "subwatershed_params.gpkg", "reaches.gpkg", "junctions.gpkg")
+    ):
+        return "prepare-inputs"
+    if not (outputs / f"{state.site}.ohq").is_file():
+        return "build-ohq"
+    return "build-hms"
 
 
 def sligo_demo_reset_args(
@@ -993,6 +1049,11 @@ class LauncherApp:
                 "examples/JohnMcCormack3600/dem_workflow.example.yaml"
             ),
         ).pack(side="left")
+        tk.Button(
+            project_buttons,
+            text="▶ RUN RECOMMENDED NEXT STEP",
+            command=self.run_recommended_step,
+        ).pack(side="left")
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
         dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         for step in (
@@ -1038,6 +1099,18 @@ class LauncherApp:
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")
+
+    def run_recommended_step(self) -> None:
+        try:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            step = recommended_workflow_step(state)
+            self.messages.put(f"Recommended next step: {step}\n")
+            self.run_step(step)
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: {exc}\n")
 
     def _filedialog(self):
         return importlib.import_module("tkinter.filedialog")

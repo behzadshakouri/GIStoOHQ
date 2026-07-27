@@ -12,6 +12,7 @@ from ohqbuilder.ui.launcher import (
     nearest_point_on_lines,
     osm_tile_cache_path,
     rectangle_from_corners,
+    recommended_workflow_step,
     geojson_preview_summary,
     load_project_config,
     save_project_config,
@@ -369,6 +370,7 @@ def test_john_mccormack_example_config_is_loadable():
 
 def test_use_expanded_acquisition_promotes_validation_output(tmp_path):
     config_path = tmp_path / "config.yaml"
+    config_path.write_text("dem_acquisition: {}\n", encoding="utf-8")
     expanded = tmp_path / "intermediate" / "expanded.geojson"
     expanded.parent.mkdir()
     expanded.write_text("{}", encoding="utf-8")
@@ -377,8 +379,13 @@ def test_use_expanded_acquisition_promotes_validation_output(tmp_path):
             "method": "upstream_network",
             "acquisition_area": "intermediate/area.geojson",
             "expanded_acquisition_area": "intermediate/expanded.geojson",
+            "validation_summary": "intermediate/validation.json",
         }
     }
+    (expanded.parent / "validation.json").write_text(
+        json.dumps({"expanded_acquisition_area": "intermediate/expanded.geojson"}),
+        encoding="utf-8",
+    )
 
     assert use_expanded_acquisition(config_path, config) == expanded
     assert config["dem_acquisition"]["method"] == "polygon"
@@ -471,6 +478,7 @@ def test_ui_prerequisites_direct_new_project_to_full_run(tmp_path):
     assert "materialize-inputs" in workflow_prerequisite_error("prepare-hydrology", state)
     assert "Prepare hydrology" in workflow_prerequisite_error("prepare-inputs", state)
     assert "Prepare GIS inputs" in workflow_prerequisite_error("build-hms", state)
+    assert recommended_workflow_step(state) == "full-run"
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

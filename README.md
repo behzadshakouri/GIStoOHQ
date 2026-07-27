@@ -82,6 +82,9 @@ Use **Browse…** beside config and path fields to switch projects or folders. T
 launcher also includes **Open Sligo example** and **Open John McCormack example**;
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the
 selected Root shown in the form.
+**RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
+hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
+exist, avoiding manual execution of downstream stages before their prerequisites.
 After phase 1 and phase 2 produce topology, subbasins, reaches, and junctions, the
 **Build HEC-HMS** button writes native `.hms`, `.basin`, `.met`, `.control`, and
 `.run` files under `<Root>/<Site>/outputs/hec_hms`; **Validate HEC-HMS** checks all
