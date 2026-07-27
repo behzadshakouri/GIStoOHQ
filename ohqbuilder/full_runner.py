@@ -66,6 +66,31 @@ def buffer_covering_bounds(
     )
 
 
+def bounds_covering_outlet(
+    bounds: tuple[float, float, float, float],
+    lon: float,
+    lat: float,
+    *,
+    margin_m: float = 500.0,
+) -> tuple[float, float, float, float]:
+    """Expand acquisition bounds so routing rasters safely contain the outlet.
+
+    A user-drawn polygon may not contain the selected outlet, and exact clipping
+    to that polygon's bounds previously produced a DEM/flow-accumulation raster
+    that could not be used by the outlet written from the same UI coordinates.
+    """
+
+    minx, miny, maxx, maxy = bounds
+    lat_margin = max(margin_m, 0.0) / 111_320.0
+    lon_margin = lat_margin / max(math.cos(math.radians(lat)), 0.1)
+    return (
+        min(minx, lon - lon_margin),
+        min(miny, lat - lat_margin),
+        max(maxx, lon + lon_margin),
+        max(maxy, lat + lat_margin),
+    )
+
+
 def run_full_pipeline(
     root: str | Path,
     site: str,
@@ -98,6 +123,13 @@ def run_full_pipeline(
         emit("Starting full-run pipeline.")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         if selected_bounds is not None:
+            original_bounds = selected_bounds
+            selected_bounds = bounds_covering_outlet(selected_bounds, lon, lat)
+            if selected_bounds != original_bounds:
+                emit(
+                    "Expanded acquisition clipping bounds to retain a 500 m safety margin "
+                    "around the selected outlet."
+                )
             required_buffer = buffer_covering_bounds(lon, lat, selected_bounds)
             buffer_m = max(buffer_m, required_buffer * 1.05)
             emit(

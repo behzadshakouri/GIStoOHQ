@@ -1068,99 +1068,96 @@ class LauncherApp:
                 ).grid(row=row, column=2, sticky="w")
         project_buttons = tk.LabelFrame(frame, text="Project and map")
         project_buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=4)
-        tk.Button(project_buttons, text="Load config", command=self.load_config).pack(side="left")
-        tk.Button(project_buttons, text="Save config", command=self.save_config).pack(side="left")
-        tk.Button(
-            project_buttons, text="Preview acquisition", command=self.preview_acquisition
-        ).pack(side="left")
-        tk.Button(project_buttons, text="Pick outlet", command=self.pick_outlet_map).pack(
-            side="left"
-        )
-        tk.Button(
-            project_buttons,
-            text="Draw rectangle",
-            command=lambda: self.open_map_picker("Rectangle"),
-        ).pack(side="left")
-        tk.Button(
-            project_buttons,
-            text="Draw polygon",
-            command=lambda: self.open_map_picker("Polygon"),
-        ).pack(side="left")
-        tk.Button(project_buttons, text="Reset Sligo demo", command=self.reset_sligo_demo).pack(
-            side="left"
-        )
-        tk.Button(
-            project_buttons,
-            text="Open Sligo example",
-            command=lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
-        ).pack(side="left")
-        tk.Button(
-            project_buttons,
-            text="Open John McCormack example",
-            command=lambda: self.open_example(
-                "examples/JohnMcCormack3600/dem_workflow.example.yaml"
+        project_specs = (
+            ("Load config", self.load_config),
+            ("Save config", self.save_config),
+            ("Preview acquisition", self.preview_acquisition),
+            ("Pick outlet", self.pick_outlet_map),
+            ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
+            ("Draw polygon", lambda: self.open_map_picker("Polygon")),
+            ("Reset Sligo demo", self.reset_sligo_demo),
+            (
+                "Open Sligo example",
+                lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
             ),
-        ).pack(side="left")
+            (
+                "Open John McCormack example",
+                lambda: self.open_example(
+                    "examples/JohnMcCormack3600/dem_workflow.example.yaml"
+                ),
+            ),
+        )
+        for index, (label, command) in enumerate(project_specs):
+            tk.Button(project_buttons, text=label, command=command).grid(
+                row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew"
+            )
         recommended_button = tk.Button(
             project_buttons,
             text="▶ RUN RECOMMENDED NEXT STEP",
             command=self.run_recommended_step,
         )
-        recommended_button.pack(side="left")
+        recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
             command=self.open_generated_layers_in_qgis,
-        ).pack(side="left")
+        ).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
         self.stop_button = tk.Button(
             project_buttons, text="■ STOP", command=self.stop_workflow, state="disabled"
         )
-        self.stop_button.pack(side="left")
+        self.stop_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
+        for column in range(4):
+            project_buttons.columnconfigure(column, weight=1, uniform="project_buttons")
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
         dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
-        for step in (
+        for index, step in enumerate((
             "init-dem-config",
             "prepare-dem",
             "run-dem-prep",
             "download-dem-manifest",
             "materialize-inputs",
             "validate-dem",
-        ):
+        )):
             button = tk.Button(
                 dem_buttons, text=step, command=lambda value=step: self.run_step(value)
             )
-            button.pack(side="left")
+            button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
-        tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).pack(
-            side="left"
+        tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).grid(
+            row=1, column=2, padx=2, pady=2, sticky="ew"
         )
+        for column in range(4):
+            dem_buttons.columnconfigure(column, weight=1, uniform="dem_buttons")
         ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
         ohq_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
-        for label, step in (
+        for index, (label, step) in enumerate((
             ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
             ("Check inputs", "check-inputs"),
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
-        ):
+        )):
             button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
-            button.pack(side="left")
+            button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+        for column in range(3):
+            ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
         hms_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
-        for label, step in (
+        for index, (label, step) in enumerate((
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
-        ):
+        )):
             button = tk.Button(
                 hms_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
-            button.pack(side="left")
+            button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)

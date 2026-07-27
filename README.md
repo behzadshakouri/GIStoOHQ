@@ -76,7 +76,9 @@ required for this production path.
 When a rectangle, polygon, or expanded acquisition GeoJSON is active, full-run uses
 its bounds both to enlarge every source-data query and to clip the materialized DEM
 and hydrography. The outlet remains the routing outlet; the drawn area controls data
-coverage rather than replacing the outlet.
+coverage rather than replacing the outlet. If the drawn area excludes the outlet,
+full-run expands the clipping bounds with a 500 m outlet safety margin so the DEM,
+flow-direction, and flow-accumulation rasters remain consistent with the outlet.
 The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
 validation, and build stages, using the outlet selected on the active QGIS canvas.
 Use **Browse…** beside config and path fields to switch projects or folders. The
