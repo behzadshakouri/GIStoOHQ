@@ -292,6 +292,11 @@ if missing:
     print("\n*** subwatershed(s) with NULL CN (no classified cells inside):", missing)
     print("    check that cn.tif covers these polygons.")
     print("    also check unmatched NLCD/HSG pairs in buildcnraster.py output.")
+    if len(missing) == n:
+        raise Exception(
+            "CN is NULL for every subwatershed. Stop before Tc calculation and verify that "
+            "cn.tif shares the DEM grid and contains classified cells over the polygons."
+        )
 
 
 if ADD_TO_PROJECT and out_lyr.isValid():

@@ -72,3 +72,31 @@ def test_phase2_watershed_delineation_has_single_outlet_fallback_and_early_failu
     assert "Pour-point CRS transformed" in source
     assert "Pour point falls outside flow_acc.tif after CRS transformation" in source
     assert "No watershed polygons were generated" in source
+
+
+def test_tc_converts_qvariant_attributes_before_arithmetic():
+    source = Path("scripts/legacy_gis/compute_tc.py").read_text(encoding="utf-8")
+
+    assert "def as_float(value):" in source
+    assert 'Sp = as_float(ft["slope_pct"])' in source
+    assert 'CN = as_float(ft["CN"])' in source
+
+
+def test_cn_preparation_stamps_exact_dem_grid_and_rejects_empty_coverage():
+    prep = Path("scripts/legacy_gis/prepcngrid.py").read_text(encoding="utf-8")
+    build = Path("scripts/legacy_gis/buildcnraster.py").read_text(encoding="utf-8")
+
+    assert "warped.SetGeoTransform(gt)" in prep
+    assert "warped.SetProjection(srs)" in prep
+    assert "Aligned CN inputs contain no classified cells" in prep
+    assert "land cover and HSG geotransforms differ" in build
+    assert "CN raster contains no classified cells" in build
+
+
+def test_zonal_parameters_fail_early_when_cn_or_slope_has_no_coverage():
+    cn = Path("scripts/legacy_gis/zonal_cn.py").read_text(encoding="utf-8")
+    slope = Path("scripts/legacy_gis/extract_slope.py").read_text(encoding="utf-8")
+
+    assert "CN is NULL for every subwatershed" in cn
+    assert "Slope is NULL for every subwatershed" in slope
+    assert 'slope_by_id[id_key(ft["id"])] = as_float' in slope
