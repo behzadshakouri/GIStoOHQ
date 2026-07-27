@@ -42,6 +42,30 @@ The installer creates a symbolic development link. Repository edits therefore
 become available after disabling/re-enabling the plugin or restarting QGIS; the
 installer does not need to be rerun after each edit.
 
+## Update an existing development installation
+
+Pull the current branch, refresh the editable Python package, and clear plugin
+bytecode for the QGIS profile:
+
+```bash
+cd /path/to/GIStoOHQ
+git pull --ff-only
+source .venv/bin/activate
+python -m pip install -e '.[gis]'
+scripts/update_qgis_plugin.sh
+```
+
+For another profile, pass its name, for example
+`scripts/update_qgis_plugin.sh field-work`. Then, in QGIS, disable and re-enable
+**GIStoOHQ DEM Workflow** under **Plugins > Manage and Install Plugins >
+Installed**. The Plugin Reloader plugin can perform the same reload during UI
+development. Fully restart QGIS after changes to dock classes, plugin lifecycle
+code, dependencies, or when a reload still shows old behavior.
+
+Because the installation is a symbolic link, do not copy files into the QGIS
+profile manually. The update script verifies the link and removes `__pycache__`
+and `.pyc` files without deleting project data or generated watershed outputs.
+
 ## Basemaps in QGIS
 
 The plugin uses the active QGIS canvas, so any licensed or configured basemap can

@@ -66,6 +66,9 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert ">1517<" in content
     assert ">13.8<" in content
     assert str(tmp_path / "site.hms") in content
+    assert "GREEN: less than 20 m" in content
+    assert "YELLOW: 20–75 m" in content
+    assert "RED: greater than 75 m" in content
 
 
 def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):

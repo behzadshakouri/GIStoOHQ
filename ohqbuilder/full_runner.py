@@ -118,6 +118,8 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <ul><li>Watershed area: <strong>{area:.4f} km²</strong></li>
 <li>Subbasins: {len(subbasins)}</li><li>Reaches: {len(reaches)}</li>
 <li>Junctions: {len(junctions)}</li></ul>
+<h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
+<li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>

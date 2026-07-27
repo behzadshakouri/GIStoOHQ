@@ -11,6 +11,17 @@ def test_qgis_plugin_scaffold_files_exist():
     assert "GIStoOHQ DEM Workflow" in (root / "metadata.txt").read_text(encoding="utf-8")
 
 
+def test_qgis_plugin_update_script_refreshes_link_and_bytecode():
+    script = Path("scripts/update_qgis_plugin.sh")
+    source = script.read_text(encoding="utf-8")
+
+    assert script.is_file()
+    assert "install_qgis_plugin.sh" in source
+    assert "__pycache__" in source
+    assert "'*.pyc'" in source
+    assert "disable and re-enable the plugin" in source
+
+
 def test_qgis_plugin_registers_an_actual_qdockwidget():
     plugin = Path("qgis_plugin/gistoohq_dem_workflow/plugin.py").read_text(encoding="utf-8")
 
