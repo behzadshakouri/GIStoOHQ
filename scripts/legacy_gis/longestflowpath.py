@@ -70,6 +70,7 @@ except NameError:
     SITE_DIR = "WS3_GIS/AZ12-100"
 
 FLOWDIR_NAME = "flow_dir.tif"
+FLOWACC_NAME = "flow_acc.tif"
 ROUTING_DEM_NAME = "dem_carved.tif"
 
 SUBWS_NAME = "subwatersheds.gpkg"
@@ -89,6 +90,8 @@ ADD_TO_PROJECT = True
 # Maximum number of cells used when snapping an outlet back into its polygon.
 # This is only a safety guard. Normally the snapped point is already inside.
 OUTLET_SEARCH_RADIUS_CELLS = 30
+OUTLET_CANDIDATE_LIMIT = 12
+MIN_REACHED_FRACTION = 0.05
 
 # -----------------------------------------------------------------------------
 # GRASS flow-direction coding
@@ -115,6 +118,7 @@ site = os.path.join(ROOT, SITE_DIR)
 out_dir = os.path.join(site, "outputs")
 
 fd_path = os.path.join(out_dir, FLOWDIR_NAME)
+fa_path = os.path.join(out_dir, FLOWACC_NAME)
 routing_dem_path = os.path.join(out_dir, ROUTING_DEM_NAME)
 
 # Prefer the unmodified DEM for elevations. It normally has the same grid as
@@ -128,7 +132,7 @@ lfp_path = os.path.join(out_dir, LFP_NAME)
 
 print("Site :", site)
 
-for required_path in (fd_path, routing_dem_path, subws_path, pour_path, params_path):
+for required_path in (fd_path, fa_path, routing_dem_path, subws_path, pour_path, params_path):
     if not os.path.isfile(required_path):
         raise Exception("not found: " + required_path)
 
@@ -151,10 +155,21 @@ def open_single_band_array(path, dtype=None):
 
 
 fd_ds, flow_dir = open_single_band_array(fd_path, np.int16)
+fa_ds, flow_acc = open_single_band_array(fa_path, np.float64)
 gt = fd_ds.GetGeoTransform()
 projection_wkt = fd_ds.GetProjection()
 nx = fd_ds.RasterXSize
 ny = fd_ds.RasterYSize
+
+if (
+    fa_ds.RasterXSize != nx
+    or fa_ds.RasterYSize != ny
+    or any(
+        abs(float(a) - float(b)) > 1.0e-7
+        for a, b in zip(fa_ds.GetGeoTransform(), gt)
+    )
+):
+    raise Exception("flow_acc.tif grid does not match flow_dir.tif")
 
 pixel_x = abs(float(gt[1]))
 pixel_y = abs(float(gt[5]))
@@ -268,45 +283,33 @@ def rasterize_geometry(geometry, row0, row1, col0, col1):
     return mask.astype(bool, copy=False)
 
 
-def nearest_mask_cell(mask, row_local, col_local, max_radius):
+def outlet_mask_candidates(mask, row_local, col_local, row0, col0, max_radius):
+    """Rank nearby mask cells by routed accumulation, then proximity.
+
+    A polygonized watershed outlet frequently lies on the polygon boundary. A
+    nearest-cell-only snap can therefore select the adjacent non-outlet cell and
+    reduce an otherwise complete upstream traversal to one or two cells. Testing
+    a small set of high-accumulation candidates makes the result deterministic
+    across minor polygon/raster alignment differences.
     """
-    Return the nearest True mask cell to the requested local row/column.
-
-    First performs an expanding-window search. If that fails, it falls back to
-    a vectorized nearest-cell search over the full local mask.
-    """
-    height, width = mask.shape
-
-    if (
-        0 <= row_local < height
-        and 0 <= col_local < width
-        and bool(mask[row_local, col_local])
-    ):
-        return row_local, col_local
-
-    for radius in range(1, max_radius + 1):
-        rr0 = max(0, row_local - radius)
-        rr1 = min(height - 1, row_local + radius)
-        cc0 = max(0, col_local - radius)
-        cc1 = min(width - 1, col_local + radius)
-
-        sub = mask[rr0 : rr1 + 1, cc0 : cc1 + 1]
-        local_rows, local_cols = np.nonzero(sub)
-
-        if local_rows.size:
-            rows = local_rows + rr0
-            cols = local_cols + cc0
-            dist2 = (rows - row_local) ** 2 + (cols - col_local) ** 2
-            index = int(np.argmin(dist2))
-            return int(rows[index]), int(cols[index])
-
     rows, cols = np.nonzero(mask)
     if rows.size == 0:
-        return None
+        return []
 
     dist2 = (rows - row_local) ** 2 + (cols - col_local) ** 2
-    index = int(np.argmin(dist2))
-    return int(rows[index]), int(cols[index])
+    nearby = dist2 <= max_radius**2
+    if np.any(nearby):
+        rows = rows[nearby]
+        cols = cols[nearby]
+        dist2 = dist2[nearby]
+
+    accum = np.abs(flow_acc[rows + row0, cols + col0])
+    accum = np.where(np.isfinite(accum), accum, -1.0)
+    order = np.lexsort((dist2, -accum))
+    return [
+        (int(rows[index]), int(cols[index]))
+        for index in order[:OUTLET_CANDIDATE_LIMIT]
+    ]
 
 
 def step_length(drow, dcol):
@@ -622,14 +625,16 @@ for index, subwatershed in enumerate(subwatersheds.getFeatures(), start=1):
     outlet_local_row = outlet_row - row0
     outlet_local_col = outlet_col - col0
 
-    snapped_local = nearest_mask_cell(
+    candidates = outlet_mask_candidates(
         mask,
         outlet_local_row,
         outlet_local_col,
+        row0,
+        col0,
         OUTLET_SEARCH_RADIUS_CELLS,
     )
 
-    if snapped_local is None:
+    if not candidates:
         print("  [%d/%d] id %s: no valid outlet cell" %
               (index, feature_count, sid))
         results[sid] = {
@@ -641,25 +646,51 @@ for index, subwatershed in enumerate(subwatersheds.getFeatures(), start=1):
         }
         continue
 
-    snapped_local_row, snapped_local_col = snapped_local
-    outlet_global = (
-        snapped_local_row + row0,
-        snapped_local_col + col0,
-    )
+    best = None
+    for candidate_row, candidate_col in candidates:
+        candidate_global = (candidate_row + row0, candidate_col + col0)
+        candidate_result = find_longest_upstream_cell(
+            mask, row0, col0, candidate_global
+        )
+        farthest_cell, distance_m, reached = candidate_result
+        shift2 = (
+            (candidate_col - outlet_local_col) ** 2
+            + (candidate_row - outlet_local_row) ** 2
+        )
+        score = (reached, distance_m, -shift2)
+        if best is None or score > best[0]:
+            best = (
+                score,
+                candidate_row,
+                candidate_col,
+                farthest_cell,
+                distance_m,
+                reached,
+            )
+
+    (
+        _,
+        snapped_local_row,
+        snapped_local_col,
+        farthest_global,
+        longest_distance_m,
+        visited_count,
+    ) = best
+    outlet_global = (snapped_local_row + row0, snapped_local_col + col0)
 
     outlet_shift_m = math.hypot(
         (snapped_local_col - outlet_local_col) * pixel_x,
         (snapped_local_row - outlet_local_row) * pixel_y,
     )
 
-    farthest_global, longest_distance_m, visited_count = (
-        find_longest_upstream_cell(
-            mask,
-            row0,
-            col0,
-            outlet_global,
+    minimum_reached = max(3, int(math.ceil(mask_cell_count * MIN_REACHED_FRACTION)))
+    if visited_count < minimum_reached:
+        raise Exception(
+            "Longest-flow-path outlet candidates reached only %d of %d watershed cells "
+            "for id %s (minimum %d). Refusing to write an implausibly short path; "
+            "inspect pour_points_snapped.gpkg and the flow-direction grid."
+            % (visited_count, mask_cell_count, sid, minimum_reached)
         )
-    )
 
     path = trace_to_outlet(
         farthest_global,
