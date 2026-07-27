@@ -61,8 +61,14 @@ def _write_manifest(
     summary_csv: Path,
     products: list[ProductKey],
 ) -> None:
+    def display_path(value: Path) -> str:
+        try:
+            return str(value.relative_to(path.parent))
+        except ValueError:
+            return str(value)
+
     outlet_line = (
-        f"- Created `{outlet_path.relative_to(path.parent)}` from the supplied WGS84 coordinate."
+        f"- Created `{display_path(outlet_path)}` from the supplied WGS84 coordinate."
         if outlet_path
         else "- Skipped outlet creation because `--skip-outlet` was used."
     )
@@ -76,8 +82,8 @@ def _write_manifest(
                 "",
                 outlet_line,
                 product_lines,
-                f"- Raw TNM downloads are under `{download_dir.relative_to(path.parent)}`.",
-                f"- Download/query details are in `{summary_csv.relative_to(path.parent)}`.",
+                f"- Raw TNM downloads are under `{display_path(download_dir)}`.",
+                f"- Download/query details are in `{display_path(summary_csv)}`.",
                 "",
                 "## Still required before `prepare-inputs`",
                 "",

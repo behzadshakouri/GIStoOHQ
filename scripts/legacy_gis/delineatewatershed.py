@@ -129,6 +129,7 @@ from qgis.core import (  # noqa: E402
     QgsField,
     QgsVectorFileWriter,
     QgsWkbTypes,
+    QgsCoordinateTransform,
     QgsCoordinateTransformContext,
 )
 from qgis.PyQt.QtCore import QVariant  # noqa: E402
@@ -216,10 +217,22 @@ def grass_id(name):
 fdir = QgsRasterLayer(FLOWDIR_PATH, "flow_dir")
 if not fdir.isValid():
     raise Exception("Flow direction raster invalid: " + FLOWDIR_PATH)
+grid_crs = fdir.crs()
+if not grid_crs.isValid():
+    raise Exception("Flow direction raster has no valid CRS: " + FLOWDIR_PATH)
 
 pts = QgsVectorLayer(POINTS_PATH, "pour_points", "ogr")
 if not pts.isValid():
     raise Exception("Pour points layer invalid: " + POINTS_PATH)
+if not pts.crs().isValid():
+    raise Exception("Pour points layer has no valid CRS: " + POINTS_PATH)
+point_transform = None
+if pts.crs() != grid_crs:
+    point_transform = QgsCoordinateTransform(pts.crs(), grid_crs, QgsProject.instance())
+    print(
+        "Pour-point CRS transformed: %s -> %s"
+        % (pts.crs().authid(), grid_crs.authid())
+    )
 
 print("Points      :", pts.featureCount())
 
@@ -248,7 +261,11 @@ def snap_point(x, y):
     row = int((y - origin_y) / px_h)
 
     if col < 0 or col >= nx or row < 0 or row >= ny:
-        return x, y
+        raise Exception(
+            "Pour point falls outside flow_acc.tif after CRS transformation: "
+            "point=(%.2f, %.2f). Expand/rematerialize the DEM around the selected "
+            "outlet before Phase 2." % (x, y)
+        )
 
     c0 = max(0, col - SNAP_CELLS)
     c1 = min(nx, col + SNAP_CELLS + 1)
@@ -272,6 +289,30 @@ print("\nDelineating one watershed per point...")
 made = []
 field_names = [field.name() for field in pts.fields()]
 
+
+def use_whole_watershed_fallback(tag, cleaned):
+    """Use the Phase 1 boundary for a one-outlet/one-subbasin model."""
+    if pts.featureCount() != 1:
+        return False
+    boundary_path = os.path.join(OUT_DIR, "watershed_boundary.gpkg")
+    boundary = QgsVectorLayer(boundary_path, "watershed_boundary", "ogr")
+    if not boundary.isValid() or boundary.featureCount() == 0:
+        return False
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        candidate = cleaned + suffix
+        if os.path.exists(candidate):
+            os.remove(candidate)
+    qgis_run(
+        "native:savefeatures",
+        {"INPUT": boundary, "OUTPUT": cleaned},
+    )
+    made.append((tag, cleaned))
+    print(
+        "      watershed raster was empty; used the Phase 1 whole-watershed "
+        "boundary for this single-outlet model"
+    )
+    return True
+
 for i, feat in enumerate(pts.getFeatures(), start=1):
     geom = feat.geometry()
 
@@ -281,6 +322,9 @@ for i, feat in enumerate(pts.getFeatures(), start=1):
 
     pt = geom.asPoint()
     x, y = pt.x(), pt.y()
+    if point_transform is not None:
+        grid_point = point_transform.transform(QgsPointXY(x, y))
+        x, y = grid_point.x(), grid_point.y()
 
     if SNAP:
         sx, sy = snap_point(x, y)
@@ -329,7 +373,13 @@ for i, feat in enumerate(pts.getFeatures(), start=1):
                 pass
 
     src = gdal.Open(wat_ras)
+    if src is None:
+        if use_whole_watershed_fallback(tag, cleaned):
+            continue
+        raise Exception("r.water.outlet did not create a readable raster for id='%s'" % tag)
     band = src.GetRasterBand(1)
+    watershed_values = band.ReadAsArray()
+    has_watershed_cells = bool(np.any(watershed_values == 1))
 
     srs = osr.SpatialReference()
     srs.ImportFromWkt(src.GetProjection())
@@ -345,8 +395,10 @@ for i, feat in enumerate(pts.getFeatures(), start=1):
 
     poly_layer = QgsVectorLayer(wat_vec + "|layername=wshed", "wshed_%s_poly" % safe, "ogr")
 
-    if not poly_layer.isValid() or poly_layer.featureCount() == 0:
+    if not has_watershed_cells or not poly_layer.isValid() or poly_layer.featureCount() == 0:
         print("      WARNING: polygonize produced no polygons for id='%s', skipping" % tag)
+        if use_whole_watershed_fallback(tag, cleaned):
+            continue
         continue
 
     sel = qgis_run(
@@ -357,6 +409,15 @@ for i, feat in enumerate(pts.getFeatures(), start=1):
             "OUTPUT": "TEMPORARY_OUTPUT",
         },
     )
+
+    selected_layer = sel["OUTPUT"]
+    if isinstance(selected_layer, str):
+        selected_layer = QgsVectorLayer(selected_layer, "selected_wshed", "ogr")
+    if not selected_layer.isValid() or selected_layer.featureCount() == 0:
+        print("      WARNING: watershed raster contains no DN=1 cells for id='%s'" % tag)
+        if use_whole_watershed_fallback(tag, cleaned):
+            continue
+        continue
 
     diss = qgis_run(
         "native:dissolve",
@@ -406,14 +467,18 @@ if SNAP and made:
         snapped_path,
         fields,
         QgsWkbTypes.Point,
-        pts.crs(),
+        grid_crs,
         QgsCoordinateTransformContext(),
         opts,
     )
 
     for i, feat in enumerate(pts.getFeatures(), start=1):
         pt = feat.geometry().asPoint()
-        sx, sy = snap_point(pt.x(), pt.y())
+        x, y = pt.x(), pt.y()
+        if point_transform is not None:
+            grid_point = point_transform.transform(QgsPointXY(x, y))
+            x, y = grid_point.x(), grid_point.y()
+        sx, sy = snap_point(x, y)
 
         f2 = QgsFeature(fields)
         f2.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(sx, sy)))
@@ -436,6 +501,12 @@ if ADD_TO_PROJECT:
 
 
 print("\nDone. %d watershed(s) in %s" % (len(made), OUT_DIR))
+if not made:
+    raise Exception(
+        "No watershed polygons were generated. Check that the snapped pour point is inside "
+        "flow_acc.tif, that flow_dir.tif contains routed cells at the point, and that the "
+        "materialized DEM covers the selected outlet before continuing Phase 2."
+    )
 print("Scratch rasters are in temp/ (safe to delete).")
 print("If a watershed does not climb the channel after snapping, the channel")
 print("is not continuously downhill there -- in fillsink_etc.py use")

@@ -26,6 +26,7 @@
 # =============================================================================
 import os
 import glob
+import numpy as np
 from osgeo import gdal
 from qgis.core import QgsProject, QgsRasterLayer
 gdal.UseExceptions()
@@ -90,18 +91,47 @@ def bounds_from(gt, nx, ny):
 def align_to_template(src, dst, srs, bounds, nx, ny, nodata=0):
     if os.path.exists(dst):
         os.remove(dst)
-    gdal.Warp(
+    src_ds = gdal.Open(src)
+    if src_ds is None:
+        raise Exception("Could not open categorical raster: " + src)
+    src_nodata = src_ds.GetRasterBand(1).GetNoDataValue()
+    src_ds = None
+    warped = gdal.Warp(
         dst, src,
         options=gdal.WarpOptions(
             dstSRS=srs,
             outputBounds=bounds,          # (minx, miny, maxx, maxy) in dst CRS
             width=nx, height=ny,          # exact pixel grid of the template
             resampleAlg="near",           # categorical -> nearest only
-            srcNodata=nodata, dstNodata=nodata,
+            srcNodata=src_nodata, dstNodata=nodata,
             outputType=gdal.GDT_Byte,
             creationOptions=["COMPRESS=LZW"],
         ),
     )
+    if warped is None:
+        raise Exception("Could not align raster to DEM grid: " + src)
+    # outputBounds+width/height can differ from the template by floating-point
+    # roundoff. Stamp the authoritative template metadata exactly so every
+    # downstream categorical operation is cell-for-cell identical to the DEM.
+    warped.SetGeoTransform(gt)
+    warped.SetProjection(srs)
+    warped.FlushCache()
+    warped = None
+
+
+def classified_cell_count(path):
+    ds = gdal.Open(path)
+    if ds is None:
+        return 0
+    band = ds.GetRasterBand(1)
+    values = band.ReadAsArray()
+    nodata = band.GetNoDataValue()
+    valid = values != 0
+    if nodata is not None:
+        valid &= values != nodata
+    count = int(np.count_nonzero(valid))
+    ds = None
+    return count
 
 
 # --- template grid from the DEM --------------------------------------------
@@ -122,11 +152,21 @@ _, gt_lc,  nx_lc,  ny_lc  = grid_of(out_lc)
 _, gt_hsg, nx_hsg, ny_hsg = grid_of(out_hsg)
 same = (nx_lc == nx == nx_hsg and ny_lc == ny == ny_hsg
         and gt_lc == gt and gt_hsg == gt)
+lc_valid = classified_cell_count(out_lc)
+hsg_valid = classified_cell_count(out_hsg)
 
 print("\nWrote:")
 print("  %s  (%d x %d)" % (OUT_LC, nx_lc, ny_lc))
 print("  %s  (%d x %d)" % (OUT_HSG, nx_hsg, ny_hsg))
 print("Grid match with DEM:", "YES" if same else "NO -- check inputs")
+print("Classified cells: land cover=%d HSG=%d" % (lc_valid, hsg_valid))
+if not same:
+    raise Exception("CN input grids do not exactly match the DEM template after alignment.")
+if lc_valid == 0 or hsg_valid == 0:
+    raise Exception(
+        "Aligned CN inputs contain no classified cells over the watershed. Check source "
+        "coverage and CRS before running buildcnraster.py."
+    )
 
 # --- load into the QGIS project --------------------------------------------
 if ADD_TO_PROJECT:

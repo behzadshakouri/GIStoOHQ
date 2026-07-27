@@ -27,7 +27,7 @@ def trapezoidal_channel_properties(reach: Reach) -> list[tuple[str, str]]:
         Channel-segment length.
     base_width_m or width_m
         Bottom width of the trapezoidal section.
-    side_slope or side_slope_hv
+    side_slope_z, side_slope, or side_slope_hv
         Horizontal-to-vertical bank slope, e.g. 2 for 2H:1V.
     manning_n
         Manning roughness coefficient.
@@ -46,8 +46,11 @@ def trapezoidal_channel_properties(reach: Reach) -> list[tuple[str, str]]:
     base_width = max(base_width, 0.05)
 
     side_slope = _number(
-        getattr(reach, "side_slope", None),
-        _number(getattr(reach, "side_slope_hv", None), 2.0),
+        getattr(reach, "side_slope_z", None),
+        _number(
+            getattr(reach, "side_slope", None),
+            _number(getattr(reach, "side_slope_hv", None), 2.0),
+        ),
     )
     side_slope = max(side_slope, 0.01)
 
