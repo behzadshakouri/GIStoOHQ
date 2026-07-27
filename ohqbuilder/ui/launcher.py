@@ -170,6 +170,7 @@ WorkflowStep = Literal[
     "download-dem-manifest",
     "materialize-inputs",
     "validate-dem",
+    "prepare-hydrology",
     "prepare-inputs",
     "check-inputs",
     "build-ohq",
@@ -185,6 +186,12 @@ class LauncherError(RuntimeError):
 class WorkflowCommand:
     label: str
     argv: tuple[str, ...]
+    followup_argv: tuple[tuple[str, ...], ...] = ()
+
+
+@dataclass(frozen=True)
+class RunnerFinished:
+    status: int
 
 
 @dataclass(frozen=True)
@@ -304,24 +311,35 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         if state.manifest_path is not None:
             argv.extend(("--dem-manifest", str(state.manifest_path)))
         return WorkflowCommand("Materialize Inputs", tuple(argv))
-    if step in {"prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
+    if step in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for OHQ workflow commands.")
         command = {
+            "prepare-hydrology": "prepare-hydrology",
             "prepare-inputs": "prepare-inputs",
             "check-inputs": "check-inputs",
             "build-ohq": "build",
             "run-to-ohq": "run",
         }[step]
         label = {
+            "prepare-hydrology": "Prepare Hydrology",
             "prepare-inputs": "Prepare OHQ Inputs",
             "check-inputs": "Check OHQ Inputs",
             "build-ohq": "Build OHQ File",
             "run-to-ohq": "Continue to OHQ",
         }[step]
-        return WorkflowCommand(
-            label, ("ohqbuild", command, "--root", str(state.root), "--site", state.site)
-        )
+        argv = ("ohqbuild", command, "--root", str(state.root), "--site", state.site)
+        if step == "run-to-ohq":
+            hydrology = (
+                "ohqbuild",
+                "prepare-hydrology",
+                "--root",
+                str(state.root),
+                "--site",
+                state.site,
+            )
+            return WorkflowCommand(label, hydrology, (argv,))
+        return WorkflowCommand(label, argv)
     raise LauncherError(f"Unsupported workflow step: {step}")
 
 
@@ -495,23 +513,32 @@ def geojson_preview_summary(path: str | Path) -> str:
 
 
 class CommandRunner(threading.Thread):
-    def __init__(self, command: WorkflowCommand, messages: queue.Queue[str]):
+    def __init__(self, command: WorkflowCommand, messages: queue.Queue[Any]):
         super().__init__(daemon=True)
         self.command = command
         self.messages = messages
 
     def run(self) -> None:
-        self.messages.put(f"$ {' '.join(self.command.argv)}\n")
-        process = subprocess.Popen(
-            self.command.argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        assert process.stdout is not None
-        for line in process.stdout:
-            self.messages.put(line)
-        status = process.wait()
+        status = 0
+        commands = (self.command.argv, *self.command.followup_argv)
+        try:
+            for argv in commands:
+                self.messages.put(f"$ {' '.join(argv)}\n")
+                process = subprocess.Popen(
+                    argv,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                assert process.stdout is not None
+                for line in process.stdout:
+                    self.messages.put(line)
+                status = process.wait()
+                if status != 0:
+                    break
+        except OSError as exc:
+            status = 2
+            self.messages.put(f"Could not start workflow command: {exc}\n")
         self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
         if self.command.label == "Validate DEM" and status == 3:
             self.messages.put(
@@ -519,6 +546,7 @@ class CommandRunner(threading.Thread):
                 "EXPAND result, not a crash; review the generated expanded GeoJSON, then draw "
                 "or select the larger area and repeat DEM preparation.\n"
             )
+        self.messages.put(RunnerFinished(status))
 
 
 class MapPicker:
@@ -741,7 +769,8 @@ class LauncherApp:
                 "Use SSH X forwarding, a desktop terminal, or the terminal commands instead."
             ) from exc
         self.root.title("GIStoOHQ DEM Workflow Launcher")
-        self.messages: queue.Queue[str] = queue.Queue()
+        self.messages: queue.Queue[Any] = queue.Queue()
+        self.command_running = False
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
@@ -812,6 +841,7 @@ class LauncherApp:
         ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
         ohq_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
         for label, step in (
+            ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
             ("Check inputs", "check-inputs"),
             ("Build OHQ", "build-ohq"),
@@ -954,6 +984,11 @@ class LauncherApp:
             self.messages.put(f"ERROR: {exc}\n")
 
     def run_step(self, step: WorkflowStep) -> None:
+        if self.command_running:
+            self.messages.put(
+                "A workflow command is already running. Wait for it to finish before starting the next step.\n"
+            )
+            return
         try:
             state = self.state()
             config_path = Path(self.config_var.get()).expanduser()
@@ -963,6 +998,7 @@ class LauncherApp:
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
             return
+        self.command_running = True
         CommandRunner(command, self.messages).start()
 
     def _poll_messages(self) -> None:
@@ -971,6 +1007,9 @@ class LauncherApp:
                 message = self.messages.get_nowait()
             except queue.Empty:
                 break
+            if isinstance(message, RunnerFinished):
+                self.command_running = False
+                continue
             self.log.insert("end", message)
             self.log.see("end")
         self.root.after(100, self._poll_messages)

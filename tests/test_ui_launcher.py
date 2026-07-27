@@ -328,10 +328,10 @@ def test_use_expanded_acquisition_promotes_validation_output(tmp_path):
 @pytest.mark.parametrize(
     ("step", "subcommand"),
     [
+        ("prepare-hydrology", "prepare-hydrology"),
         ("prepare-inputs", "prepare-inputs"),
         ("check-inputs", "check-inputs"),
         ("build-ohq", "build"),
-        ("run-to-ohq", "run"),
     ],
 )
 def test_ui_launcher_builds_final_ohq_commands(step, subcommand):
@@ -340,6 +340,15 @@ def test_ui_launcher_builds_final_ohq_commands(step, subcommand):
     command = command_for_step(step, state)
 
     assert command.argv == ("ohqbuild", subcommand, "--root", "project", "--site", "Demo")
+
+
+def test_continue_to_ohq_prepares_hydrology_before_combined_run():
+    state = LauncherState(config_path=Path("config.yaml"), root=Path("project"), site="Demo")
+
+    command = command_for_step("run-to-ohq", state)
+
+    assert command.argv == ("ohqbuild", "prepare-hydrology", "--root", "project", "--site", "Demo")
+    assert command.followup_argv == (("ohqbuild", "run", "--root", "project", "--site", "Demo"),)
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

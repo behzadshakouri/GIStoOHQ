@@ -57,9 +57,12 @@ rewrite the bundled demo config while preserving the current outlet coordinate.
 The same map window can draw a rectangular acquisition area with two clicks or a
 custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
 as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
-the **Create final OHQ file** section exposes the existing `prepare-inputs`,
-`check-inputs`, and `build` terminal stages, plus **Continue automatically to OHQ**
-for the combined `ohqbuild run` workflow.
+the **Create final OHQ file** section exposes the existing `prepare-hydrology`,
+`prepare-inputs`, `check-inputs`, and `build` terminal stages.
+**Continue automatically to OHQ** first creates `flow_dir.tif` and `flow_acc.tif`,
+then runs the combined `ohqbuild run` workflow, which creates the outlet before
+running the GIS phases and final build. The launcher prevents overlapping commands,
+so each stage finishes before another can start.
 If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
 repeat preparation/download; the status is a refinement request rather than a crash.
 
