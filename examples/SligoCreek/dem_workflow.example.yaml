@@ -31,3 +31,4 @@ dem_acquisition:
   summary: intermediate/dem_workflow_summary.json
   watershed_boundary: intermediate/watershed_boundary.geojson
   validation_summary: intermediate/dem_boundary_validation_summary.json
+  allow_acquisition_area_watershed_fallback: true

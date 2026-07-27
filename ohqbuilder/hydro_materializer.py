@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-
-
 def _hydro_archive_date(path: Path) -> str:
     matches = re.findall(r"(?:19|20)\d{6}", path.name)
     if matches:
@@ -57,6 +55,17 @@ def _preferred_hydro_archives(paths: list[Path]) -> list[Path]:
         if path_score > current_score:
             latest[key] = path
     return sorted(latest.values(), key=lambda path: (path.stat().st_size if path.exists() else 10**18, path.name))
+
+
+def _flowline_vector_candidates(sources: Path, workspace: Path) -> list[Path]:
+    vector_patterns = ("*.shp", "*.geojson", "*.gpkg")
+    candidates = [
+        path
+        for pattern in vector_patterns
+        for path in list(sources.rglob(pattern)) + list(workspace.rglob(pattern))
+    ]
+    return [path for path in candidates if "flowline" in path.stem.lower()]
+
 
 class HydroMaterializeError(RuntimeError):
     """Raised when downloaded hydrography cannot be converted to flowlines."""
@@ -107,11 +116,10 @@ def materialize_flowlines(
             except zipfile.BadZipFile as exc:
                 raise HydroMaterializeError(f"Invalid hydrography archive: {archive_path}") from exc
 
-        candidates = list(sources.rglob("*.shp")) + list(workspace.rglob("*.shp"))
-        candidates = [path for path in candidates if "flowline" in path.stem.lower()]
+        candidates = _flowline_vector_candidates(sources, workspace)
         if not candidates:
             raise HydroMaterializeError(
-                f"No NHD flowline shapefile was found under downloaded products: {sources}"
+                f"No NHD flowline vector file was found under downloaded products: {sources}"
             )
         frames = []
         for candidate in candidates:
