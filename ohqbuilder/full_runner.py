@@ -30,6 +30,19 @@ class FullRunResult:
     hms_project_path: Path | None = None
 
 
+def existing_legacy_hms_project(
+    root: Path, site: str, project_name: str | None = None
+) -> Path | None:
+    """Locate the complete HMS project emitted by the legacy phase-2 writers."""
+
+    names = dict.fromkeys(filter(None, (project_name, Path(site).name)))
+    for name in names:
+        candidate = root / "WS3_HMS" / name / f"{name}.hms"
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
 def full_run_summary(
     watershed,
     ohq_path: str | Path,
@@ -207,10 +220,12 @@ def run_full_pipeline(
         built = build_ohq_project(settings, output_path=requested_output)
         if not built:
             raise FullRunError("OHQ builder did not produce an output path.")
-        hms = build_hms_project(settings)
+        hms_path = existing_legacy_hms_project(root, site, project_name)
+        if hms_path is None:
+            hms_path = build_hms_project(settings).project_file
         watershed = WatershedBuilder(settings).build()
-        emit(full_run_summary(watershed, built, hms.project_file))
-        return FullRunResult(Path(built), hms.project_file)
+        emit(full_run_summary(watershed, built, hms_path))
+        return FullRunResult(Path(built), hms_path)
     except FullRunError:
         raise
     except Exception as exc:

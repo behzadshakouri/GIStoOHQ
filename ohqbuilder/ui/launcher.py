@@ -24,6 +24,38 @@ OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
 MIN_MAP_ZOOM = 1
 MAX_MAP_ZOOM = 19
 
+
+@dataclass(frozen=True)
+class BasemapProvider:
+    """Public XYZ basemap metadata used by the lightweight map picker."""
+
+    key: str
+    label: str
+    url_template: str
+    attribution: str
+    max_zoom: int = MAX_MAP_ZOOM
+
+
+BASEMAP_PROVIDERS = {
+    "OpenStreetMap": BasemapProvider(
+        "osm", "OpenStreetMap", OSM_TILE_URL, "© OpenStreetMap contributors"
+    ),
+    "Satellite": BasemapProvider(
+        "esri_world_imagery",
+        "Satellite",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/"
+        "tile/{z}/{y}/{x}",
+        "Tiles © Esri and imagery contributors",
+    ),
+    "Topographic": BasemapProvider(
+        "opentopomap",
+        "Topographic",
+        "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
+        "Map data © OpenStreetMap contributors, SRTM | Map style © OpenTopoMap",
+        max_zoom=17,
+    ),
+}
+
 SLIGO_DEMO_SITE = "SligoCreekDemo"
 SLIGO_DEMO_LON = -76.9765
 SLIGO_DEMO_LAT = 38.9921
@@ -36,6 +68,25 @@ def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACH
     """Return the cache path for a downloaded OSM tile."""
 
     return cache_dir / str(zoom) / str(x) / f"{y}.png"
+
+
+def basemap_tile_cache_path(
+    provider: BasemapProvider,
+    zoom: int,
+    x: int,
+    y: int,
+    *,
+    cache_dir: Path = OSM_CACHE_DIR,
+) -> Path:
+    """Return a provider-isolated cache path so unlike tiles cannot collide."""
+
+    return cache_dir / provider.key / str(zoom) / str(x) / f"{y}.png"
+
+
+def basemap_tile_url(provider: BasemapProvider, zoom: int, x: int, y: int) -> str:
+    """Expand an XYZ URL, including services whose path orders y before x."""
+
+    return provider.url_template.format(z=zoom, x=x, y=y)
 
 
 def _clamp_lat(lat: float) -> float:
@@ -774,7 +825,7 @@ def qgis_command(state: LauncherState, executable: str | None = None) -> tuple[s
 
 
 class MapPicker:
-    """Small OpenStreetMap tile picker for choosing an outlet in the Tk launcher."""
+    """Small multi-basemap picker for choosing an outlet in the Tk launcher."""
 
     def __init__(
         self,
@@ -799,8 +850,9 @@ class MapPicker:
         self.selection_points: list[tuple[float, float]] = []
         self.area_saved = False
         self.mode = self.tk.StringVar(value=mode)
+        self.basemap = self.tk.StringVar(value="OpenStreetMap")
         self.window = self.tk.Toplevel(app.root)
-        self.window.title("Pick Outlet on OpenStreetMap")
+        self.window.title("Pick Outlet or Acquisition Area")
         self.canvas = self.tk.Canvas(self.window, width=width, height=height)
         self.canvas.pack(fill="both", expand=True)
         controls = self.tk.Frame(self.window)
@@ -813,6 +865,10 @@ class MapPicker:
         self.tk.Label(controls, text="Selection:").pack(side="left", padx=(12, 2))
         self.tk.OptionMenu(
             controls, self.mode, "Outlet", "Rectangle", "Polygon", command=self._mode_changed
+        ).pack(side="left")
+        self.tk.Label(controls, text="Basemap:").pack(side="left", padx=(12, 2))
+        self.tk.OptionMenu(
+            controls, self.basemap, *BASEMAP_PROVIDERS, command=self._basemap_changed
         ).pack(side="left")
         self.tk.Button(controls, text="Finish area", command=self._finish_area).pack(side="left")
         self.tk.Button(controls, text="Clear", command=self._clear_selection).pack(side="left")
@@ -843,8 +899,9 @@ class MapPicker:
             "Rectangle": "Click the first corner, then click the opposite corner.",
             "Polygon": "Click at least three vertices, then click Finish area.",
         }[self.mode.get()]
+        provider = BASEMAP_PROVIDERS[self.basemap.get()]
         self.status.config(
-            text=f"{instruction} Right-click recenters. zoom={self.zoom}. © OpenStreetMap contributors"
+            text=f"{instruction} Right-click recenters. zoom={self.zoom}. {provider.attribution}"
         )
         center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
         center_tile_x = math.floor(center_x)
@@ -860,7 +917,7 @@ class MapPicker:
                 try:
                     image = self._tile_image(tile_x, tile_y)
                 except Exception as exc:  # pragma: no cover - network/UI boundary
-                    self.status.config(text=f"Could not load OSM tile: {exc}")
+                    self.status.config(text=f"Could not load {provider.label} tile: {exc}")
                     continue
                 self.images.append(image)
                 self.canvas.create_image(
@@ -875,6 +932,11 @@ class MapPicker:
     def _mode_changed(self, _value=None) -> None:
         self.selection_points = []
         self.area_saved = False
+        self._draw_tiles()
+
+    def _basemap_changed(self, _value=None) -> None:
+        provider = BASEMAP_PROVIDERS[self.basemap.get()]
+        self.zoom = min(self.zoom, provider.max_zoom)
         self._draw_tiles()
 
     def _clear_selection(self) -> None:
@@ -924,9 +986,10 @@ class MapPicker:
         x = x % max_tile
         if y < 0 or y >= max_tile:
             raise LauncherError("Tile row is outside the Web Mercator range.")
-        cache_path = osm_tile_cache_path(self.zoom, x, y)
+        provider = BASEMAP_PROVIDERS[self.basemap.get()]
+        cache_path = basemap_tile_cache_path(provider, self.zoom, x, y)
         if not cache_path.exists():
-            url = OSM_TILE_URL.format(z=self.zoom, x=x, y=y)
+            url = basemap_tile_url(provider, self.zoom, x, y)
             request = urllib.request.Request(
                 url,
                 headers={"User-Agent": "GIStoOHQ DEM workflow launcher"},
@@ -968,7 +1031,7 @@ class MapPicker:
         action = (
             "Picked and snapped outlet to flowline"
             if snapped is not None
-            else "Picked outlet from OSM map"
+            else f"Picked outlet from {self.basemap.get()} map"
         )
         self.app.messages.put(f"{action}: lon={lon:.8f}, lat={lat:.8f}\n")
         self.window.destroy()
@@ -990,7 +1053,8 @@ class MapPicker:
         self._draw_tiles()
 
     def _zoom(self, delta: int) -> None:
-        self.zoom = clamp_zoom(self.zoom + delta)
+        provider = BASEMAP_PROVIDERS[self.basemap.get()]
+        self.zoom = min(provider.max_zoom, clamp_zoom(self.zoom + delta))
         self._draw_tiles()
 
     def _reload_from_fields(self) -> None:

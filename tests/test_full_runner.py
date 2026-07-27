@@ -7,6 +7,7 @@ from ohqbuilder.full_runner import (
     acquisition_bounds,
     bounds_covering_outlet,
     buffer_covering_bounds,
+    existing_legacy_hms_project,
     full_run_summary,
     run_full_pipeline,
 )
@@ -36,6 +37,15 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     assert "Reaches        : 1" in summary
     assert "Junctions      : 0" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
+
+
+def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):
+    project = tmp_path / "WS3_HMS" / "SITE_A" / "SITE_A.hms"
+    project.parent.mkdir(parents=True)
+    project.write_text("Project: SITE_A\n", encoding="utf-8")
+
+    assert existing_legacy_hms_project(tmp_path, "SITE_A") == project.resolve()
+    assert existing_legacy_hms_project(tmp_path, "MISSING") is None
 
 
 def test_bounds_covering_outlet_expands_area_with_routing_safety_margin():

@@ -45,9 +45,13 @@ back to `python -m ohqbuilder.cli ui`, so it works before packaging:
 scripts/run_dem_ui.sh
 ```
 
-The Tk launcher includes an OpenStreetMap tile picker for choosing the outlet
-coordinate interactively. It uses public OSM raster tiles when network access is
-available, caches tiles after first load, supports zooming and right-click
+The Tk launcher includes a multi-basemap tile picker for choosing the outlet
+coordinate interactively. Choose OpenStreetMap roads, Esri World Imagery satellite
+imagery, or OpenTopoMap topography from the **Basemap** menu. Tiles are cached in
+separate provider directories, and the displayed attribution changes with the
+selected source. The launcher intentionally does not scrape undocumented Google
+tile URLs; Google layers can be configured in QGIS with the user's licensed Google
+Maps service. The picker supports zooming and right-click
 recentering, and writes the clicked coordinate back to the outlet
 longitude/latitude fields. The QGIS plugin uses the
 active QGIS map canvas instead, so users can pick points against any basemap or
@@ -81,6 +85,10 @@ full-run expands the clipping bounds with a 500 m outlet safety margin so the DE
 flow-direction, and flow-accumulation rasters remain consistent with the outlet.
 The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
 validation, and build stages, using the outlet selected on the active QGIS canvas.
+For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
+enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
+[`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and
+basemap setup.
 Use **Browse…** beside config and path fields to switch projects or folders. The
 launcher also includes **Open Sligo example** and **Open John McCormack example**;
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the

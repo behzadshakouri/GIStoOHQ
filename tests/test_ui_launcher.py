@@ -7,12 +7,15 @@ from pathlib import Path
 import pytest
 
 from ohqbuilder.ui.launcher import (
+    BASEMAP_PROVIDERS,
     CommandRunner,
     LauncherError,
     LauncherState,
     RunnerFinished,
     WorkflowCommand,
     clamp_zoom,
+    basemap_tile_cache_path,
+    basemap_tile_url,
     command_for_step,
     map_click_to_lonlat,
     nearest_point_on_lines,
@@ -89,6 +92,17 @@ def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
     assert (
         osm_tile_cache_path(14, 4688, 6260, cache_dir=tmp_path)
         == tmp_path / "14" / "4688" / "6260.png"
+    )
+
+
+def test_basemap_providers_offer_road_satellite_and_topographic_tiles(tmp_path):
+    satellite = BASEMAP_PROVIDERS["Satellite"]
+    topographic = BASEMAP_PROVIDERS["Topographic"]
+
+    assert basemap_tile_url(satellite, 14, 4688, 6260).endswith("/14/6260/4688")
+    assert basemap_tile_url(topographic, 14, 4688, 6260).endswith("/14/4688/6260.png")
+    assert basemap_tile_cache_path(satellite, 14, 4688, 6260, cache_dir=tmp_path) == (
+        tmp_path / "esri_world_imagery" / "14" / "4688" / "6260.png"
     )
 
 
