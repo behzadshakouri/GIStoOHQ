@@ -54,6 +54,23 @@ RELOAD_IN_PROJECT = True
 
 KM2_TO_SQMI = 0.386102
 
+
+def as_float(value):
+    """Return a finite Python float for QGIS QVariant/NULL values."""
+    if value is None:
+        return None
+    is_null = getattr(value, "isNull", None)
+    if callable(is_null) and is_null():
+        return None
+    wrapped_value = getattr(value, "value", None)
+    if callable(wrapped_value):
+        value = wrapped_value()
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed and abs(parsed) != float("inf") else None
+
 def nrcs_lag_tc(L_ft, slope_frac, CN):
     """NRCS Lag -> Tc (min). slope = average basin slope (ft/ft). Tc = lag/0.6."""
     Y = slope_frac * 100.0                      # equation uses slope in PERCENT
@@ -110,8 +127,11 @@ print("Primary method:", PRIMARY_METHOD, " | floor:", MIN_TC_MIN, "min\n")
 print(" id   NRCS  Kirpich Bransby   tc_min  lag_min  floored")
 
 for ft in lyr.getFeatures():
-    A   = ft["area_km2"]; CN = ft["CN"]
-    Sp  = ft["slope_pct"]; L = ft["flow_len_ft"]; S85 = ft["slope_1085"]
+    A = as_float(ft["area_km2"])
+    CN = as_float(ft["CN"])
+    Sp = as_float(ft["slope_pct"])
+    L = as_float(ft["flow_len_ft"])
+    S85 = as_float(ft["slope_1085"])
     # slope_pct stored as PERCENT by extract_slope.py -> convert to fraction
     Sp_frac = (Sp / 100.0) if Sp is not None else None
 
