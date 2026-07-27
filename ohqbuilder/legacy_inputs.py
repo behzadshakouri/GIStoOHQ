@@ -42,6 +42,7 @@ class LegacyWorkflowOptions:
     dry_run: bool = False
     child_options: dict[str, object] | None = None
     auto_pour_points: bool = True
+    refresh_auto_pour_points: bool = False
     auto_outlet: bool = True
     start_at: str | None = None
 
@@ -302,10 +303,20 @@ def run_legacy_input_workflow(
                 )
         if selected_phase == "phase2" and workflow_options.auto_pour_points:
             paths = _workflow_paths(root_path, site, workflow_options)
-            if not _input_exists(paths["pour_points_path"]):
+            if (
+                workflow_options.refresh_auto_pour_points
+                or not _input_exists(paths["pour_points_path"])
+            ):
+                snapped_outlet = paths["out_dir"] / "outlet_snapped.gpkg"
+                fallback_outlet = (
+                    snapped_outlet if snapped_outlet.is_file() else paths["outlet_path"]
+                )
                 try:
                     result = generate_pour_points(
-                        paths["junctions_path"], paths["pour_points_path"]
+                        paths["junctions_path"],
+                        paths["pour_points_path"],
+                        fallback_outlet_path=fallback_outlet,
+                        overwrite=workflow_options.refresh_auto_pour_points,
                     )
                 except PourPointGenerationError as exc:
                     raise LegacyInputWorkflowError(

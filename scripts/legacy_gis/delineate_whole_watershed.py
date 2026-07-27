@@ -73,7 +73,7 @@ SNAP = bool(globals().get("SNAP", True))
 SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
-SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.90))
+SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
 )
@@ -510,6 +510,16 @@ print(
 
 snap_acc = None
 moved = None
+snap_quality = "NOT_SNAPPED"
+
+
+def outlet_snap_quality(distance_m):
+    """Return a simple operator-facing quality band for outlet movement."""
+    if distance_m < 20.0:
+        return "GREEN"
+    if distance_m <= 75.0:
+        return "YELLOW"
+    return "RED"
 
 if SNAP:
     x, y, snap_acc, moved, snap_col, snap_row = snap_to_flow_accumulation(
@@ -525,10 +535,13 @@ if SNAP:
     print("  raw flow accumulation: %.3f" % snap_acc)
     print("  |flow accumulation|  : %.3f cells" % abs(snap_acc))
     print("  movement             : %.2f m" % moved)
+    snap_quality = outlet_snap_quality(moved)
+    print("  outlet quality       : %s" % snap_quality)
     if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
         print(
-            "  WARNING: snap used %.0f%% or more of the search radius; "
-            "the intended routed channel may not be near the outlet."
+            "  WARNING: SELECTED OUTLET IS FAR FROM THE ROUTED STREAM. "
+            "Snap used %.0f%% or more of the search radius; verify the selected "
+            "outlet and snapped point in QGIS before relying on the model."
             % (SNAP_EDGE_FRACTION * 100.0)
         )
     if abs(snap_acc) < MIN_SNAP_ACC_CELLS:
@@ -702,6 +715,9 @@ print("watershed_boundary.gpkg written WITH CRS", check_authid)
 release_and_delete(SNAPPED_OUT)
 snapped_fields = QgsFields()
 snapped_fields.append(QgsField("id", QVariant.Int))
+snapped_fields.append(QgsField("snap_m", QVariant.Double))
+snapped_fields.append(QgsField("quality", QVariant.String))
+snapped_fields.append(QgsField("flow_acc", QVariant.Double))
 snapped_options = QgsVectorFileWriter.SaveVectorOptions()
 snapped_options.driverName = "GPKG"
 snapped_options.layerName = "outlet_snapped"
@@ -716,6 +732,9 @@ snapped_writer = QgsVectorFileWriter.create(
 snapped_feature = QgsFeature(snapped_fields)
 snapped_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
 snapped_feature["id"] = 1
+snapped_feature["snap_m"] = round(float(moved or 0.0), 2)
+snapped_feature["quality"] = snap_quality
+snapped_feature["flow_acc"] = float(abs(snap_acc)) if snap_acc is not None else None
 snapped_writer.addFeature(snapped_feature)
 del snapped_writer
 print("outlet_snapped.gpkg written.")

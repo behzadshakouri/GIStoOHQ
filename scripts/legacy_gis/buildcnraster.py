@@ -111,6 +111,10 @@ hsg_ds = gdal.Open(hsg_path)
 nx, ny = lc_ds.RasterXSize, lc_ds.RasterYSize
 if (hsg_ds.RasterXSize, hsg_ds.RasterYSize) != (nx, ny):
     raise Exception("land cover and HSG grids differ -- run prep_cn_grid.py first")
+if hsg_ds.GetGeoTransform() != lc_ds.GetGeoTransform():
+    raise Exception("land cover and HSG geotransforms differ -- run prep_cn_grid.py first")
+if hsg_ds.GetProjection() != lc_ds.GetProjection():
+    raise Exception("land cover and HSG projections differ -- run prep_cn_grid.py first")
 
 lc_b, hsg_b = lc_ds.GetRasterBand(1), hsg_ds.GetRasterBand(1)
 lc_nd  = lc_b.GetNoDataValue()
@@ -169,6 +173,13 @@ if unmatched:
     for (lv, hv), n in sorted(unmatched.items()):
         print("    NLCD %s  HSG code %s (%s)  x%d" %
               (lv, hv, HSG_LETTER.get(hv, "?"), n))
+
+classified_cells = sum(combo_counts.values())
+if classified_cells == 0:
+    raise Exception(
+        "CN raster contains no classified cells. Verify aligned land-cover/HSG coverage "
+        "and cn_lookup.csv before zonal statistics."
+    )
 
 # --- load into project ------------------------------------------------------
 if ADD_TO_PROJECT:
