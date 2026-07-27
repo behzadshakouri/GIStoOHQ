@@ -44,6 +44,8 @@ def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):
     project.parent.mkdir(parents=True)
     project.write_text("Project: SITE_A\n", encoding="utf-8")
 
+    # CLI argparse supplies root as a string; retain Path support for Python callers.
+    assert existing_legacy_hms_project(str(tmp_path), "SITE_A") == project.resolve()
     assert existing_legacy_hms_project(tmp_path, "SITE_A") == project.resolve()
     assert existing_legacy_hms_project(tmp_path, "MISSING") is None
 
@@ -108,7 +110,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     )
 
     result = run_full_pipeline(
-        tmp_path,
+        str(tmp_path),
         "SITE_A",
         lon=-111.2,
         lat=34.1,
