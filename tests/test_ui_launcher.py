@@ -1,16 +1,24 @@
 import json
+import queue
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from ohqbuilder.ui.launcher import (
+    CommandRunner,
     LauncherError,
     LauncherState,
+    RunnerFinished,
+    WorkflowCommand,
     clamp_zoom,
     command_for_step,
     map_click_to_lonlat,
     nearest_point_on_lines,
     osm_tile_cache_path,
+    qgis_command,
+    qgis_layer_paths,
     rectangle_from_corners,
     recommended_workflow_step,
     geojson_preview_summary,
@@ -25,6 +33,54 @@ from ohqbuilder.ui.launcher import (
     workflow_prerequisite_error,
     write_drawn_acquisition,
 )
+
+
+def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):
+    site = tmp_path / "SITE_A"
+    dem = site / "demlr" / "cliped_utm.tif"
+    reaches = site / "outputs" / "reaches.gpkg"
+    sidecar = site / "outputs" / "outlet.dbf"
+    for path in (dem, reaches, sidecar):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    paths = qgis_layer_paths(
+        LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
+    )
+
+    assert paths == (dem.resolve(), reaches.resolve())
+
+
+def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
+    layer = tmp_path / "SITE_A" / "outputs" / "watershed_boundary.gpkg"
+    layer.parent.mkdir(parents=True)
+    layer.touch()
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
+
+    assert qgis_command(state, executable="/usr/bin/qgis") == (
+        "/usr/bin/qgis",
+        "--nologo",
+        str(layer.resolve()),
+    )
+
+
+def test_command_runner_stop_terminates_active_process():
+    messages = queue.Queue()
+    runner = CommandRunner(
+        WorkflowCommand("Slow command", (sys.executable, "-c", "import time; time.sleep(30)")),
+        messages,
+    )
+    runner.start()
+    deadline = time.monotonic() + 3
+    while runner.process is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    runner.cancel()
+    runner.join(timeout=3)
+
+    assert not runner.is_alive()
+    finished = [item for item in list(messages.queue) if isinstance(item, RunnerFinished)]
+    assert finished[-1].status == 130
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):

@@ -4,7 +4,10 @@ import importlib
 import importlib.util
 import json
 import math
+import os
 import queue
+import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -688,23 +691,42 @@ class CommandRunner(threading.Thread):
         super().__init__(daemon=True)
         self.command = command
         self.messages = messages
+        self.process: subprocess.Popen[str] | None = None
+        self.cancelled = threading.Event()
+
+    def cancel(self) -> None:
+        """Stop the active command and its child process group."""
+        self.cancelled.set()
+        process = self.process
+        if process is None or process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            process.terminate()
 
     def run(self) -> None:
         status = 0
         commands = (self.command.argv, *self.command.followup_argv)
         try:
             for argv in commands:
+                if self.cancelled.is_set():
+                    status = 130
+                    break
                 self.messages.put(f"$ {' '.join(argv)}\n")
-                process = subprocess.Popen(
+                self.process = subprocess.Popen(
                     argv,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    start_new_session=True,
                 )
-                assert process.stdout is not None
-                for line in process.stdout:
+                assert self.process.stdout is not None
+                for line in self.process.stdout:
                     self.messages.put(line)
-                status = process.wait()
+                status = self.process.wait()
+                if self.cancelled.is_set():
+                    status = 130
                 if status != 0:
                     break
         except OSError as exc:
@@ -718,6 +740,34 @@ class CommandRunner(threading.Thread):
                 "or select the larger area and repeat DEM preparation.\n"
             )
         self.messages.put(RunnerFinished(status))
+
+
+def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
+    """Return generated watershed rasters and vectors suitable for QGIS."""
+    if state.root is None or not state.site:
+        return ()
+    site_path = (state.root / state.site).resolve()
+    roots = (site_path / "demlr", site_path / "outputs")
+    supported = {".tif", ".tiff", ".gpkg", ".shp", ".geojson"}
+    paths = {
+        path.resolve()
+        for root in roots
+        if root.is_dir()
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in supported
+    }
+    return tuple(sorted(paths, key=lambda path: str(path)))
+
+
+def qgis_command(state: LauncherState, executable: str | None = None) -> tuple[str, ...]:
+    """Build a QGIS command that opens all currently generated workflow layers."""
+    qgis = executable or shutil.which("qgis")
+    if not qgis:
+        raise LauncherError("QGIS executable was not found on PATH.")
+    layers = qgis_layer_paths(state)
+    if not layers:
+        raise LauncherError("No generated DEM, hydrology, or delineation layers exist yet.")
+    return (qgis, "--nologo", *(str(path) for path in layers))
 
 
 class MapPicker:
@@ -962,6 +1012,7 @@ class LauncherApp:
         self.root.title("GIStoOHQ DEM Workflow Launcher")
         self.messages: queue.Queue[Any] = queue.Queue()
         self.command_running = False
+        self.runner: CommandRunner | None = None
         self.workflow_buttons: list[Any] = []
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
@@ -1057,6 +1108,15 @@ class LauncherApp:
         )
         recommended_button.pack(side="left")
         self.workflow_buttons.append(recommended_button)
+        tk.Button(
+            project_buttons,
+            text="Open generated layers in QGIS",
+            command=self.open_generated_layers_in_qgis,
+        ).pack(side="left")
+        self.stop_button = tk.Button(
+            project_buttons, text="■ STOP", command=self.stop_workflow, state="disabled"
+        )
+        self.stop_button.pack(side="left")
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
         dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         for step in (
@@ -1120,6 +1180,26 @@ class LauncherApp:
             self.run_step(step)
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
+
+    def open_generated_layers_in_qgis(self) -> None:
+        """Launch QGIS detached with every generated watershed workflow layer."""
+        try:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            command = qgis_command(state)
+            subprocess.Popen(command, start_new_session=True)
+            self.messages.put(f"Opened {len(command) - 2} generated layer(s) in QGIS.\n")
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: Could not open QGIS: {exc}\n")
+
+    def stop_workflow(self) -> None:
+        if self.runner is None or not self.command_running:
+            return
+        self.messages.put("Stopping the active workflow command…\n")
+        self.stop_button.config(state="disabled")
+        self.runner.cancel()
 
     def _filedialog(self):
         return importlib.import_module("tkinter.filedialog")
@@ -1303,7 +1383,9 @@ class LauncherApp:
         self.command_running = True
         for button in self.workflow_buttons:
             button.config(state="disabled")
-        CommandRunner(command, self.messages).start()
+        self.stop_button.config(state="normal")
+        self.runner = CommandRunner(command, self.messages)
+        self.runner.start()
 
     def _poll_messages(self) -> None:
         while True:
@@ -1313,6 +1395,8 @@ class LauncherApp:
                 break
             if isinstance(message, RunnerFinished):
                 self.command_running = False
+                self.runner = None
+                self.stop_button.config(state="disabled")
                 for button in self.workflow_buttons:
                     button.config(state="normal")
                 continue

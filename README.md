@@ -64,7 +64,8 @@ the **Create final OHQ file** section exposes the existing `prepare-hydrology`,
 **Continue automatically to OHQ** first creates `flow_dir.tif` and `flow_acc.tif`,
 then runs the combined `ohqbuild run` workflow, which creates the outlet before
 running the GIS phases and final build. The launcher prevents overlapping commands,
-so each stage finishes before another can start.
+so each stage finishes before another can start; **STOP** terminates the active
+command and its child process group when a long download or GIS run must be cancelled.
 For a new real site, **FULL RUN: download all data to OHQ** invokes the terminal
 `full-run` pipeline with the form's verified outlet, root, site, CRS, and download
 directory. That pipeline downloads DEM, hydrography, roads, land cover, Atlas 14,
@@ -82,6 +83,11 @@ Use **Browse…** beside config and path fields to switch projects or folders. T
 launcher also includes **Open Sligo example** and **Open John McCormack example**;
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the
 selected Root shown in the form.
+**Open generated layers in QGIS** starts the installed `qgis` executable and loads
+all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products beneath the
+selected site's `demlr` and `outputs` directories, including the source DEM,
+routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
+become available.
 **RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
 hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
 exist, avoiding manual execution of downstream stages before their prerequisites.

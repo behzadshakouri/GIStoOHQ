@@ -55,3 +55,10 @@ def test_reach_extraction_adapts_threshold_to_tiny_demo_accumulation():
     assert "max_accumulation" in source
     assert "using adaptive threshold" in source
     assert "No raster-extracted reaches; clipping mapped flowlines as fallback" in source
+
+
+def test_phase2_accepts_single_reach_watershed_without_interior_junctions():
+    source = Path("scripts/legacy_gis/run_phase2.py").read_text(encoding="utf-8")
+
+    junction_check = source.split("junctions_layer = validate_vector(", 1)[1].split(")", 1)[0]
+    assert "minimum_features=0" in junction_check
