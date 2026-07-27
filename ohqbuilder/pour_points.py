@@ -18,13 +18,16 @@ def generate_pour_points(
     junctions_path: str | Path,
     output_path: str | Path,
     *,
+    fallback_outlet_path: str | Path | None = None,
     overwrite: bool = False,
 ) -> PourPointResult:
-    """Create Phase 2 pour points from every Phase 1 junction.
+    """Create Phase 2 pour points from Phase 1 junctions or a lone outlet.
 
     Junctions are the natural drainage locations used by the retained topology
     scripts.  Keeping their numeric IDs gives Phase 2 a deterministic mapping
-    between delineated subbasins and the generated reach network.
+    between delineated subbasins and the generated reach network. A valid
+    single-reach watershed has no interior junctions, so its outlet becomes the
+    sole pour point when ``fallback_outlet_path`` is supplied.
     """
 
     try:
@@ -50,11 +53,41 @@ def generate_pour_points(
         raise PourPointGenerationError(f"Could not read junctions from {source}: {exc}") from exc
 
     if junctions.empty:
-        raise PourPointGenerationError(f"No junctions were found in {source}")
+        if fallback_outlet_path is None:
+            raise PourPointGenerationError(
+                f"No junctions were found in {source}; provide a fallback outlet for a "
+                "single-reach watershed."
+            )
+        outlet_source = Path(fallback_outlet_path).expanduser().resolve()
+        if not outlet_source.is_file():
+            raise PourPointGenerationError(f"Fallback outlet file not found: {outlet_source}")
+        try:
+            outlet = gpd.read_file(outlet_source)
+        except Exception as exc:
+            raise PourPointGenerationError(
+                f"Could not read fallback outlet from {outlet_source}: {exc}"
+            ) from exc
+        if len(outlet) != 1:
+            raise PourPointGenerationError(
+                f"Fallback outlet must contain exactly one feature: {outlet_source}"
+            )
+        if outlet.crs is None:
+            raise PourPointGenerationError(
+                f"Fallback outlet has no coordinate reference system: {outlet_source}"
+            )
+        if outlet.geometry.isna().any() or not outlet.geometry.geom_type.eq("Point").all():
+            raise PourPointGenerationError(
+                "Fallback outlet must have one non-empty point geometry."
+            )
+        junctions = gpd.GeoDataFrame(
+            {"junction_id": [1]}, geometry=outlet.geometry.copy(), crs=outlet.crs
+        )
     if "junction_id" not in junctions.columns:
         raise PourPointGenerationError(f"Missing required field 'junction_id' in {source}")
     if junctions.crs is None:
-        raise PourPointGenerationError(f"Junctions layer has no coordinate reference system: {source}")
+        raise PourPointGenerationError(
+            f"Junctions layer has no coordinate reference system: {source}"
+        )
     if not junctions.geometry.notna().all() or not junctions.geometry.geom_type.eq("Point").all():
         raise PourPointGenerationError("Every junction must have a non-empty point geometry.")
 
@@ -82,5 +115,7 @@ def generate_pour_points(
     try:
         pour_points.to_file(destination)
     except Exception as exc:
-        raise PourPointGenerationError(f"Could not write pour points to {destination}: {exc}") from exc
+        raise PourPointGenerationError(
+            f"Could not write pour points to {destination}: {exc}"
+        ) from exc
     return PourPointResult(destination, len(pour_points))
