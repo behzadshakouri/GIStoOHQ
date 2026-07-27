@@ -161,7 +161,11 @@ def run_full_pipeline(
             clip_bounds=selected_bounds,
         )
         # Step 3: generate the GIS-derived model inputs.
-        options = LegacyWorkflowOptions(auto_outlet=True, auto_pour_points=True)
+        options = LegacyWorkflowOptions(
+            auto_outlet=True,
+            auto_pour_points=True,
+            refresh_auto_pour_points=True,
+        )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)

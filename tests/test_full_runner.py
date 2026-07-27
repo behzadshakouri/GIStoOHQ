@@ -22,6 +22,7 @@ def test_bounds_covering_outlet_expands_area_with_routing_safety_margin():
 def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     calls = []
     download_options = {}
+    phase_options = {}
     downloads = tmp_path / "downloads"
 
     def fake_download(*args, **kwargs):
@@ -43,10 +44,11 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "ohqbuilder.full_runner.run_hydrology_preprocessing",
         lambda *args, **kwargs: calls.append("routing"),
     )
-    monkeypatch.setattr(
-        "ohqbuilder.full_runner.run_legacy_input_workflow",
-        lambda *args, **kwargs: calls.append("phases"),
-    )
+    def fake_legacy(*args, **kwargs):
+        phase_options["options"] = args[4]
+        calls.append("phases")
+
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", fake_legacy)
     monkeypatch.setattr(
         "ohqbuilder.full_runner.InputValidator",
         lambda: SimpleNamespace(
@@ -101,6 +103,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     }
     assert result.output_path == Path(tmp_path / "SITE_A.ohq")
     assert result.hms_project_path == tmp_path / "SITE_A.hms"
+    assert phase_options["options"].refresh_auto_pour_points is True
 
 
 def test_full_pipeline_uses_drawn_area_for_download_coverage_and_clipping(monkeypatch, tmp_path):
