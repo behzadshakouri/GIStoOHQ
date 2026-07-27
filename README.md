@@ -54,6 +54,14 @@ active QGIS map canvas instead, so users can pick points against any basemap or
 GIS layers they have loaded there. If the demo YAML is left with merge-conflict
 markers after a branch update, use **reset Sligo demo** in the Tk launcher to
 rewrite the bundled demo config while preserving the current outlet coordinate.
+The same map window can draw a rectangular acquisition area with two clicks or a
+custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
+as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
+the **Create final OHQ file** section exposes the existing `prepare-inputs`,
+`check-inputs`, and `build` terminal stages, plus **Continue automatically to OHQ**
+for the combined `ohqbuild run` workflow.
+If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
+repeat preparation/download; the status is a refinement request rather than a crash.
 
 For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
 

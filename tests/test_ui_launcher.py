@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ from ohqbuilder.ui.launcher import (
     state_from_config,
     state_with_config_defaults,
     update_config_from_state,
+    use_expanded_acquisition,
+    write_drawn_acquisition,
 )
 
 
@@ -290,6 +293,53 @@ def test_geojson_preview_summary(tmp_path):
     )
 
     assert geojson_preview_summary(geojson) == "1 feature(s); geometry: Polygon"
+
+
+def test_write_drawn_acquisition_closes_user_polygon(tmp_path):
+    output = write_drawn_acquisition(
+        tmp_path / "area.geojson",
+        [(-77.0, 39.0), (-76.9, 39.0), (-76.9, 39.1), (-77.0, 39.1)],
+    )
+
+    data = json.loads(output.read_text(encoding="utf-8"))
+    ring = data["features"][0]["geometry"]["coordinates"][0]
+    assert ring[0] == ring[-1]
+    assert data["features"][0]["properties"]["source"] == "launcher_map"
+
+
+def test_use_expanded_acquisition_promotes_validation_output(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    expanded = tmp_path / "intermediate" / "expanded.geojson"
+    expanded.parent.mkdir()
+    expanded.write_text("{}", encoding="utf-8")
+    config = {
+        "dem_acquisition": {
+            "method": "upstream_network",
+            "acquisition_area": "intermediate/area.geojson",
+            "expanded_acquisition_area": "intermediate/expanded.geojson",
+        }
+    }
+
+    assert use_expanded_acquisition(config_path, config) == expanded
+    assert config["dem_acquisition"]["method"] == "polygon"
+    assert config["dem_acquisition"]["acquisition_area"] == "intermediate/expanded.geojson"
+
+
+@pytest.mark.parametrize(
+    ("step", "subcommand"),
+    [
+        ("prepare-inputs", "prepare-inputs"),
+        ("check-inputs", "check-inputs"),
+        ("build-ohq", "build"),
+        ("run-to-ohq", "run"),
+    ],
+)
+def test_ui_launcher_builds_final_ohq_commands(step, subcommand):
+    state = LauncherState(config_path=Path("config.yaml"), root=Path("project"), site="Demo")
+
+    command = command_for_step(step, state)
+
+    assert command.argv == ("ohqbuild", subcommand, "--root", "project", "--site", "Demo")
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

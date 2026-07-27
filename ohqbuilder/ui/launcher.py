@@ -121,6 +121,48 @@ def geojson_lines(path: Path) -> list[list[list[float]]]:
     return lines
 
 
+def write_drawn_acquisition(path: Path, points: list[tuple[float, float]]) -> Path:
+    """Write a closed EPSG:4326 acquisition polygon drawn in the map picker."""
+    if len(points) < 3:
+        raise LauncherError("An acquisition polygon requires at least three points.")
+    ring = list(points)
+    if ring[0] != ring[-1]:
+        ring.append(ring[0])
+    data = {
+        "type": "FeatureCollection",
+        "name": path.stem,
+        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"source": "launcher_map", "selection": "user_polygon"},
+                "geometry": {"type": "Polygon", "coordinates": [[[lon, lat] for lon, lat in ring]]},
+            }
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def use_expanded_acquisition(config_path: Path, config: dict[str, Any]) -> Path:
+    """Promote the validation-generated expanded area to the active polygon."""
+    dem = config.get("dem_acquisition")
+    if not isinstance(dem, dict):
+        raise LauncherError("dem_acquisition must be a mapping.")
+    expanded_value = dem.get("expanded_acquisition_area")
+    if not isinstance(expanded_value, str) or not expanded_value:
+        raise LauncherError("dem_acquisition.expanded_acquisition_area is not configured.")
+    expanded = Path(expanded_value).expanduser()
+    if not expanded.is_absolute():
+        expanded = config_path.parent / expanded
+    if not expanded.is_file():
+        raise LauncherError(f"Expanded acquisition area does not exist yet: {expanded}")
+    dem["acquisition_area"] = _path_for_config_value(expanded, config_path)
+    dem["method"] = "polygon"
+    return expanded
+
+
 WorkflowStep = Literal[
     "init-dem-config",
     "prepare-dem",
@@ -128,6 +170,10 @@ WorkflowStep = Literal[
     "download-dem-manifest",
     "materialize-inputs",
     "validate-dem",
+    "prepare-inputs",
+    "check-inputs",
+    "build-ohq",
+    "run-to-ohq",
 ]
 
 
@@ -258,6 +304,24 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         if state.manifest_path is not None:
             argv.extend(("--dem-manifest", str(state.manifest_path)))
         return WorkflowCommand("Materialize Inputs", tuple(argv))
+    if step in {"prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required for OHQ workflow commands.")
+        command = {
+            "prepare-inputs": "prepare-inputs",
+            "check-inputs": "check-inputs",
+            "build-ohq": "build",
+            "run-to-ohq": "run",
+        }[step]
+        label = {
+            "prepare-inputs": "Prepare OHQ Inputs",
+            "check-inputs": "Check OHQ Inputs",
+            "build-ohq": "Build OHQ File",
+            "run-to-ohq": "Continue to OHQ",
+        }[step]
+        return WorkflowCommand(
+            label, ("ohqbuild", command, "--root", str(state.root), "--site", state.site)
+        )
     raise LauncherError(f"Unsupported workflow step: {step}")
 
 
@@ -449,6 +513,12 @@ class CommandRunner(threading.Thread):
             self.messages.put(line)
         status = process.wait()
         self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
+        if self.command.label == "Validate DEM" and status == 3:
+            self.messages.put(
+                "DEM validation requested a larger acquisition area. This is an actionable "
+                "EXPAND result, not a crash; review the generated expanded GeoJSON, then draw "
+                "or select the larger area and repeat DEM preparation.\n"
+            )
 
 
 class MapPicker:
@@ -466,6 +536,8 @@ class MapPicker:
         self.center_lat = float(app.lat_var.get() or 38.9921)
         self.images = []
         self.flowlines = self._load_flowlines()
+        self.selection_points: list[tuple[float, float]] = []
+        self.mode = self.tk.StringVar(value="Outlet")
         self.window = self.tk.Toplevel(app.root)
         self.window.title("Pick Outlet on OpenStreetMap")
         self.canvas = self.tk.Canvas(self.window, width=width, height=height)
@@ -477,6 +549,12 @@ class MapPicker:
         self.tk.Button(
             controls, text="Reload at lon/lat fields", command=self._reload_from_fields
         ).pack(side="left")
+        self.tk.Label(controls, text="Selection:").pack(side="left", padx=(12, 2))
+        self.tk.OptionMenu(
+            controls, self.mode, "Outlet", "Rectangle", "Polygon", command=self._mode_changed
+        ).pack(side="left")
+        self.tk.Button(controls, text="Finish area", command=self._finish_area).pack(side="left")
+        self.tk.Button(controls, text="Clear", command=self._clear_selection).pack(side="left")
         self.status = self.tk.Label(
             self.window,
             text="Left-click to set outlet; selections snap to the configured flowline.",
@@ -526,6 +604,38 @@ class MapPicker:
                     image=image,
                 )
         self._draw_flowlines()
+        self._draw_selection()
+
+    def _mode_changed(self, _value=None) -> None:
+        self.selection_points = []
+        self._draw_tiles()
+
+    def _clear_selection(self) -> None:
+        self.selection_points = []
+        self._draw_tiles()
+
+    def _selection_ring(self) -> list[tuple[float, float]]:
+        if self.mode.get() == "Rectangle" and len(self.selection_points) == 2:
+            (x1, y1), (x2, y2) = self.selection_points
+            return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+        return list(self.selection_points)
+
+    def _draw_selection(self) -> None:
+        ring = self._selection_ring()
+        if not ring:
+            return
+        center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
+        points = []
+        for lon, lat in ring:
+            tile_x, tile_y = lonlat_to_tile_fraction(lon, lat, self.zoom)
+            x = self.width / 2.0 + (tile_x - center_x) * MAP_TILE_SIZE
+            y = self.height / 2.0 + (tile_y - center_y) * MAP_TILE_SIZE
+            points.extend((x, y))
+            self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill="#ffcc00")
+        if len(points) >= 4:
+            self.canvas.create_line(*points, fill="#ffcc00", width=3)
+        if len(ring) >= 3:
+            self.canvas.create_line(*points, points[0], points[1], fill="#ffcc00", width=3)
 
     def _draw_flowlines(self) -> None:
         center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
@@ -573,6 +683,14 @@ class MapPicker:
 
     def _click(self, event) -> None:
         lon, lat = self._event_lonlat(event)
+        if self.mode.get() != "Outlet":
+            if self.mode.get() == "Rectangle" and len(self.selection_points) == 2:
+                self.selection_points = []
+            self.selection_points.append((lon, lat))
+            self._draw_tiles()
+            if self.mode.get() == "Rectangle" and len(self.selection_points) == 2:
+                self._finish_area()
+            return
         snapped = nearest_point_on_lines(lon, lat, self.flowlines)
         if snapped is not None:
             lon, lat = snapped
@@ -584,6 +702,15 @@ class MapPicker:
             else "Picked outlet from OSM map"
         )
         self.app.messages.put(f"{action}: lon={lon:.8f}, lat={lat:.8f}\n")
+        self.window.destroy()
+
+    def _finish_area(self) -> None:
+        ring = self._selection_ring()
+        try:
+            self.app.save_drawn_area(ring)
+        except (OSError, ValueError, LauncherError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.status.config(text=f"Could not save area: {exc}")
+            return
         self.window.destroy()
 
     def _recenter(self, event) -> None:
@@ -606,7 +733,13 @@ class LauncherApp:
     def __init__(self) -> None:
         tk = _require_tkinter()
         self.tk = tk
-        self.root = tk.Tk()
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            raise LauncherError(
+                "The Tk launcher requires a graphical Linux session with DISPLAY set. "
+                "Use SSH X forwarding, a desktop terminal, or the terminal commands instead."
+            ) from exc
         self.root.title("GIStoOHQ DEM Workflow Launcher")
         self.messages: queue.Queue[str] = queue.Queue()
         self.config_var = tk.StringVar(value=default_config_path())
@@ -647,15 +780,21 @@ class LauncherApp:
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
-        buttons = tk.Frame(frame)
-        buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=8)
-        tk.Button(buttons, text="load config", command=self.load_config).pack(side="left")
-        tk.Button(buttons, text="save config", command=self.save_config).pack(side="left")
-        tk.Button(buttons, text="preview acquisition", command=self.preview_acquisition).pack(
+        project_buttons = tk.LabelFrame(frame, text="Project and map")
+        project_buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=4)
+        tk.Button(project_buttons, text="Load config", command=self.load_config).pack(side="left")
+        tk.Button(project_buttons, text="Save config", command=self.save_config).pack(side="left")
+        tk.Button(
+            project_buttons, text="Preview acquisition", command=self.preview_acquisition
+        ).pack(side="left")
+        tk.Button(
+            project_buttons, text="Pick outlet / draw area", command=self.pick_outlet_map
+        ).pack(side="left")
+        tk.Button(project_buttons, text="Reset Sligo demo", command=self.reset_sligo_demo).pack(
             side="left"
         )
-        tk.Button(buttons, text="pick outlet map", command=self.pick_outlet_map).pack(side="left")
-        tk.Button(buttons, text="reset Sligo demo", command=self.reset_sligo_demo).pack(side="left")
+        dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
+        dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         for step in (
             "init-dem-config",
             "prepare-dem",
@@ -664,19 +803,63 @@ class LauncherApp:
             "materialize-inputs",
             "validate-dem",
         ):
-            tk.Button(buttons, text=step, command=lambda value=step: self.run_step(value)).pack(
+            tk.Button(dem_buttons, text=step, command=lambda value=step: self.run_step(value)).pack(
                 side="left"
             )
+        tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).pack(
+            side="left"
+        )
+        ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
+        ohq_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
+        for label, step in (
+            ("Prepare GIS inputs", "prepare-inputs"),
+            ("Check inputs", "check-inputs"),
+            ("Build OHQ", "build-ohq"),
+            ("Continue automatically to OHQ", "run-to-ohq"),
+        ):
+            tk.Button(
+                ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
+            ).pack(side="left")
         self.log = tk.Text(frame, height=24, width=100)
-        self.log.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="nsew")
+        self.log.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(len(rows) + 1, weight=1)
+        frame.rowconfigure(len(rows) + 3, weight=1)
 
     def pick_outlet_map(self) -> None:
         try:
             self.map_picker = MapPicker(self)
         except Exception as exc:  # pragma: no cover - Tk/network UI boundary
             self.messages.put(f"Map picker failed: {exc}\n")
+
+    def save_drawn_area(self, points: list[tuple[float, float]]) -> None:
+        config_path = Path(self.config_var.get()).expanduser()
+        config = load_project_config(config_path)
+        dem = config.get("dem_acquisition")
+        if not isinstance(dem, dict):
+            raise LauncherError("dem_acquisition must be a mapping before drawing an area.")
+        area_value = dem.get("acquisition_area") or "intermediate/dem_acquisition_area.geojson"
+        area_path = Path(area_value).expanduser()
+        if not area_path.is_absolute():
+            area_path = config_path.parent / area_path
+        write_drawn_acquisition(area_path, points)
+        dem["method"] = "polygon"
+        dem["acquisition_area"] = _path_for_config_value(area_path, config_path)
+        save_project_config(config_path, config)
+        self.method_var.set("polygon")
+        self.messages.put(f"Saved user-drawn acquisition polygon: {area_path}\n")
+
+    def apply_expanded_area(self) -> None:
+        try:
+            config_path = Path(self.config_var.get()).expanduser()
+            config = load_project_config(config_path)
+            expanded = use_expanded_acquisition(config_path, config)
+            save_project_config(config_path, config)
+            self.load_config()
+            self.messages.put(
+                f"Using expanded acquisition area: {expanded}. Run prepare-dem and download again.\n"
+            )
+        except (OSError, ValueError, LauncherError, json.JSONDecodeError, yaml.YAMLError) as exc:
+            self.messages.put(f"ERROR: {exc}\n")
 
     def reset_sligo_demo(self) -> None:
         try:
