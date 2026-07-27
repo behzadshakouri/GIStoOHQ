@@ -192,6 +192,12 @@ def build_parser() -> argparse.ArgumentParser:
     pour.add_argument(
         "--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp."
     )
+    pour.add_argument(
+        "--fallback-outlet",
+        default=None,
+        help="Used as the sole pour point when a single-reach watershed has no junctions; "
+        "defaults to <root>/<site>/outputs/outlet.shp.",
+    )
     pour.add_argument("--overwrite", action="store_true")
 
     dl = sub.add_parser(
@@ -871,8 +877,18 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.junctions).expanduser() if args.junctions else outputs / "junctions.gpkg"
         )
         output = Path(args.out).expanduser() if args.out else outputs / "pour_points.shp"
+        fallback_outlet = (
+            Path(args.fallback_outlet).expanduser()
+            if args.fallback_outlet
+            else outputs / "outlet.shp"
+        )
         try:
-            result = generate_pour_points(junctions, output, overwrite=args.overwrite)
+            result = generate_pour_points(
+                junctions,
+                output,
+                fallback_outlet_path=fallback_outlet,
+                overwrite=args.overwrite,
+            )
         except PourPointGenerationError as exc:
             print(f"create-pour-points failed: {exc}")
             return 2

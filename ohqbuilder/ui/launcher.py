@@ -962,6 +962,7 @@ class LauncherApp:
         self.root.title("GIStoOHQ DEM Workflow Launcher")
         self.messages: queue.Queue[Any] = queue.Queue()
         self.command_running = False
+        self.workflow_buttons: list[Any] = []
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
@@ -1049,11 +1050,13 @@ class LauncherApp:
                 "examples/JohnMcCormack3600/dem_workflow.example.yaml"
             ),
         ).pack(side="left")
-        tk.Button(
+        recommended_button = tk.Button(
             project_buttons,
             text="▶ RUN RECOMMENDED NEXT STEP",
             command=self.run_recommended_step,
-        ).pack(side="left")
+        )
+        recommended_button.pack(side="left")
+        self.workflow_buttons.append(recommended_button)
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
         dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         for step in (
@@ -1064,9 +1067,11 @@ class LauncherApp:
             "materialize-inputs",
             "validate-dem",
         ):
-            tk.Button(dem_buttons, text=step, command=lambda value=step: self.run_step(value)).pack(
-                side="left"
+            button = tk.Button(
+                dem_buttons, text=step, command=lambda value=step: self.run_step(value)
             )
+            button.pack(side="left")
+            self.workflow_buttons.append(button)
         tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).pack(
             side="left"
         )
@@ -1080,18 +1085,22 @@ class LauncherApp:
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
         ):
-            tk.Button(
+            button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
-            ).pack(side="left")
+            )
+            button.pack(side="left")
+            self.workflow_buttons.append(button)
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
         hms_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
         for label, step in (
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
         ):
-            tk.Button(
+            button = tk.Button(
                 hms_buttons, text=label, command=lambda value=step: self.run_step(value)
-            ).pack(side="left")
+            )
+            button.pack(side="left")
+            self.workflow_buttons.append(button)
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
@@ -1292,6 +1301,8 @@ class LauncherApp:
             self.messages.put(f"ERROR: {exc}\n")
             return
         self.command_running = True
+        for button in self.workflow_buttons:
+            button.config(state="disabled")
         CommandRunner(command, self.messages).start()
 
     def _poll_messages(self) -> None:
@@ -1302,6 +1313,8 @@ class LauncherApp:
                 break
             if isinstance(message, RunnerFinished):
                 self.command_running = False
+                for button in self.workflow_buttons:
+                    button.config(state="normal")
                 continue
             self.log.insert("end", message)
             self.log.see("end")
