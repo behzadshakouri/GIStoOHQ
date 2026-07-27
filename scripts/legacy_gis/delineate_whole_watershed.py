@@ -510,6 +510,16 @@ print(
 
 snap_acc = None
 moved = None
+snap_quality = "NOT_SNAPPED"
+
+
+def outlet_snap_quality(distance_m):
+    """Return a simple operator-facing quality band for outlet movement."""
+    if distance_m < 20.0:
+        return "GREEN"
+    if distance_m <= 75.0:
+        return "YELLOW"
+    return "RED"
 
 if SNAP:
     x, y, snap_acc, moved, snap_col, snap_row = snap_to_flow_accumulation(
@@ -525,6 +535,8 @@ if SNAP:
     print("  raw flow accumulation: %.3f" % snap_acc)
     print("  |flow accumulation|  : %.3f cells" % abs(snap_acc))
     print("  movement             : %.2f m" % moved)
+    snap_quality = outlet_snap_quality(moved)
+    print("  outlet quality       : %s" % snap_quality)
     if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
         print(
             "  WARNING: SELECTED OUTLET IS FAR FROM THE ROUTED STREAM. "
@@ -703,6 +715,9 @@ print("watershed_boundary.gpkg written WITH CRS", check_authid)
 release_and_delete(SNAPPED_OUT)
 snapped_fields = QgsFields()
 snapped_fields.append(QgsField("id", QVariant.Int))
+snapped_fields.append(QgsField("snap_m", QVariant.Double))
+snapped_fields.append(QgsField("quality", QVariant.String))
+snapped_fields.append(QgsField("flow_acc", QVariant.Double))
 snapped_options = QgsVectorFileWriter.SaveVectorOptions()
 snapped_options.driverName = "GPKG"
 snapped_options.layerName = "outlet_snapped"
@@ -717,6 +732,9 @@ snapped_writer = QgsVectorFileWriter.create(
 snapped_feature = QgsFeature(snapped_fields)
 snapped_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
 snapped_feature["id"] = 1
+snapped_feature["snap_m"] = round(float(moved or 0.0), 2)
+snapped_feature["quality"] = snap_quality
+snapped_feature["flow_acc"] = float(abs(snap_acc)) if snap_acc is not None else None
 snapped_writer.addFeature(snapped_feature)
 del snapped_writer
 print("outlet_snapped.gpkg written.")

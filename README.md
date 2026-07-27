@@ -139,7 +139,11 @@ ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
 ```
 
 The final file is written to `<ROOT>/<SITE>/outputs/<SITE>.ohq` unless `--out`
-is supplied. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
+is supplied. A review-ready `watershed_report.html` is written beside the OHQ file
+with watershed counts, subbasin area, CN, slope, longest flow path, Tc, lag, and
+links to the OHQ and HEC-HMS artifacts. The snapped outlet layer also records its
+movement and a GREEN/YELLOW/RED quality rating so large automatic adjustments are
+visible in QGIS. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
 maximum-file-size, target-CRS, and soil-resolution options. The downloader checks
 existing files against TNM size metadata, skips valid cached files, and
 redownloads incomplete/corrupt files.

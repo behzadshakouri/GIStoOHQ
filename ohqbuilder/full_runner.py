@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 import json
 import math
 from pathlib import Path
@@ -28,6 +29,7 @@ class FullRunError(RuntimeError):
 class FullRunResult:
     output_path: Path
     hms_project_path: Path | None = None
+    report_path: Path | None = None
 
 
 def existing_legacy_hms_project(
@@ -48,14 +50,14 @@ def full_run_summary(
     watershed,
     ohq_path: str | Path,
     hms_path: str | Path,
+    report_path: str | Path | None = None,
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
     reaches = list(getattr(watershed, "reaches", []) or [])
     junctions = list(getattr(watershed, "junctions", []) or [])
     area_km2 = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
-    return "\n".join(
-        (
+    lines = [
             "=" * 72,
             "FULL-RUN SUCCESS SUMMARY",
             f"Watershed area : {area_km2:.4f} km²",
@@ -64,9 +66,68 @@ def full_run_summary(
             f"Junctions      : {len(junctions)}",
             f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
             f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
-            "=" * 72,
-        )
+    ]
+    if report_path is not None:
+        lines.append(f"Watershed report: {Path(report_path).expanduser().resolve()}")
+    lines.append("=" * 72)
+    return "\n".join(lines)
+
+
+def write_watershed_report(
+    watershed,
+    ohq_path: str | Path,
+    hms_path: str | Path,
+    output_path: str | Path | None = None,
+) -> Path:
+    """Write a portable HTML summary for model review and regression baselines."""
+
+    ohq = Path(ohq_path).expanduser().resolve()
+    hms = Path(hms_path).expanduser().resolve()
+    report = (
+        Path(output_path).expanduser().resolve()
+        if output_path is not None
+        else ohq.with_name("watershed_report.html")
     )
+    subbasins = list(getattr(watershed, "subbasins", []) or [])
+    reaches = list(getattr(watershed, "reaches", []) or [])
+    junctions = list(getattr(watershed, "junctions", []) or [])
+    area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+
+    def value(item, attribute: str, digits: int = 2) -> str:
+        raw = getattr(item, attribute, None)
+        return "—" if raw is None else f"{float(raw):.{digits}f}"
+
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(getattr(item, 'name', getattr(item, 'id', ''))))}</td>"
+        f"<td>{value(item, 'area_km2', 4)}</td>"
+        f"<td>{value(item, 'curve_number', 1)}</td>"
+        f"<td>{value(item, 'slope_pct', 2)}</td>"
+        f"<td>{value(item, 'flow_len_ft', 0)}</td>"
+        f"<td>{value(item, 'tc_min', 1)}</td>"
+        f"<td>{value(item, 'lag_min', 1)}</td>"
+        "</tr>"
+        for item in subbasins
+    )
+    document = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>GIStoOHQ Watershed Report</title>
+<style>body{{font:16px sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}}
+table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #bbb;padding:.45rem;text-align:right}}
+th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</style></head><body>
+<h1>GIStoOHQ Watershed Report</h1>
+<ul><li>Watershed area: <strong>{area:.4f} km²</strong></li>
+<li>Subbasins: {len(subbasins)}</li><li>Reaches: {len(reaches)}</li>
+<li>Junctions: {len(junctions)}</li></ul>
+<h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
+<th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
+</tr></thead><tbody>{rows}</tbody></table>
+<h2>Artifacts</h2><p>OHQ: <code>{escape(str(ohq))}</code></p>
+<p>HEC-HMS: <code>{escape(str(hms))}</code></p>
+<p><em>Review the snapped outlet, longest flow path, topology, parameters, and design storms before use.</em></p>
+</body></html>"""
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(document, encoding="utf-8")
+    return report
 
 
 def acquisition_bounds(path: str | Path) -> tuple[float, float, float, float]:
@@ -225,8 +286,9 @@ def run_full_pipeline(
         if hms_path is None:
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
-        emit(full_run_summary(watershed, built, hms_path))
-        return FullRunResult(Path(built), hms_path)
+        report_path = write_watershed_report(watershed, built, hms_path)
+        emit(full_run_summary(watershed, built, hms_path, report_path))
+        return FullRunResult(Path(built), hms_path, report_path)
     except FullRunError:
         raise
     except Exception as exc:

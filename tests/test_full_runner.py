@@ -10,6 +10,7 @@ from ohqbuilder.full_runner import (
     existing_legacy_hms_project,
     full_run_summary,
     run_full_pipeline,
+    write_watershed_report,
 )
 
 
@@ -37,6 +38,34 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     assert "Reaches        : 1" in summary
     assert "Junctions      : 0" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
+
+
+def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
+    watershed = SimpleNamespace(
+        subbasins=[
+            SimpleNamespace(
+                name="Subbasin_1",
+                area_km2=0.0638,
+                curve_number=87.3,
+                slope_pct=6.3,
+                flow_len_ft=1517,
+                tc_min=13.8,
+                lag_min=8.3,
+            )
+        ],
+        reaches=[object()],
+        junctions=[],
+    )
+
+    report = write_watershed_report(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
+    content = report.read_text(encoding="utf-8")
+
+    assert report == tmp_path / "watershed_report.html"
+    assert "0.0638 km²" in content
+    assert "Subbasin_1" in content
+    assert ">1517<" in content
+    assert ">13.8<" in content
+    assert str(tmp_path / "site.hms") in content
 
 
 def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):
@@ -144,6 +173,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     }
     assert result.output_path == Path(tmp_path / "SITE_A.ohq")
     assert result.hms_project_path == tmp_path / "SITE_A.hms"
+    assert result.report_path == tmp_path / "watershed_report.html"
     assert phase_options["options"].refresh_auto_pour_points is True
 
 

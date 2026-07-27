@@ -118,6 +118,11 @@ def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
 
     assert 'globals().get("SNAP_EDGE_FRACTION", 0.80)' in source
     assert "SELECTED OUTLET IS FAR FROM THE ROUTED STREAM" in source
+    assert "def outlet_snap_quality(distance_m):" in source
+    assert 'return "GREEN"' in source
+    assert 'return "YELLOW"' in source
+    assert 'return "RED"' in source
+    assert 'QgsField("quality", QVariant.String)' in source
 
 
 def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():

@@ -940,6 +940,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Full pipeline complete: {result.output_path}")
         if result.hms_project_path:
             print(f"HEC-HMS project complete: {result.hms_project_path}")
+        if result.report_path:
+            print(f"Watershed report complete: {result.report_path}")
         return 0
     if args.command == "download-data":
         try:
