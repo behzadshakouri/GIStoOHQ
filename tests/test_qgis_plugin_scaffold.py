@@ -148,3 +148,5 @@ def test_qgis_plugin_exposes_full_download_to_ohq_workflow():
     assert "FULL RUN: Download All Data to OHQ" in dock
     assert 'command == "full-run"' in dock
     assert "prepare-hydrology" in dock
+    assert "Build HEC-HMS" in dock
+    assert "Validate HEC-HMS" in dock

@@ -436,6 +436,30 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
 
 
+def test_hms_buttons_build_and_validate_native_project(tmp_path):
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="Demo")
+
+    build = command_for_step("build-hms", state)
+    validate = command_for_step("validate-hms", state)
+
+    assert build.argv == (
+        "ohqbuild",
+        "build-hms",
+        "--root",
+        str(tmp_path),
+        "--site",
+        "Demo",
+        "--project-name",
+        "Demo",
+    )
+    assert validate.argv == (
+        "ohqbuild",
+        "validate-hms",
+        "--project",
+        str(tmp_path / "Demo" / "outputs" / "hec_hms" / "Demo.hms"),
+    )
+
+
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):
     from ohqbuilder.ui.launcher import LauncherState, command_for_step
 

@@ -185,6 +185,8 @@ WorkflowStep = Literal[
     "build-ohq",
     "run-to-ohq",
     "full-run",
+    "build-hms",
+    "validate-hms",
 ]
 
 
@@ -356,6 +358,27 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         if state.acquisition_area is not None:
             argv.extend(("--acquisition-area", str(state.acquisition_area)))
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
+    if step in {"build-hms", "validate-hms"}:
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required for HEC-HMS commands.")
+        if step == "build-hms":
+            return WorkflowCommand(
+                "Build HEC-HMS Project",
+                (
+                    "ohqbuild",
+                    "build-hms",
+                    "--root",
+                    str(state.root),
+                    "--site",
+                    state.site,
+                    "--project-name",
+                    state.site,
+                ),
+            )
+        project = state.root / state.site / "outputs" / "hec_hms" / f"{state.site}.hms"
+        return WorkflowCommand(
+            "Validate HEC-HMS Project", ("ohqbuild", "validate-hms", "--project", str(project))
+        )
     if step in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for OHQ workflow commands.")
@@ -966,10 +989,19 @@ class LauncherApp:
             tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
             ).pack(side="left")
+        hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
+        hms_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
+        for label, step in (
+            ("Build HEC-HMS", "build-hms"),
+            ("Validate HEC-HMS", "validate-hms"),
+        ):
+            tk.Button(
+                hms_buttons, text=label, command=lambda value=step: self.run_step(value)
+            ).pack(side="left")
         self.log = tk.Text(frame, height=24, width=100)
-        self.log.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="nsew")
+        self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(len(rows) + 3, weight=1)
+        frame.rowconfigure(len(rows) + 4, weight=1)
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")

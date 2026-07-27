@@ -44,6 +44,12 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "ohqbuilder.full_runner.build_ohq_project",
         lambda *args, **kwargs: calls.append("build") or str(tmp_path / "SITE_A.ohq"),
     )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *args, **kwargs: (
+            calls.append("build-hms") or SimpleNamespace(project_file=tmp_path / "SITE_A.hms")
+        ),
+    )
 
     result = run_full_pipeline(
         tmp_path,
@@ -64,6 +70,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "phases",
         "validate",
         "build",
+        "build-hms",
     ]
     assert callable(download_options.pop("progress"))
     assert download_options == {
@@ -78,6 +85,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "soil_top_depth": 15,
     }
     assert result.output_path == Path(tmp_path / "SITE_A.ohq")
+    assert result.hms_project_path == tmp_path / "SITE_A.hms"
 
 
 def test_full_pipeline_uses_drawn_area_for_download_coverage_and_clipping(monkeypatch, tmp_path):
@@ -107,6 +115,10 @@ def test_full_pipeline_uses_drawn_area_for_download_coverage_and_clipping(monkey
     )
     monkeypatch.setattr(
         "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
     )
 
     run_full_pipeline(tmp_path, "SITE", lon=-77.0, lat=39.0, acquisition_area=area)

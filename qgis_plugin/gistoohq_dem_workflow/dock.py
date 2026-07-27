@@ -184,6 +184,24 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         root = _relative_to_config(config_path, config.get("root") or ".")
         return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
 
+    if command == "build-hms":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        return [
+            "ohqbuild",
+            "build-hms",
+            "--root",
+            str(root),
+            "--site",
+            _site_name(config),
+            "--project-name",
+            _site_name(config),
+        ]
+
+    if command == "validate-hms":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        project = root / _site_name(config) / "outputs" / "hec_hms" / f"{_site_name(config)}.hms"
+        return ["ohqbuild", "validate-hms", "--project", str(project)]
+
     if command == "full-run":
         outlet = _as_mapping(config.get("outlet"), "outlet")
         if outlet.get("longitude") is None or outlet.get("latitude") is None:
@@ -326,6 +344,8 @@ class DemWorkflowDock:
             ("Prepare GIS Inputs", "prepare-inputs"),
             ("Check Inputs", "check-inputs"),
             ("Build OHQ", "build"),
+            ("Build HEC-HMS", "build-hms"),
+            ("Validate HEC-HMS", "validate-hms"),
             ("FULL RUN: Download All Data to OHQ", "full-run"),
         ):
             button = QPushButton(label)

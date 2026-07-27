@@ -34,6 +34,7 @@ from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
+from .hms_pipeline import build_hms_project, validate_hms_project
 from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
@@ -62,6 +63,16 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--dry-run", action="store_true")
     b.add_argument("--skip-input-check", action="store_true")
     b.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+
+    hms = sub.add_parser("build-hms", help="Build native HEC-HMS project files from GIS outputs.")
+    hms.add_argument("--root", required=True)
+    hms.add_argument("--site", required=True)
+    hms.add_argument("--config", default=None)
+    hms.add_argument("--project-name", default=None)
+    hms.add_argument("--out-dir", default=None)
+
+    hms_validate = sub.add_parser("validate-hms", help="Validate HEC-HMS project references.")
+    hms_validate.add_argument("--project", required=True)
 
     v = sub.add_parser("validate", help="Validate inputs and topology only.")
     v.add_argument("--root", required=True)
@@ -801,6 +812,23 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "build-hms":
+        settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
+        try:
+            result = build_hms_project(settings, args.out_dir)
+        except Exception as exc:
+            print(f"build-hms failed: {exc}")
+            return 2
+        print(f"Wrote HEC-HMS project: {result.project_file}")
+        return 0
+    if args.command == "validate-hms":
+        try:
+            references = validate_hms_project(args.project)
+        except (OSError, ValueError) as exc:
+            print(f"validate-hms failed: {exc}")
+            return 2
+        print(f"HEC-HMS project references OK: {len(references)} file(s)")
+        return 0
     if args.command == "validate":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
         input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
@@ -894,6 +922,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"full-run failed: {exc}")
             return 2
         print(f"Full pipeline complete: {result.output_path}")
+        if result.hms_project_path:
+            print(f"HEC-HMS project complete: {result.hms_project_path}")
         return 0
     if args.command == "download-data":
         try:

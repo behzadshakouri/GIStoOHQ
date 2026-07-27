@@ -54,6 +54,8 @@ active QGIS map canvas instead, so users can pick points against any basemap or
 GIS layers they have loaded there. If the demo YAML is left with merge-conflict
 markers after a branch update, use **reset Sligo demo** in the Tk launcher to
 rewrite the bundled demo config while preserving the current outlet coordinate.
+The cyan/blue line in the Tk map is the configured hydrography flowline overlay;
+it is used for outlet snapping and visual channel reference, not as a rectangle edge.
 The same map window can draw a rectangular acquisition area with two clicks or a
 custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
 as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
@@ -80,6 +82,10 @@ Use **Browse…** beside config and path fields to switch projects or folders. T
 launcher also includes **Open Sligo example** and **Open John McCormack example**;
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the
 selected Root shown in the form.
+After phase 1 and phase 2 produce topology, subbasins, reaches, and junctions, the
+**Build HEC-HMS** button writes native `.hms`, `.basin`, `.met`, `.control`, and
+`.run` files under `<Root>/<Site>/outputs/hec_hms`; **Validate HEC-HMS** checks all
+project references. Production full-run now creates both the OHQ and HEC-HMS file set.
 If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
 repeat preparation/download; the status is a refinement request rather than a crash.
 
