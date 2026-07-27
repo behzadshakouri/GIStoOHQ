@@ -305,7 +305,9 @@ def run_legacy_input_workflow(
             if not _input_exists(paths["pour_points_path"]):
                 try:
                     result = generate_pour_points(
-                        paths["junctions_path"], paths["pour_points_path"]
+                        paths["junctions_path"],
+                        paths["pour_points_path"],
+                        fallback_outlet_path=paths["outlet_path"],
                     )
                 except PourPointGenerationError as exc:
                     raise LegacyInputWorkflowError(

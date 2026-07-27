@@ -230,8 +230,8 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
 
     calls = []
 
-    def fake_generate(junctions, output):
-        calls.append((junctions, output))
+    def fake_generate(junctions, output, fallback_outlet_path=None):
+        calls.append((junctions, output, fallback_outlet_path))
         for suffix in (".shp", ".shx", ".dbf"):
             output.with_suffix(suffix).write_text("", encoding="utf-8")
         return types.SimpleNamespace(count=2, output_path=output)
@@ -246,5 +246,9 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
 
     run_legacy_input_workflow(tmp_path / "root", "SITE_A", script_dir, phase="phase2")
 
-    assert calls == [(outputs / "junctions.gpkg", outputs / "pour_points.shp")]
+    assert calls == [(
+        outputs / "junctions.gpkg",
+        outputs / "pour_points.shp",
+        outputs / "outlet.shp",
+    )]
     assert marker.is_file()

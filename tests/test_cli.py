@@ -94,8 +94,8 @@ def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
 def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):
     calls = []
 
-    def fake_generate(junctions, output, overwrite=False):
-        calls.append((junctions, output, overwrite))
+    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, fallback_outlet_path, overwrite))
         return PourPointResult(Path(output).resolve(), 3)
 
     monkeypatch.setattr("ohqbuilder.cli.generate_pour_points", fake_generate)
@@ -110,7 +110,12 @@ def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys
 
     outputs = tmp_path / "SITE_A" / "outputs"
     assert status == 0
-    assert calls == [(outputs / "junctions.gpkg", outputs / "pour_points.shp", True)]
+    assert calls == [(
+        outputs / "junctions.gpkg",
+        outputs / "pour_points.shp",
+        outputs / "outlet.shp",
+        True,
+    )]
     assert "Generated 3 pour point(s)" in capsys.readouterr().out
 
 
