@@ -45,6 +45,36 @@ back to `python -m ohqbuilder.cli ui`, so it works before packaging:
 scripts/run_dem_ui.sh
 ```
 
+The Tk launcher includes an OpenStreetMap tile picker for choosing the outlet
+coordinate interactively. It uses public OSM raster tiles when network access is
+available, caches tiles after first load, supports zooming and right-click
+recentering, and writes the clicked coordinate back to the outlet
+longitude/latitude fields. The QGIS plugin uses the
+active QGIS map canvas instead, so users can pick points against any basemap or
+GIS layers they have loaded there. If the demo YAML is left with merge-conflict
+markers after a branch update, use **reset Sligo demo** in the Tk launcher to
+rewrite the bundled demo config while preserving the current outlet coordinate.
+The same map window can draw a rectangular acquisition area with two clicks or a
+custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
+as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
+the **Create final OHQ file** section exposes the existing `prepare-hydrology`,
+`prepare-inputs`, `check-inputs`, and `build` terminal stages.
+**Continue automatically to OHQ** first creates `flow_dir.tif` and `flow_acc.tif`,
+then runs the combined `ohqbuild run` workflow, which creates the outlet before
+running the GIS phases and final build. The launcher prevents overlapping commands,
+so each stage finishes before another can start.
+For a new real site, **FULL RUN: download all data to OHQ** invokes the terminal
+`full-run` pipeline with the form's verified outlet, root, site, CRS, and download
+directory. That pipeline downloads DEM, hydrography, roads, land cover, Atlas 14,
+hydrologic soil groups, and soil texture; mosaics/clips the GIS sources; runs
+hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/network
+inputs; and writes the final OHQ file. QGIS processing and internet access are
+required for this production path.
+The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
+validation, and build stages, using the outlet selected on the active QGIS canvas.
+If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
+repeat preparation/download; the status is a refinement request rather than a crash.
+
 For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
 
 ```bash

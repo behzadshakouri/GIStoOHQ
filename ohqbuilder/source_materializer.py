@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import shutil
 
-from .dem_materializer import DemMaterializeResult, materialize_dem, bounds_from_lonlat_buffer, parse_bounds
+from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
 
 
@@ -30,7 +30,6 @@ def find_product_dir(source_dir: str | Path, product: str) -> Path:
     return matches[0]
 
 
-
 def bundled_cn_lookup_path() -> Path:
     """Return the repository-bundled curve-number lookup table path."""
 
@@ -47,6 +46,25 @@ def materialize_cn_lookup(root: Path, source: Path | None = None) -> Path:
     target = root / "cn_lookup.csv"
     shutil.copyfile(source_path, target)
     return target
+
+
+def demo_hydro_dir(root: Path) -> Path | None:
+    """Return bundled hydro fixtures when downloaded hydro is unavailable."""
+
+    candidate = root / "hydro"
+    return candidate if candidate.is_dir() else None
+
+
+def resolve_hydro_source_dir(root: Path, source_dir: Path) -> Path:
+    """Find downloaded hydro products or fall back to bundled example hydro files."""
+
+    try:
+        return find_product_dir(source_dir, "hydro")
+    except FileNotFoundError:
+        fallback = demo_hydro_dir(root)
+        if fallback is not None:
+            return fallback
+        raise
 
 
 def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | None:
@@ -70,6 +88,7 @@ def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | Non
     if aux.exists():
         shutil.copyfile(aux, target.with_name(target.name + ".aux.xml"))
     return target
+
 
 def materialize_source_inputs(
     root: str | Path,
@@ -116,7 +135,7 @@ def materialize_source_inputs(
     hydro = materialize_flowlines(
         root_path,
         site,
-        source_dir=find_product_dir(downloads, "hydro"),
+        source_dir=resolve_hydro_source_dir(root_path, downloads),
         dem_path=dem.output_path,
     )
     landcover = materialize_landcover(root_path, site, downloads)
