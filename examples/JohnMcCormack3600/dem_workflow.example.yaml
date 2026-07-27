@@ -1,34 +1,35 @@
 root: .
 site:
-  name: SligoCreekDemo
+  name: JohnMcCormack3600
   target_crs: EPSG:26918
+project:
+  title: 3600 John McCormack Rd NE Plan Set 20240709
+  jurisdiction: Washington, DC
+  source_date: 2024-07-09
 spatial_input:
   mode: outlet
 outlet:
-  longitude: -76.9765
-  latitude: 38.9921
+  # Starter location near the named property. Verify it in the map picker and
+  # move it to the actual receiving drainage outlet before downloading data.
+  longitude: -76.9974
+  latitude: 38.9370
   input_crs: EPSG:4326
   raw_path: inputs/outlet_raw.geojson
-  snap_to_flowline: true
-  snap_distance_m: 500
-  snapped_path: inputs/outlet_snapped.geojson
+  snap_to_flowline: false
 dem_acquisition:
-  method: upstream_network
+  method: outlet_buffer
   acquisition_area: intermediate/dem_acquisition_area.geojson
-  tile_index: indexes/usgs_3dep_tiles.demo.geojson
-  tile_manifest: intermediate/dem_download_manifest.json
-  flowline_path: hydro/NHDFlowline.demo.geojson
-  envelope_type: oriented_rectangle
-  upstream_trace_distance_km: 20
-  upstream_margin_km: 3
-  downstream_margin_km: 1
-  lateral_margin_km: 2
+  upstream_km: 5
+  downstream_km: 1
+  lateral_km: 2
   auto_expand: true
   directional_expansion: true
   boundary_safety_distance_m: 500
   expanded_acquisition_area: intermediate/dem_acquisition_area_attempt2.geojson
-  expansion_distance_km: 5
+  expansion_distance_km: 2
   summary: intermediate/dem_workflow_summary.json
   watershed_boundary: intermediate/watershed_boundary.geojson
   validation_summary: intermediate/dem_boundary_validation_summary.json
-  allow_acquisition_area_watershed_fallback: true
+paths:
+  raw_dem_dir: dem/raw
+download_dir: source_downloads
