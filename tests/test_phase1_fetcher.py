@@ -1,7 +1,24 @@
 from pathlib import Path
 
 from ohqbuilder.cli import main
-from ohqbuilder.phase1_fetcher import fetch_phase1_inputs
+from ohqbuilder.phase1_fetcher import _write_manifest, fetch_phase1_inputs
+
+
+def test_manifest_allows_download_directory_outside_site(tmp_path):
+    site = tmp_path / "root" / "SITE"
+    site.mkdir(parents=True)
+    manifest = site / "PHASE1_INPUTS.md"
+    outside = tmp_path / "shared_downloads"
+
+    _write_manifest(
+        manifest,
+        outlet_path=None,
+        download_dir=outside,
+        summary_csv=site / "summary.csv",
+        products=["demlr"],
+    )
+
+    assert str(outside) in manifest.read_text(encoding="utf-8")
 
 
 def test_fetch_phase1_inputs_creates_layout_and_manifest(monkeypatch, tmp_path):
