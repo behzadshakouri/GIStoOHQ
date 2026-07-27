@@ -6,15 +6,24 @@ required.
 
 ## Install from a source checkout
 
-Install GIStoOHQ into the Python environment used by QGIS, verify its GIS
-dependencies, and link the plugin into the default QGIS profile:
+Create a virtual environment that can see the system QGIS packages, install
+GIStoOHQ there, verify its GIS dependencies, and link the plugin into the default
+QGIS profile:
 
 ```bash
 cd /path/to/GIStoOHQ
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e '.[gis]'
 ohqbuild doctor --strict-gis
 scripts/install_qgis_plugin.sh
 ```
+
+If `/usr/bin/python` reports `No module named pip`, install the distribution's
+`python3-pip` and `python3-venv` packages first. Do not use `sudo pip`; keep the
+editable GIStoOHQ installation in `.venv`. In later terminal sessions, activate
+the environment again with `source .venv/bin/activate`.
 
 Pass a profile name when it is not `default`, for example
 `scripts/install_qgis_plugin.sh field-work`.
@@ -28,6 +37,10 @@ workflow or the individual stage buttons for review between steps.
 The plugin runs `ohqbuild` as a child process. If QGIS was started from a desktop
 menu and cannot find it, either install GIStoOHQ into QGIS's Python environment or
 start QGIS from a shell where `command -v ohqbuild` succeeds.
+
+The installer creates a symbolic development link. Repository edits therefore
+become available after disabling/re-enabling the plugin or restarting QGIS; the
+installer does not need to be rerun after each edit.
 
 ## Basemaps in QGIS
 

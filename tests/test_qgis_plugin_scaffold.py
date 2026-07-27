@@ -11,6 +11,15 @@ def test_qgis_plugin_scaffold_files_exist():
     assert "GIStoOHQ DEM Workflow" in (root / "metadata.txt").read_text(encoding="utf-8")
 
 
+def test_qgis_plugin_registers_an_actual_qdockwidget():
+    plugin = Path("qgis_plugin/gistoohq_dem_workflow/plugin.py").read_text(encoding="utf-8")
+
+    assert "self.dock_content = DemWorkflowDock(self.iface)" in plugin
+    assert "self.dock = self.dock_content.widget" in plugin
+    assert "addDockWidget(Qt.RightDockWidgetArea, self.dock)" in plugin
+    assert "addDockWidget(Qt.RightDockWidgetArea, self.dock_content)" not in plugin
+
+
 def test_qgis_plugin_dock_has_outlet_capture_hook():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
 
