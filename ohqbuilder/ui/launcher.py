@@ -355,7 +355,7 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
-        if state.acquisition_area is not None:
+        if state.acquisition_area is not None and state.acquisition_area.is_file():
             argv.extend(("--acquisition-area", str(state.acquisition_area)))
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
     if step in {"build-hms", "validate-hms"}:
@@ -560,6 +560,39 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
         acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
     )
+
+
+def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str | None:
+    """Return actionable UI guidance instead of launching a predictably invalid stage."""
+    if step == "download-dem-manifest" and (
+        state.manifest_path is None or not state.manifest_path.is_file()
+    ):
+        return (
+            "No DEM manifest exists. Configure a tile index and run prepare-dem, or use FULL RUN."
+        )
+    if step == "prepare-hydrology" and state.root is not None and state.site:
+        site = state.root / state.site
+        if not (site / "demlr" / "cliped_utm.tif").is_file():
+            return "Materialized DEM is missing. Run materialize-inputs or FULL RUN first."
+        if not (site / "outputs" / "NHDFlowline_clip.gpkg").is_file():
+            return "Materialized flowlines are missing. Run materialize-inputs or FULL RUN first."
+    if step in {"prepare-inputs", "build-ohq", "build-hms"} and state.root and state.site:
+        outputs = state.root / state.site / "outputs"
+        if step == "prepare-inputs":
+            required = ("flow_dir.tif", "flow_acc.tif")
+            if any(not (outputs / name).is_file() for name in required):
+                return "Hydrology outputs are missing. Run Prepare hydrology first."
+        elif any(
+            not (outputs / name).is_file()
+            for name in (
+                "topology.gpkg",
+                "subwatershed_params.gpkg",
+                "reaches.gpkg",
+                "junctions.gpkg",
+            )
+        ):
+            return "Phase 1/2 model inputs are missing. Run Prepare GIS inputs first."
+    return None
 
 
 def sligo_demo_reset_args(
@@ -1178,6 +1211,9 @@ class LauncherApp:
             config_path = Path(self.config_var.get()).expanduser()
             if config_path.exists():
                 state = state_with_config_defaults(state, load_project_config(config_path))
+            prerequisite = workflow_prerequisite_error(step, state)
+            if prerequisite:
+                raise LauncherError(prerequisite)
             command = command_for_step(step, state)
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")

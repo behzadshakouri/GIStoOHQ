@@ -63,6 +63,8 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
 """.strip(),
         encoding="utf-8",
     )
+    (tmp_path / "intermediate").mkdir()
+    (tmp_path / "intermediate" / "area.geojson").write_text("{}", encoding="utf-8")
 
     assert _command_for_workflow("prepare-dem", str(config)) == [
         "ohqbuild",

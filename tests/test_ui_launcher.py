@@ -21,6 +21,7 @@ from ohqbuilder.ui.launcher import (
     state_with_config_defaults,
     update_config_from_state,
     use_expanded_acquisition,
+    workflow_prerequisite_error,
     write_drawn_acquisition,
 )
 
@@ -411,6 +412,9 @@ def test_continue_to_ohq_prepares_hydrology_before_combined_run():
 
 
 def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
+    acquisition = tmp_path / "intermediate" / "area.geojson"
+    acquisition.parent.mkdir()
+    acquisition.write_text("{}", encoding="utf-8")
     state = LauncherState(
         config_path=tmp_path / "config.yaml",
         root=tmp_path,
@@ -419,7 +423,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         target_crs="EPSG:26918",
         lon=-76.99,
         lat=38.94,
-        acquisition_area=tmp_path / "intermediate" / "area.geojson",
+        acquisition_area=acquisition,
     )
 
     command = command_for_step("full-run", state)
@@ -458,6 +462,15 @@ def test_hms_buttons_build_and_validate_native_project(tmp_path):
         "--project",
         str(tmp_path / "Demo" / "outputs" / "hec_hms" / "Demo.hms"),
     )
+
+
+def test_ui_prerequisites_direct_new_project_to_full_run(tmp_path):
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="NewSite")
+
+    assert "FULL RUN" in workflow_prerequisite_error("download-dem-manifest", state)
+    assert "materialize-inputs" in workflow_prerequisite_error("prepare-hydrology", state)
+    assert "Prepare hydrology" in workflow_prerequisite_error("prepare-inputs", state)
+    assert "Prepare GIS inputs" in workflow_prerequisite_error("build-hms", state)
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

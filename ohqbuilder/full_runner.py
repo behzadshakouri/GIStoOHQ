@@ -66,43 +66,6 @@ def buffer_covering_bounds(
     )
 
 
-def acquisition_bounds(path: str | Path) -> tuple[float, float, float, float]:
-    """Read the bounding box of GeoJSON acquisition geometry in EPSG:4326."""
-    data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    coordinates: list[tuple[float, float]] = []
-
-    def collect(value) -> None:
-        if (
-            isinstance(value, list)
-            and len(value) >= 2
-            and all(isinstance(item, (int, float)) for item in value[:2])
-        ):
-            coordinates.append((float(value[0]), float(value[1])))
-        elif isinstance(value, list):
-            for item in value:
-                collect(item)
-
-    for feature in data.get("features", []):
-        collect((feature.get("geometry") or {}).get("coordinates", []))
-    if not coordinates:
-        raise FullRunError(f"Acquisition GeoJSON contains no coordinates: {path}")
-    xs, ys = zip(*coordinates)
-    return min(xs), min(ys), max(xs), max(ys)
-
-
-def buffer_covering_bounds(
-    lon: float, lat: float, bounds: tuple[float, float, float, float]
-) -> float:
-    """Return an outlet-centered query radius covering all acquisition corners."""
-    minx, miny, maxx, maxy = bounds
-    meters_per_lon = 111_320.0 * max(math.cos(math.radians(lat)), 0.1)
-    return max(
-        math.hypot((x - lon) * meters_per_lon, (y - lat) * 111_320.0)
-        for x in (minx, maxx)
-        for y in (miny, maxy)
-    )
-
-
 def run_full_pipeline(
     root: str | Path,
     site: str,

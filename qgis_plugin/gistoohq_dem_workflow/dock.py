@@ -230,7 +230,7 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
-        if acquisition is not None:
+        if acquisition is not None and acquisition.is_file():
             argv.extend(["--acquisition-area", str(acquisition)])
         return argv
 

@@ -105,10 +105,20 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     outlet = _section(config, "outlet")
     dem_acquisition = _section(config, "dem_acquisition")
 
-    method = str(dem_acquisition.get("method") or dem_acquisition.get("acquisition_mode") or "").lower()
+    method = str(
+        dem_acquisition.get("method") or dem_acquisition.get("acquisition_mode") or ""
+    ).lower()
     flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
-    outlet_lon = _required_float(outlet, "longitude", "outlet") if outlet.get("longitude") is not None else None
-    outlet_lat = _required_float(outlet, "latitude", "outlet") if outlet.get("latitude") is not None else None
+    outlet_lon = (
+        _required_float(outlet, "longitude", "outlet")
+        if outlet.get("longitude") is not None
+        else None
+    )
+    outlet_lat = (
+        _required_float(outlet, "latitude", "outlet")
+        if outlet.get("latitude") is not None
+        else None
+    )
     raw_outlet_path: Path | None = None
     snapped = None
     if outlet_lon is not None and outlet_lat is not None:
@@ -117,13 +127,20 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
             outlet_lat,
             _resolve(outlet.get("raw_path") or "inputs/outlet_raw.geojson", base),
         )
-    if outlet.get("snap_to_flowline") and flowline_value and outlet_lon is not None and outlet_lat is not None:
+    if (
+        outlet.get("snap_to_flowline")
+        and flowline_value
+        and outlet_lon is not None
+        and outlet_lat is not None
+    ):
         snapped = snap_outlet_to_flowlines(
             outlet_lon,
             outlet_lat,
             _resolve(flowline_value, base),
             snap_distance_m=float(outlet.get("snap_distance_m", 500.0)),
-            output_path=_resolve(outlet.get("snapped_path") or "inputs/outlet_snapped.geojson", base),
+            output_path=_resolve(
+                outlet.get("snapped_path") or "inputs/outlet_snapped.geojson", base
+            ),
         )
         outlet_lon = snapped.snapped_lon
         outlet_lat = snapped.snapped_lat
@@ -140,7 +157,9 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         lat = outlet_lat
         azimuth_value = dem_acquisition.get("azimuth")
         if method == "oriented_outlet_buffer" and azimuth_value is None:
-            raise DemWorkflowError("dem_acquisition.azimuth is required for oriented_outlet_buffer.")
+            raise DemWorkflowError(
+                "dem_acquisition.azimuth is required for oriented_outlet_buffer."
+            )
         azimuth = float(azimuth_value) if azimuth_value is not None else None
         acquisition_result = create_outlet_buffer_area(
             lon,
@@ -153,13 +172,19 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         )
     elif method == "upstream_network":
         if not flowline_value:
-            raise DemWorkflowError("dem_acquisition.flowline_path is required for upstream_network.")
+            raise DemWorkflowError(
+                "dem_acquisition.flowline_path is required for upstream_network."
+            )
         acquisition_result = create_upstream_network_area(
-            outlet_lon if outlet_lon is not None else _required_float(outlet, "longitude", "outlet"),
+            outlet_lon
+            if outlet_lon is not None
+            else _required_float(outlet, "longitude", "outlet"),
             outlet_lat if outlet_lat is not None else _required_float(outlet, "latitude", "outlet"),
             _resolve(flowline_value, base),
             acquisition_path,
-            upstream_trace_distance_km=float(dem_acquisition.get("upstream_trace_distance_km", 40.0)),
+            upstream_trace_distance_km=float(
+                dem_acquisition.get("upstream_trace_distance_km", 40.0)
+            ),
             upstream_margin_km=float(dem_acquisition.get("upstream_margin_km", 5.0)),
             downstream_margin_km=float(dem_acquisition.get("downstream_margin_km", 3.0)),
             lateral_margin_km=float(dem_acquisition.get("lateral_margin_km", 4.0)),
@@ -167,7 +192,9 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         )
     elif method == "polygon":
         if not acquisition_path.exists():
-            raise DemWorkflowError(f"Configured acquisition polygon does not exist: {acquisition_path}")
+            raise DemWorkflowError(
+                f"Configured acquisition polygon does not exist: {acquisition_path}"
+            )
     else:
         raise DemWorkflowError(
             "dem_acquisition.method must be outlet_buffer, oriented_outlet_buffer, upstream_network, or polygon."
@@ -185,7 +212,9 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
             path_field=str(dem_acquisition.get("tile_path_field", "path")),
         )
     elif tile_index or tile_manifest:
-        raise DemWorkflowError("dem_acquisition.tile_index and tile_manifest must be provided together.")
+        raise DemWorkflowError(
+            "dem_acquisition.tile_index and tile_manifest must be provided together."
+        )
 
     summary_path = _resolve(
         dem_acquisition.get("summary") or "intermediate/dem_workflow_summary.json",
@@ -199,9 +228,13 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         "tile_manifest": _relativize(tile_manifest_result.output_path, base)
         if tile_manifest_result
         else None,
-        "selected_tile_count": tile_manifest_result.selected_count if tile_manifest_result else None,
+        "selected_tile_count": tile_manifest_result.selected_count
+        if tile_manifest_result
+        else None,
         "raw_outlet": _relativize(raw_outlet_path, base) if raw_outlet_path else None,
-        "snapped_outlet": _relativize(snapped.output_path, base) if snapped and snapped.output_path else None,
+        "snapped_outlet": _relativize(snapped.output_path, base)
+        if snapped and snapped.output_path
+        else None,
         "snap_distance_m": snapped.distance_m if snapped else None,
     }
     if acquisition_result:
@@ -341,7 +374,6 @@ def write_dem_config_template(
     dem: dict[str, Any] = {
         "method": method,
         "acquisition_area": "intermediate/dem_acquisition_area.geojson",
-        "tile_manifest": "intermediate/dem_download_manifest.json",
         "summary": "intermediate/dem_workflow_summary.json",
         "watershed_boundary": "intermediate/watershed_boundary.geojson",
         "validation_summary": "intermediate/dem_boundary_validation_summary.json",
@@ -351,25 +383,28 @@ def write_dem_config_template(
         "boundary_safety_distance_m": 500,
         "expansion_distance_km": 5,
         "final_watershed_buffer_m": 1000,
-        "allow_acquisition_area_watershed_fallback": True,
+        "allow_acquisition_area_watershed_fallback": _is_sligo_demo_config(path),
     }
     if method == "upstream_network":
         flowline_path = _demo_default_path(path, SLIGO_DEMO_FLOWLINES, flowline_path)
         tile_index = _demo_default_path(path, SLIGO_DEMO_TILE_INDEX, tile_index)
         if flowline_path is None:
             raise DemWorkflowError("flowline_path is required for upstream_network configs.")
-        dem.update({
-            "flowline_path": str(flowline_path),
-            "envelope_type": "oriented_rectangle",
-            "upstream_trace_distance_km": 40,
-            "upstream_margin_km": 5,
-            "downstream_margin_km": 3,
-            "lateral_margin_km": 4,
-        })
+        dem.update(
+            {
+                "flowline_path": str(flowline_path),
+                "envelope_type": "oriented_rectangle",
+                "upstream_trace_distance_km": 40,
+                "upstream_margin_km": 5,
+                "downstream_margin_km": 3,
+                "lateral_margin_km": 4,
+            }
+        )
     else:
         dem.update({"upstream_km": 35, "downstream_km": 3, "lateral_km": 4})
     if tile_index is not None:
         dem["tile_index"] = str(tile_index)
+        dem["tile_manifest"] = "intermediate/dem_download_manifest.json"
     config: dict[str, Any] = {
         "root": ".",
         "site": {"name": site, "target_crs": target_crs or infer_utm_crs(lon, lat)},
