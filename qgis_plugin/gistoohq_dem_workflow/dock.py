@@ -34,7 +34,10 @@ def _write_geojson_polygon(path: Path, coords: list[tuple[float, float]], *, sou
                     {
                         "type": "Feature",
                         "properties": {"source": source},
-                        "geometry": {"type": "Polygon", "coordinates": [[list(point) for point in coords]]},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[list(point) for point in coords]],
+                        },
                     }
                 ],
             },
@@ -69,13 +72,15 @@ def _write_manifest_footprints(manifest_path: Path) -> Path | None:
                 },
                 "geometry": {
                     "type": "Polygon",
-                    "coordinates": [[
-                        [minx, miny],
-                        [maxx, miny],
-                        [maxx, maxy],
-                        [minx, maxy],
-                        [minx, miny],
-                    ]],
+                    "coordinates": [
+                        [
+                            [minx, miny],
+                            [maxx, miny],
+                            [maxx, maxy],
+                            [minx, maxy],
+                            [minx, miny],
+                        ]
+                    ],
                 },
             }
         )
@@ -107,7 +112,13 @@ def _relative_to_config(config_path: Path, value) -> Path | None:
     path = Path(str(value)).expanduser()
     if path.is_absolute():
         return path
-    return config_path.parent / path
+    base = config_path.expanduser().resolve().parent
+    cwd_candidate = path.resolve()
+    try:
+        cwd_candidate.relative_to(base)
+        return cwd_candidate
+    except ValueError:
+        return base / path
 
 
 def _site_name(config: dict) -> str:
@@ -143,7 +154,9 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
     if command == "download-dem-manifest":
         manifest = _relative_to_config(config_path, dem.get("tile_manifest"))
         if manifest is None:
-            raise QgisDockConfigError("dem_acquisition.tile_manifest is required to download DEM tiles.")
+            raise QgisDockConfigError(
+                "dem_acquisition.tile_manifest is required to download DEM tiles."
+            )
         paths = _as_mapping(config.get("paths"), "paths")
         out_dir = _relative_to_config(
             config_path,
@@ -154,7 +167,9 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
     if command == "materialize-inputs":
         root = _relative_to_config(config_path, config.get("root") or ".")
         argv = ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
-        source_dir = _relative_to_config(config_path, config.get("download_dir") or config.get("source_dir"))
+        source_dir = _relative_to_config(
+            config_path, config.get("download_dir") or config.get("source_dir")
+        )
         if source_dir is not None:
             argv.extend(["--source-dir", str(source_dir)])
         target_crs = _target_crs(config)
@@ -163,6 +178,60 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         manifest = _relative_to_config(config_path, dem.get("tile_manifest"))
         if manifest is not None:
             argv.extend(["--dem-manifest", str(manifest)])
+        return argv
+
+    if command in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build"}:
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
+
+    if command == "build-hms":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        return [
+            "ohqbuild",
+            "build-hms",
+            "--root",
+            str(root),
+            "--site",
+            _site_name(config),
+            "--project-name",
+            _site_name(config),
+        ]
+
+    if command == "validate-hms":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        project = root / _site_name(config) / "outputs" / "hec_hms" / f"{_site_name(config)}.hms"
+        return ["ohqbuild", "validate-hms", "--project", str(project)]
+
+    if command == "full-run":
+        outlet = _as_mapping(config.get("outlet"), "outlet")
+        if outlet.get("longitude") is None or outlet.get("latitude") is None:
+            raise QgisDockConfigError(
+                "outlet.longitude and outlet.latitude are required for full-run."
+            )
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        argv = [
+            "ohqbuild",
+            "full-run",
+            "--root",
+            str(root),
+            "--site",
+            _site_name(config),
+            "--lon",
+            str(outlet["longitude"]),
+            "--lat",
+            str(outlet["latitude"]),
+            "--project-name",
+            _site_name(config),
+        ]
+        target_crs = _target_crs(config)
+        if target_crs:
+            argv.extend(["--target-crs", target_crs])
+        source_dir = _relative_to_config(config_path, config.get("download_dir"))
+        if source_dir is not None:
+            argv.extend(["--download-dir", str(source_dir)])
+        acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
+        if acquisition is not None and acquisition.is_file():
+            argv.extend(["--acquisition-area", str(acquisition)])
         return argv
 
     raise QgisDockConfigError(f"Unsupported workflow command: {command}")
@@ -219,7 +288,9 @@ class AcquisitionPolygonTool:
         transform = QgsCoordinateTransform(source_crs, target_crs, QgsProject.instance())
         lonlat = transform.transform(point)
         self.points.append((lonlat.x(), lonlat.y()))
-        self.dock.log.append(f"Added DEM area vertex {len(self.points)}: {lonlat.x():.8f}, {lonlat.y():.8f}")
+        self.dock.log.append(
+            f"Added DEM area vertex {len(self.points)}: {lonlat.x():.8f}, {lonlat.y():.8f}"
+        )
 
     def finish(self):
         if len(self.points) < 3:
@@ -269,6 +340,13 @@ class DemWorkflowDock:
             ("Download DEM Tiles", "download-dem-manifest"),
             ("Materialize Inputs", "materialize-inputs"),
             ("Validate DEM", "validate-dem"),
+            ("Prepare Hydrology", "prepare-hydrology"),
+            ("Prepare GIS Inputs", "prepare-inputs"),
+            ("Check Inputs", "check-inputs"),
+            ("Build OHQ", "build"),
+            ("Build HEC-HMS", "build-hms"),
+            ("Validate HEC-HMS", "validate-hms"),
+            ("FULL RUN: Download All Data to OHQ", "full-run"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
@@ -360,7 +438,9 @@ class DemWorkflowDock:
         self.process = QProcess(self.widget)
         self.process.readyReadStandardOutput.connect(self._append_process_stdout)
         self.process.readyReadStandardError.connect(self._append_process_stderr)
-        self.process.finished.connect(lambda code, status, value=command: self._command_finished(value, code, status))
+        self.process.finished.connect(
+            lambda code, status, value=command: self._command_finished(value, code, status)
+        )
         self.process.start(argv[0], argv[1:])
 
     def _append_process_stdout(self) -> None:
@@ -390,13 +470,20 @@ class DemWorkflowDock:
         outlet = data.get("outlet", {}) if isinstance(data, dict) else {}
         layer_values = {
             key: dem.get(key)
-            for key in ("acquisition_area", "expanded_acquisition_area", "watershed_boundary", "tile_index")
+            for key in (
+                "acquisition_area",
+                "expanded_acquisition_area",
+                "watershed_boundary",
+                "tile_index",
+            )
         }
         if isinstance(outlet, dict):
-            layer_values.update({
-                "outlet_raw": outlet.get("raw_path"),
-                "outlet_snapped": outlet.get("snapped_path"),
-            })
+            layer_values.update(
+                {
+                    "outlet_raw": outlet.get("raw_path"),
+                    "outlet_snapped": outlet.get("snapped_path"),
+                }
+            )
         manifest_value = dem.get("tile_manifest")
         if manifest_value:
             manifest_path = Path(manifest_value).expanduser()

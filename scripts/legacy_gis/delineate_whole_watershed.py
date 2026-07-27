@@ -73,7 +73,7 @@ SNAP = bool(globals().get("SNAP", True))
 SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
-SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.90))
+SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
 )
@@ -527,8 +527,9 @@ if SNAP:
     print("  movement             : %.2f m" % moved)
     if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
         print(
-            "  WARNING: snap used %.0f%% or more of the search radius; "
-            "the intended routed channel may not be near the outlet."
+            "  WARNING: SELECTED OUTLET IS FAR FROM THE ROUTED STREAM. "
+            "Snap used %.0f%% or more of the search radius; verify the selected "
+            "outlet and snapped point in QGIS before relying on the model."
             % (SNAP_EDGE_FRACTION * 100.0)
         )
     if abs(snap_acc) < MIN_SNAP_ACC_CELLS:
