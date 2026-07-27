@@ -16,7 +16,12 @@ from .dem_acquisition import (
 )
 from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .dem_materializer import DemMaterializeError, materialize_dem
-from .dem_workflow import DemWorkflowError, prepare_dem_from_config, validate_dem_from_config, write_dem_config_template
+from .dem_workflow import (
+    DemWorkflowError,
+    prepare_dem_from_config,
+    validate_dem_from_config,
+    write_dem_config_template,
+)
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -29,17 +34,24 @@ from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
+from .hms_pipeline import build_hms_project, validate_hms_project
 from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
 from .settings import BuilderSettings
-from .soil_retrieval import SoilRetrievalError, retrieve_hydrologic_soil_groups, retrieve_soil_texture
+from .soil_retrieval import (
+    SoilRetrievalError,
+    retrieve_hydrologic_soil_groups,
+    retrieve_soil_texture,
+)
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ohqbuild", description="Build OpenHydroQual OHQ files from GIS outputs.")
+    p = argparse.ArgumentParser(
+        prog="ohqbuild", description="Build OpenHydroQual OHQ files from GIS outputs."
+    )
     sub = p.add_subparsers(dest="command", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
@@ -51,6 +63,16 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--dry-run", action="store_true")
     b.add_argument("--skip-input-check", action="store_true")
     b.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+
+    hms = sub.add_parser("build-hms", help="Build native HEC-HMS project files from GIS outputs.")
+    hms.add_argument("--root", required=True)
+    hms.add_argument("--site", required=True)
+    hms.add_argument("--config", default=None)
+    hms.add_argument("--project-name", default=None)
+    hms.add_argument("--out-dir", default=None)
+
+    hms_validate = sub.add_parser("validate-hms", help="Validate HEC-HMS project references.")
+    hms_validate.add_argument("--project", required=True)
 
     v = sub.add_parser("validate", help="Validate inputs and topology only.")
     v.add_argument("--root", required=True)
@@ -67,18 +89,52 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--site", required=True)
     prep.add_argument("--script-dir", default=None)
     prep.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
-    prep.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
-    prep.add_argument("--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts.")
-    prep.add_argument("--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts.")
-    prep.add_argument("--flowline-path", default=None, help="Flowline path passed to legacy scripts.")
-    prep.add_argument("--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts.")
-    prep.add_argument("--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts.")
-    prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
-    prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
-    prep.add_argument("--dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
-    prep.add_argument("--start-at", default=None, help="Resume a phase at the named legacy step script, e.g. load_cn_inputs.py.")
-    prep.add_argument("--no-auto-pour-points", action="store_true", help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.")
-    prep.add_argument("--no-auto-outlet", action="store_true", help="Require an existing outlet.shp instead of deriving it from flow_acc.tif.")
+    prep.add_argument(
+        "--out-dir",
+        default=None,
+        help="Legacy outputs directory; defaults to <root>/<site>/outputs.",
+    )
+    prep.add_argument(
+        "--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts."
+    )
+    prep.add_argument(
+        "--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts."
+    )
+    prep.add_argument(
+        "--flowline-path", default=None, help="Flowline path passed to legacy scripts."
+    )
+    prep.add_argument(
+        "--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts."
+    )
+    prep.add_argument(
+        "--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts."
+    )
+    prep.add_argument(
+        "--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts."
+    )
+    prep.add_argument(
+        "--no-force", action="store_true", help="Forward FORCE=False to legacy scripts."
+    )
+    prep.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run legacy preflight and list steps without executing processing.",
+    )
+    prep.add_argument(
+        "--start-at",
+        default=None,
+        help="Resume a phase at the named legacy step script, e.g. load_cn_inputs.py.",
+    )
+    prep.add_argument(
+        "--no-auto-pour-points",
+        action="store_true",
+        help="Require an existing pour_points.shp instead of generating it from Phase 1 junctions.",
+    )
+    prep.add_argument(
+        "--no-auto-outlet",
+        action="store_true",
+        help="Require an existing outlet.shp instead of deriving it from flow_acc.tif.",
+    )
 
     hydro_prep = sub.add_parser(
         "prepare-hydrology",
@@ -87,14 +143,30 @@ def build_parser() -> argparse.ArgumentParser:
     hydro_prep.add_argument("--root", required=True)
     hydro_prep.add_argument("--site", required=True)
     hydro_prep.add_argument("--script-dir", default=None)
-    hydro_prep.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
-    hydro_prep.add_argument("--dem-path", default=None, help="DEM path passed to hydrology preprocessing.")
-    hydro_prep.add_argument("--flowline-path", default=None, help="Flowline path passed to hydrology preprocessing.")
+    hydro_prep.add_argument(
+        "--out-dir",
+        default=None,
+        help="Legacy outputs directory; defaults to <root>/<site>/outputs.",
+    )
+    hydro_prep.add_argument(
+        "--dem-path", default=None, help="DEM path passed to hydrology preprocessing."
+    )
+    hydro_prep.add_argument(
+        "--flowline-path", default=None, help="Flowline path passed to hydrology preprocessing."
+    )
     hydro_prep.add_argument("--flowdir-path", default=None, help="flow_dir.tif output path.")
     hydro_prep.add_argument("--flowacc-path", default=None, help="flow_acc.tif output path.")
-    hydro_prep.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
-    hydro_prep.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
-    hydro_prep.add_argument("--dry-run", action="store_true", help="Run preflight and list steps without executing processing.")
+    hydro_prep.add_argument(
+        "--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts."
+    )
+    hydro_prep.add_argument(
+        "--no-force", action="store_true", help="Forward FORCE=False to legacy scripts."
+    )
+    hydro_prep.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run preflight and list steps without executing processing.",
+    )
 
     outlet = sub.add_parser(
         "create-outlet",
@@ -102,7 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     outlet.add_argument("--root", required=True)
     outlet.add_argument("--site", required=True)
-    outlet.add_argument("--flow-acc", default=None, help="Defaults to <root>/<site>/outputs/flow_acc.tif.")
+    outlet.add_argument(
+        "--flow-acc", default=None, help="Defaults to <root>/<site>/outputs/flow_acc.tif."
+    )
     outlet.add_argument("--out", default=None, help="Defaults to <root>/<site>/outputs/outlet.shp.")
     outlet.add_argument("--overwrite", action="store_true")
 
@@ -112,8 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pour.add_argument("--root", required=True)
     pour.add_argument("--site", required=True)
-    pour.add_argument("--junctions", default=None, help="Defaults to <root>/<site>/outputs/junctions.gpkg.")
-    pour.add_argument("--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp.")
+    pour.add_argument(
+        "--junctions", default=None, help="Defaults to <root>/<site>/outputs/junctions.gpkg."
+    )
+    pour.add_argument(
+        "--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp."
+    )
     pour.add_argument("--overwrite", action="store_true")
 
     dl = sub.add_parser(
@@ -132,21 +210,48 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument("--lat-col", default=None, help="Latitude column (auto-detected by default).")
     dl.add_argument("--lon-col", default=None, help="Longitude column (auto-detected by default).")
     dl.add_argument("--buffer", type=float, default=30.0, help="Half-width of query box in meters.")
-    dl.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
-    dl.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
-    dl.add_argument("--dem-resolution", default="1/3", help="DEM tier for product dem: 1/3, 1/9, 1m, 30m, or auto (default: 1/3).")
-    dl.add_argument("--make-points", action="store_true", help="Write a single-point shapefile per site.")
-    dl.add_argument("--points-dir", default=None, help="Base directory for point shapefiles; defaults to --download when set.")
-    dl.add_argument("--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads.")
+    dl.add_argument(
+        "--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap."
+    )
+    dl.add_argument(
+        "--max-file-size-mb",
+        type=float,
+        default=512.0,
+        help="Maximum single download size in MiB; 0 disables the size guard.",
+    )
+    dl.add_argument(
+        "--dem-resolution",
+        default="1/3",
+        help="DEM tier for product dem: 1/3, 1/9, 1m, 30m, or auto (default: 1/3).",
+    )
+    dl.add_argument(
+        "--make-points", action="store_true", help="Write a single-point shapefile per site."
+    )
+    dl.add_argument(
+        "--points-dir",
+        default=None,
+        help="Base directory for point shapefiles; defaults to --download when set.",
+    )
+    dl.add_argument(
+        "--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads."
+    )
     dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
 
     manifest_download = sub.add_parser(
         "download-dem-manifest",
         help="Download URL-backed DEM manifest items and update tile paths.",
     )
-    manifest_download.add_argument("--manifest", required=True, help="DEM manifest JSON with URL-backed items.")
-    manifest_download.add_argument("--out-dir", required=True, help="Directory for downloaded raw DEM tiles.")
-    manifest_download.add_argument("--updated-manifest", default=None, help="Optional output manifest path; defaults to updating --manifest.")
+    manifest_download.add_argument(
+        "--manifest", required=True, help="DEM manifest JSON with URL-backed items."
+    )
+    manifest_download.add_argument(
+        "--out-dir", required=True, help="Directory for downloaded raw DEM tiles."
+    )
+    manifest_download.add_argument(
+        "--updated-manifest",
+        default=None,
+        help="Optional output manifest path; defaults to updating --manifest.",
+    )
 
     hsg = sub.add_parser("download-hsg", help="Retrieve USDA SDA hydrologic soil group products.")
     hsg.add_argument("--root", required=True)
@@ -167,10 +272,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mat_dem.add_argument("--root", required=True)
     mat_dem.add_argument("--site", required=True)
-    mat_dem.add_argument("--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips.")
-    mat_dem.add_argument("--out", default=None, help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.")
-    mat_dem.add_argument("--dst-crs", default=None, help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.")
-    mat_dem.add_argument("--manifest", default=None, help="DEM download manifest with an explicit tiles list; avoids scanning unrelated rasters.")
+    mat_dem.add_argument(
+        "--source-dir", default=None, help="Directory containing downloaded DEM rasters/zips."
+    )
+    mat_dem.add_argument(
+        "--out",
+        default=None,
+        help="Output DEM path; defaults to <root>/<site>/demlr/cliped_utm.tif.",
+    )
+    mat_dem.add_argument(
+        "--dst-crs",
+        default=None,
+        help="Target CRS, e.g. EPSG:26912; defaults to UTM inferred from raster center.",
+    )
+    mat_dem.add_argument(
+        "--manifest",
+        default=None,
+        help="DEM download manifest with an explicit tiles list; avoids scanning unrelated rasters.",
+    )
 
     area = sub.add_parser(
         "dem-acquisition-area",
@@ -178,11 +297,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
     area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
-    area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
-    area.add_argument("--upstream-km", type=float, default=25.0, help="Distance from outlet toward upstream end.")
-    area.add_argument("--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet.")
+    area.add_argument(
+        "--out", required=True, help="Output GeoJSON path for the acquisition polygon."
+    )
+    area.add_argument(
+        "--upstream-km", type=float, default=25.0, help="Distance from outlet toward upstream end."
+    )
+    area.add_argument(
+        "--downstream-km", type=float, default=3.0, help="Small downstream margin below the outlet."
+    )
     area.add_argument("--lateral-km", type=float, default=5.0, help="Half-width lateral margin.")
-    area.add_argument("--azimuth", type=float, default=None, help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.")
+    area.add_argument(
+        "--azimuth",
+        type=float,
+        default=None,
+        help="Optional upstream azimuth, degrees clockwise from north, for an oriented rectangle.",
+    )
 
     snap = sub.add_parser(
         "dem-snap-outlet",
@@ -191,39 +321,98 @@ def build_parser() -> argparse.ArgumentParser:
     snap.add_argument("--lat", type=float, required=True, help="Raw outlet latitude in EPSG:4326.")
     snap.add_argument("--lon", type=float, required=True, help="Raw outlet longitude in EPSG:4326.")
     snap.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines.")
-    snap.add_argument("--out", required=True, help="Output GeoJSON path for the snapped outlet point.")
-    snap.add_argument("--snap-distance-m", type=float, default=500.0, help="Maximum allowed snap distance in meters.")
+    snap.add_argument(
+        "--out", required=True, help="Output GeoJSON path for the snapped outlet point."
+    )
+    snap.add_argument(
+        "--snap-distance-m",
+        type=float,
+        default=500.0,
+        help="Maximum allowed snap distance in meters.",
+    )
 
     network_area = sub.add_parser(
         "dem-upstream-network-area",
         help="Create a lightweight upstream-flowline DEM acquisition envelope.",
     )
-    network_area.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
-    network_area.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
-    network_area.add_argument("--flowlines", required=True, help="EPSG:4326 GeoJSON flowlines used to infer the upstream envelope.")
-    network_area.add_argument("--out", required=True, help="Output GeoJSON path for the acquisition polygon.")
-    network_area.add_argument("--upstream-trace-km", type=float, default=40.0, help="Maximum outlet-to-flowline vertex distance to consider.")
-    network_area.add_argument("--upstream-margin-km", type=float, default=5.0, help="Safety margin beyond the upstream flowline extent.")
-    network_area.add_argument("--downstream-margin-km", type=float, default=3.0, help="Safety margin downstream of the outlet.")
-    network_area.add_argument("--lateral-margin-km", type=float, default=4.0, help="Safety margin on both sides of the flowline envelope.")
-    network_area.add_argument("--envelope-type", default="oriented_rectangle", choices=("oriented_rectangle", "axis_aligned_rectangle"))
+    network_area.add_argument(
+        "--lat", type=float, required=True, help="Outlet latitude in EPSG:4326."
+    )
+    network_area.add_argument(
+        "--lon", type=float, required=True, help="Outlet longitude in EPSG:4326."
+    )
+    network_area.add_argument(
+        "--flowlines",
+        required=True,
+        help="EPSG:4326 GeoJSON flowlines used to infer the upstream envelope.",
+    )
+    network_area.add_argument(
+        "--out", required=True, help="Output GeoJSON path for the acquisition polygon."
+    )
+    network_area.add_argument(
+        "--upstream-trace-km",
+        type=float,
+        default=40.0,
+        help="Maximum outlet-to-flowline vertex distance to consider.",
+    )
+    network_area.add_argument(
+        "--upstream-margin-km",
+        type=float,
+        default=5.0,
+        help="Safety margin beyond the upstream flowline extent.",
+    )
+    network_area.add_argument(
+        "--downstream-margin-km",
+        type=float,
+        default=3.0,
+        help="Safety margin downstream of the outlet.",
+    )
+    network_area.add_argument(
+        "--lateral-margin-km",
+        type=float,
+        default=4.0,
+        help="Safety margin on both sides of the flowline envelope.",
+    )
+    network_area.add_argument(
+        "--envelope-type",
+        default="oriented_rectangle",
+        choices=("oriented_rectangle", "axis_aligned_rectangle"),
+    )
 
     manifest = sub.add_parser(
         "dem-tile-manifest",
         help="Select DEM tile-index features intersecting a DEM acquisition polygon.",
     )
-    manifest.add_argument("--acquisition-area", required=True, help="GeoJSON acquisition polygon from dem-acquisition-area or UI drawing.")
-    manifest.add_argument("--tile-index", required=True, help="GeoJSON tile footprint/index file with URL/path properties.")
+    manifest.add_argument(
+        "--acquisition-area",
+        required=True,
+        help="GeoJSON acquisition polygon from dem-acquisition-area or UI drawing.",
+    )
+    manifest.add_argument(
+        "--tile-index",
+        required=True,
+        help="GeoJSON tile footprint/index file with URL/path properties.",
+    )
     manifest.add_argument("--out", required=True, help="Output DEM download manifest JSON.")
-    manifest.add_argument("--url-field", default="url", help="Tile-index property containing the download URL.")
-    manifest.add_argument("--path-field", default="path", help="Tile-index property containing the local raw tile path.")
+    manifest.add_argument(
+        "--url-field", default="url", help="Tile-index property containing the download URL."
+    )
+    manifest.add_argument(
+        "--path-field",
+        default="path",
+        help="Tile-index property containing the local raw tile path.",
+    )
 
     boundary = sub.add_parser(
         "dem-boundary-check",
         help="Check whether a delineated watershed is too close to the DEM acquisition boundary.",
     )
-    boundary.add_argument("--watershed", required=True, help="Delineated watershed GeoJSON polygon.")
-    boundary.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon.")
+    boundary.add_argument(
+        "--watershed", required=True, help="Delineated watershed GeoJSON polygon."
+    )
+    boundary.add_argument(
+        "--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon."
+    )
     boundary.add_argument("--safety-distance-m", type=float, default=500.0)
     boundary.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
 
@@ -231,9 +420,15 @@ def build_parser() -> argparse.ArgumentParser:
         "dem-expand-area",
         help="Directionally expand a DEM acquisition polygon after a boundary check fails.",
     )
-    expand.add_argument("--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon to expand.")
-    expand.add_argument("--out", required=True, help="Output expanded DEM acquisition GeoJSON polygon.")
-    expand.add_argument("--edges", required=True, help="Comma-separated edges to expand: west,south,east,north.")
+    expand.add_argument(
+        "--acquisition-area", required=True, help="DEM acquisition GeoJSON polygon to expand."
+    )
+    expand.add_argument(
+        "--out", required=True, help="Output expanded DEM acquisition GeoJSON polygon."
+    )
+    expand.add_argument(
+        "--edges", required=True, help="Comma-separated edges to expand: west,south,east,north."
+    )
     expand.add_argument("--expansion-distance-km", type=float, default=5.0)
 
     fetch = sub.add_parser(
@@ -244,13 +439,38 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--site", required=True)
     fetch.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
     fetch.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
-    fetch.add_argument("--site-id", default=None, help="Folder-safe ID for source downloads; defaults to the site name.")
-    fetch.add_argument("--products", default="all", help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).")
-    fetch.add_argument("--download-dir", default=None, help="Raw source download directory; defaults under the site folder.")
-    fetch.add_argument("--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters.")
-    fetch.add_argument("--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap.")
-    fetch.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
-    fetch.add_argument("--skip-outlet", action="store_true", help="Only create folders and download source products.")
+    fetch.add_argument(
+        "--site-id",
+        default=None,
+        help="Folder-safe ID for source downloads; defaults to the site name.",
+    )
+    fetch.add_argument(
+        "--products",
+        default="all",
+        help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).",
+    )
+    fetch.add_argument(
+        "--download-dir",
+        default=None,
+        help="Raw source download directory; defaults under the site folder.",
+    )
+    fetch.add_argument(
+        "--buffer", type=float, default=500.0, help="Half-width of TNM query box in meters."
+    )
+    fetch.add_argument(
+        "--max-tiles", type=int, default=None, help="Cap files per product/site; 0 means no cap."
+    )
+    fetch.add_argument(
+        "--max-file-size-mb",
+        type=float,
+        default=512.0,
+        help="Maximum single download size in MiB; 0 disables the size guard.",
+    )
+    fetch.add_argument(
+        "--skip-outlet",
+        action="store_true",
+        help="Only create folders and download source products.",
+    )
 
     all_inputs = sub.add_parser(
         "download-inputs",
@@ -264,7 +484,12 @@ def build_parser() -> argparse.ArgumentParser:
     all_inputs.add_argument("--download-dir", default=None)
     all_inputs.add_argument("--buffer", type=float, default=5000.0)
     all_inputs.add_argument("--max-tiles", type=int, default=None)
-    all_inputs.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
+    all_inputs.add_argument(
+        "--max-file-size-mb",
+        type=float,
+        default=512.0,
+        help="Maximum single download size in MiB; 0 disables the size guard.",
+    )
     all_inputs.add_argument("--soil-pixel-size", type=float, default=0.0003)
     all_inputs.add_argument("--soil-top-depth", type=float, default=30.0)
 
@@ -276,13 +501,41 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--site", required=True)
     materialize.add_argument("--source-dir", default=None)
     materialize.add_argument("--target-crs", default=None)
-    materialize.add_argument("--dem-manifest", default=None, help="DEM tile manifest with explicit raw raster paths.")
-    materialize.add_argument("--clip-bounds", default=None, help="Optional minx,miny,maxx,maxy materialization bounds.")
-    materialize.add_argument("--clip-bounds-crs", default="EPSG:4326", help="CRS for --clip-bounds; defaults to EPSG:4326.")
-    materialize.add_argument("--clip-center-lat", type=float, default=None, help="Latitude for auto materialization bounds.")
-    materialize.add_argument("--clip-center-lon", type=float, default=None, help="Longitude for auto materialization bounds.")
-    materialize.add_argument("--clip-buffer", type=float, default=None, help="Meter buffer around --clip-center-lat/lon for materialization bounds.")
-    materialize.add_argument("--clip-buffer-scale", type=float, default=1.2, help="Safety scale applied to --clip-buffer; default 1.2.")
+    materialize.add_argument(
+        "--dem-manifest", default=None, help="DEM tile manifest with explicit raw raster paths."
+    )
+    materialize.add_argument(
+        "--clip-bounds", default=None, help="Optional minx,miny,maxx,maxy materialization bounds."
+    )
+    materialize.add_argument(
+        "--clip-bounds-crs",
+        default="EPSG:4326",
+        help="CRS for --clip-bounds; defaults to EPSG:4326.",
+    )
+    materialize.add_argument(
+        "--clip-center-lat",
+        type=float,
+        default=None,
+        help="Latitude for auto materialization bounds.",
+    )
+    materialize.add_argument(
+        "--clip-center-lon",
+        type=float,
+        default=None,
+        help="Longitude for auto materialization bounds.",
+    )
+    materialize.add_argument(
+        "--clip-buffer",
+        type=float,
+        default=None,
+        help="Meter buffer around --clip-center-lat/lon for materialization bounds.",
+    )
+    materialize.add_argument(
+        "--clip-buffer-scale",
+        type=float,
+        default=1.2,
+        help="Safety scale applied to --clip-buffer; default 1.2.",
+    )
 
     init_dem = sub.add_parser(
         "init-dem-config",
@@ -292,19 +545,41 @@ def build_parser() -> argparse.ArgumentParser:
     init_dem.add_argument("--site", required=True, help="Site/project name.")
     init_dem.add_argument("--lon", type=float, required=True, help="Outlet longitude in EPSG:4326.")
     init_dem.add_argument("--lat", type=float, required=True, help="Outlet latitude in EPSG:4326.")
-    init_dem.add_argument("--flowlines", default=None, help="GeoJSON flowlines for upstream_network mode.")
-    init_dem.add_argument("--tile-index", default=None, help="Optional DEM tile-index GeoJSON path.")
-    init_dem.add_argument("--target-crs", default=None, help="Optional target CRS; defaults to NAD83 UTM inferred from outlet.")
-    init_dem.add_argument("--method", default="upstream_network", choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"))
+    init_dem.add_argument(
+        "--flowlines", default=None, help="GeoJSON flowlines for upstream_network mode."
+    )
+    init_dem.add_argument(
+        "--tile-index", default=None, help="Optional DEM tile-index GeoJSON path."
+    )
+    init_dem.add_argument(
+        "--target-crs",
+        default=None,
+        help="Optional target CRS; defaults to NAD83 UTM inferred from outlet.",
+    )
+    init_dem.add_argument(
+        "--method",
+        default="upstream_network",
+        choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"),
+    )
 
     run_dem_prep = sub.add_parser(
         "run-dem-prep",
         help="Run the direct DEM prep path from one config, with optional download/materialization.",
     )
     run_dem_prep.add_argument("--config", required=True, help="YAML/JSON project config.")
-    run_dem_prep.add_argument("--download", action="store_true", help="Download URL-backed DEM manifest tiles after prepare-dem.")
-    run_dem_prep.add_argument("--materialize", action="store_true", help="Run materialize-inputs after optional download.")
-    run_dem_prep.add_argument("--validate", action="store_true", help="Run validate-dem after prepare/download/materialize.")
+    run_dem_prep.add_argument(
+        "--download",
+        action="store_true",
+        help="Download URL-backed DEM manifest tiles after prepare-dem.",
+    )
+    run_dem_prep.add_argument(
+        "--materialize", action="store_true", help="Run materialize-inputs after optional download."
+    )
+    run_dem_prep.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run validate-dem after prepare/download/materialize.",
+    )
 
     prepare_dem = sub.add_parser(
         "prepare-dem",
@@ -327,10 +602,14 @@ def build_parser() -> argparse.ArgumentParser:
     bounds.add_argument("--buffer", type=float, default=20000.0)
     bounds.add_argument("--safety-scale", type=float, default=1.2)
     bounds.add_argument("--timeout", type=float, default=20.0)
-    bounds.add_argument("--no-web", action="store_true", help="Skip NLDI and use coordinate-buffer bounds.")
+    bounds.add_argument(
+        "--no-web", action="store_true", help="Skip NLDI and use coordinate-buffer bounds."
+    )
     bounds.add_argument("--json", action="store_true")
 
-    init = sub.add_parser("init-inputs", help="Create source-input folders and an INPUTS.md checklist.")
+    init = sub.add_parser(
+        "init-inputs", help="Create source-input folders and an INPUTS.md checklist."
+    )
     init.add_argument("--root", required=True)
     init.add_argument("--site", required=True)
 
@@ -338,7 +617,9 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--root", required=True)
     chk.add_argument("--site", required=True)
     chk.add_argument("--config", default=None)
-    chk.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
+    chk.add_argument(
+        "--no-schema", action="store_true", help="Only check that required files exist."
+    )
     chk.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
 
     run = sub.add_parser(
@@ -352,20 +633,50 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default=None)
     run.add_argument("--script-dir", default=None)
     run.add_argument("--phase", choices=["phase1", "phase2", "all"], default="all")
-    run.add_argument("--out-dir", default=None, help="Legacy outputs directory; defaults to <root>/<site>/outputs.")
-    run.add_argument("--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts.")
-    run.add_argument("--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts.")
-    run.add_argument("--flowline-path", default=None, help="Flowline path passed to legacy scripts.")
-    run.add_argument("--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts.")
-    run.add_argument("--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts.")
-    run.add_argument("--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts.")
-    run.add_argument("--no-force", action="store_true", help="Forward FORCE=False to legacy scripts.")
-    run.add_argument("--prepare-dry-run", action="store_true", help="Run legacy preflight and list steps without executing processing.")
-    run.add_argument("--start-at", default=None, help="Resume prepare phase at the named legacy step script.")
+    run.add_argument(
+        "--out-dir",
+        default=None,
+        help="Legacy outputs directory; defaults to <root>/<site>/outputs.",
+    )
+    run.add_argument(
+        "--dem-path", default=None, help="Real-elevation DEM path passed to Phase 1 scripts."
+    )
+    run.add_argument(
+        "--outlet-path", default=None, help="Outlet shapefile path passed to legacy scripts."
+    )
+    run.add_argument(
+        "--flowline-path", default=None, help="Flowline path passed to legacy scripts."
+    )
+    run.add_argument(
+        "--flowdir-path", default=None, help="flow_dir.tif path passed to Phase 1 scripts."
+    )
+    run.add_argument(
+        "--flowacc-path", default=None, help="flow_acc.tif path passed to Phase 1 scripts."
+    )
+    run.add_argument(
+        "--target-epsg", default=None, help="Target EPSG code forwarded to legacy scripts."
+    )
+    run.add_argument(
+        "--no-force", action="store_true", help="Forward FORCE=False to legacy scripts."
+    )
+    run.add_argument(
+        "--prepare-dry-run",
+        action="store_true",
+        help="Run legacy preflight and list steps without executing processing.",
+    )
+    run.add_argument(
+        "--start-at", default=None, help="Resume prepare phase at the named legacy step script."
+    )
     run.add_argument("--skip-prepare", action="store_true")
-    run.add_argument("--no-schema", action="store_true", help="Only check that required files exist.")
-    run.add_argument("--no-auto-pour-points", action="store_true", help="Require manually supplied pour points.")
-    run.add_argument("--no-auto-outlet", action="store_true", help="Require a manually supplied outlet.")
+    run.add_argument(
+        "--no-schema", action="store_true", help="Only check that required files exist."
+    )
+    run.add_argument(
+        "--no-auto-pour-points", action="store_true", help="Require manually supplied pour points."
+    )
+    run.add_argument(
+        "--no-auto-outlet", action="store_true", help="Require a manually supplied outlet."
+    )
 
     full = sub.add_parser(
         "full-run",
@@ -378,14 +689,30 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--project-name", default=None)
     full.add_argument("--out", default=None)
     full.add_argument("--script-dir", default=None)
-    full.add_argument("--buffer", type=float, default=5000.0, help="Source-data query buffer in meters.")
-    full.add_argument("--target-crs", default=None, help="Optional DEM target CRS, e.g. EPSG:26912.")
+    full.add_argument(
+        "--buffer", type=float, default=5000.0, help="Source-data query buffer in meters."
+    )
+    full.add_argument(
+        "--target-crs", default=None, help="Optional DEM target CRS, e.g. EPSG:26912."
+    )
     full.add_argument("--site-id", default=None, help="Folder-safe source download ID.")
     full.add_argument("--download-dir", default=None, help="Override the raw download directory.")
-    full.add_argument("--max-tiles", type=int, default=None, help="Cap files per product; 0 means no cap.")
-    full.add_argument("--max-file-size-mb", type=float, default=512.0, help="Maximum single download size in MiB; 0 disables the size guard.")
+    full.add_argument(
+        "--max-tiles", type=int, default=None, help="Cap files per product; 0 means no cap."
+    )
+    full.add_argument(
+        "--max-file-size-mb",
+        type=float,
+        default=512.0,
+        help="Maximum single download size in MiB; 0 disables the size guard.",
+    )
     full.add_argument("--soil-pixel-size", type=float, default=0.0003)
     full.add_argument("--soil-top-depth", type=float, default=30.0)
+    full.add_argument(
+        "--acquisition-area",
+        default=None,
+        help="EPSG:4326 GeoJSON area used to size downloads and clip materialized DEM/hydrography.",
+    )
 
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
 
@@ -414,7 +741,9 @@ def _validate_inputs(settings: BuilderSettings, no_schema: bool, json_output: bo
     return 0 if result.ok else 2
 
 
-def _maybe_validate_inputs(settings: BuilderSettings, skip_input_check: bool, no_schema: bool) -> int:
+def _maybe_validate_inputs(
+    settings: BuilderSettings, skip_input_check: bool, no_schema: bool
+) -> int:
     if skip_input_check:
         return 0
     return _validate_inputs(settings, no_schema)
@@ -483,6 +812,23 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "build-hms":
+        settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
+        try:
+            result = build_hms_project(settings, args.out_dir)
+        except Exception as exc:
+            print(f"build-hms failed: {exc}")
+            return 2
+        print(f"Wrote HEC-HMS project: {result.project_file}")
+        return 0
+    if args.command == "validate-hms":
+        try:
+            references = validate_hms_project(args.project)
+        except (OSError, ValueError) as exc:
+            print(f"validate-hms failed: {exc}")
+            return 2
+        print(f"HEC-HMS project references OK: {len(references)} file(s)")
+        return 0
     if args.command == "validate":
         settings = BuilderSettings.from_args(args.root, args.site, args.config)
         input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
@@ -521,7 +867,9 @@ def main(argv: list[str] | None = None) -> int:
         if not site_path.is_absolute():
             site_path = Path(args.root).expanduser().resolve() / site_path
         outputs = site_path.resolve() / "outputs"
-        junctions = Path(args.junctions).expanduser() if args.junctions else outputs / "junctions.gpkg"
+        junctions = (
+            Path(args.junctions).expanduser() if args.junctions else outputs / "junctions.gpkg"
+        )
         output = Path(args.out).expanduser() if args.out else outputs / "pour_points.shp"
         try:
             result = generate_pour_points(junctions, output, overwrite=args.overwrite)
@@ -567,16 +915,21 @@ def main(argv: list[str] | None = None) -> int:
                 max_file_size_mb=args.max_file_size_mb,
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
+                acquisition_area=args.acquisition_area,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:
             print(f"full-run failed: {exc}")
             return 2
         print(f"Full pipeline complete: {result.output_path}")
+        if result.hms_project_path:
+            print(f"HEC-HMS project complete: {result.hms_project_path}")
         return 0
     if args.command == "download-data":
         try:
-            default_output = str(Path(args.input_csv).with_name(Path(args.input_csv).stem + "_dem.csv"))
+            default_output = str(
+                Path(args.input_csv).with_name(Path(args.input_csv).stem + "_dem.csv")
+            )
             results = process_csv(
                 args.input_csv,
                 args.output_csv or default_output,
@@ -712,22 +1065,34 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Wrote tile manifest: {manifest_path}")
                 print(f"Selected tile count: {result.tile_manifest.selected_count}")
             config = _load_cli_config(args.config)
-            dem = config.get("dem_acquisition", {}) if isinstance(config.get("dem_acquisition"), dict) else {}
+            dem = (
+                config.get("dem_acquisition", {})
+                if isinstance(config.get("dem_acquisition"), dict)
+                else {}
+            )
             paths = config.get("paths", {}) if isinstance(config.get("paths"), dict) else {}
             if args.download:
                 if manifest_path is None:
-                    raise DemWorkflowError("run-dem-prep --download requires a tile manifest from prepare-dem.")
-                raw_dem_dir = _resolve_cli_path(args.config, paths.get("raw_dem_dir") or dem.get("raw_dem_dir"), "dem/raw")
+                    raise DemWorkflowError(
+                        "run-dem-prep --download requires a tile manifest from prepare-dem."
+                    )
+                raw_dem_dir = _resolve_cli_path(
+                    args.config, paths.get("raw_dem_dir") or dem.get("raw_dem_dir"), "dem/raw"
+                )
                 download_result = download_dem_manifest(manifest_path, raw_dem_dir)
                 print(f"Downloaded tile count: {download_result.downloaded}")
                 print(f"Skipped existing tile count: {download_result.skipped}")
             if args.materialize:
                 if manifest_path is None:
-                    raise DemWorkflowError("run-dem-prep --materialize requires a tile manifest from prepare-dem.")
+                    raise DemWorkflowError(
+                        "run-dem-prep --materialize requires a tile manifest from prepare-dem."
+                    )
                 materialized = materialize_source_inputs(
                     _resolve_cli_path(args.config, config.get("root"), "."),
                     _cli_site_name(config),
-                    source_dir=_resolve_cli_path(args.config, config.get("download_dir") or config.get("source_dir")),
+                    source_dir=_resolve_cli_path(
+                        args.config, config.get("download_dir") or config.get("source_dir")
+                    ),
                     target_crs=_cli_target_crs(config),
                     dem_manifest=str(manifest_path),
                 )
@@ -737,9 +1102,13 @@ def main(argv: list[str] | None = None) -> int:
                 validation = validate_dem_from_config(args.config)
                 print(f"Wrote DEM validation summary: {validation.summary_path}")
                 print(f"Boundary validation: {'OK' if validation.is_valid else 'EXPAND'}")
-                print(f"Touched edges: {','.join(validation.touched_edges) if validation.touched_edges else 'none'}")
+                print(
+                    f"Touched edges: {','.join(validation.touched_edges) if validation.touched_edges else 'none'}"
+                )
                 if validation.expanded_area:
-                    print(f"Wrote expanded acquisition area: {validation.expanded_area.output_path}")
+                    print(
+                        f"Wrote expanded acquisition area: {validation.expanded_area.output_path}"
+                    )
         except Exception as exc:  # pragma: no cover - CLI boundary
             print(f"run-dem-prep failed: {exc}")
             return 2
@@ -765,7 +1134,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM validation summary: {result.summary_path}")
         print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
-        print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+        print(
+            f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}"
+        )
         if result.expanded_area:
             print(f"Wrote expanded acquisition area: {result.expanded_area.output_path}")
         return 0 if result.is_valid else 3
@@ -842,7 +1213,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Bounds: {minx},{miny},{maxx},{maxy}")
         return 0
 
-
     if args.command == "dem-snap-outlet":
         try:
             result = snap_outlet_to_flowlines(
@@ -909,14 +1279,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"dem-boundary-check failed: {exc}")
             return 2
         if args.json:
-            print(json.dumps({
-                "is_valid": result.is_valid,
-                "touched_edges": result.touched_edges,
-                "distances_m": result.distances_m,
-            }, indent=2, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "is_valid": result.is_valid,
+                        "touched_edges": result.touched_edges,
+                        "distances_m": result.distances_m,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
         else:
             print(f"Boundary validation: {'OK' if result.is_valid else 'EXPAND'}")
-            print(f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}")
+            print(
+                f"Touched edges: {','.join(result.touched_edges) if result.touched_edges else 'none'}"
+            )
             for edge, distance in result.distances_m.items():
                 print(f"Distance {edge}: {distance:g} m")
         return 0 if result.is_valid else 3
