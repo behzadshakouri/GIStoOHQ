@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ohqbuilder.cli import main
 from ohqbuilder.dem_workflow import prepare_dem_from_config
@@ -17,6 +18,21 @@ def _feature(name, bounds, **props):
             "coordinates": [[[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]],
         },
     }
+
+
+def test_prepare_dem_reports_invalid_yaml_without_traceback(tmp_path):
+    from ohqbuilder.dem_workflow import DemWorkflowError, prepare_dem_from_config
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "dem_acquisition:\n"
+        "<<<<<<< Updated upstream\n"
+        "  method: upstream_network\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DemWorkflowError, match="Could not parse DEM workflow config"):
+        prepare_dem_from_config(config)
 
 
 def test_prepare_dem_from_config_writes_area_manifest_and_summary(tmp_path):
@@ -123,6 +139,34 @@ dem_acquisition:
     assert result.expanded_area is not None
     summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
     assert summary["expanded_acquisition_area"] == "expanded.geojson"
+
+
+def test_validate_dem_from_config_can_fallback_to_acquisition_area(tmp_path):
+    from ohqbuilder.dem_workflow import validate_dem_from_config
+
+    acquisition = tmp_path / "area.geojson"
+    acquisition.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [_feature("area", (-77.1, 38.9, -76.9, 39.1))],
+    }), encoding="utf-8")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+dem_acquisition:
+  acquisition_area: area.geojson
+  watershed_boundary: missing_watershed.geojson
+  validation_summary: validation.json
+  allow_acquisition_area_watershed_fallback: true
+  auto_expand: false
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = validate_dem_from_config(config)
+
+    assert not result.is_valid
+    summary = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
+    assert summary["used_acquisition_area_watershed_fallback"] is True
 
 
 def test_validate_dem_from_config_reports_missing_watershed(tmp_path):
@@ -264,6 +308,27 @@ def test_infer_utm_crs_defaults_to_nad83_for_sligo_creek():
 
     assert infer_utm_crs(-76.9765, 38.9921) == "EPSG:26918"
     assert infer_utm_crs(-76.9765, 38.9921, datum="WGS84") == "EPSG:32618"
+
+
+def test_write_dem_config_template_defaults_sligo_demo_paths(tmp_path):
+    from ohqbuilder.dem_workflow import write_dem_config_template
+
+    demo_dir = tmp_path / "examples" / "SligoCreek"
+    demo_dir.mkdir(parents=True)
+    config = demo_dir / "dem_workflow.example.yaml"
+
+    write_dem_config_template(
+        config,
+        site="SligoCreekDemo",
+        lon=-76.99778601,
+        lat=38.96888097,
+        target_crs="EPSG:26918",
+        method="upstream_network",
+    )
+
+    data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    assert data["dem_acquisition"]["flowline_path"] == "hydro/NHDFlowline.demo.geojson"
+    assert data["dem_acquisition"]["tile_index"] == "indexes/usgs_3dep_tiles.demo.geojson"
 
 
 def test_write_dem_config_template_infers_target_crs(tmp_path):
