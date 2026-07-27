@@ -64,6 +64,13 @@ import importlib.util
 import os
 import sys
 import traceback
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="QgsField constructor is deprecated",
+    category=DeprecationWarning,
+)
 
 from qgis.core import QgsVectorLayer
 
@@ -348,7 +355,8 @@ reaches_layer = validate_vector(
 junctions_layer = validate_vector(
     JUNCTIONS_PATH,
     "junctions.gpkg",
-    minimum_features=1,
+    # A one-reach watershed legitimately has no interior confluence.
+    minimum_features=0,
 )
 
 pour_points_layer = validate_vector(

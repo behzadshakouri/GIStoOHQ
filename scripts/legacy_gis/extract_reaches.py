@@ -271,6 +271,13 @@ print("Building |flow_acc| ...")
 ds = gdal.Open(FLOWACC_PATH)
 gt, proj = ds.GetGeoTransform(), ds.GetProjection()
 arr = np.abs(ds.GetRasterBand(1).ReadAsArray().astype("float64"))
+max_accumulation = float(np.nanmax(arr)) if arr.size else 0.0
+if max_accumulation > 0 and threshold_cells > max_accumulation:
+    threshold_cells = max(1, int(max_accumulation * 0.8))
+    print(
+        "  requested threshold exceeds available accumulation; "
+        f"using adaptive threshold = {threshold_cells} cells"
+    )
 drv = gdal.GetDriverByName("GTiff")
 out = drv.Create(acc_abs, ds.RasterXSize, ds.RasterYSize, 1, gdal.GDT_Float32)
 out.SetGeoTransform(gt); out.SetProjection(proj)
@@ -314,6 +321,21 @@ print("Clipping reaches to watershed boundary ...")
 reaches_geom = processing.run("native:clip", {
     "INPUT": reaches_geom, "OVERLAY": WATERSHED_CLIP_INPUT,
     "OUTPUT": "TEMPORARY_OUTPUT"})["OUTPUT"]
+
+# Tiny/demo routing grids can delineate too few cells for r.stream.extract to
+# emit a line even at an adaptive one-cell threshold. In that case retain a
+# real mapped channel segment by clipping the materialized hydrography to the
+# watershed. This is preferable to writing an empty reaches layer that cannot
+# form topology, and remains a last-resort fallback only.
+_stream_check = QgsVectorLayer(reaches_geom, "stream_check", "ogr") \
+    if isinstance(reaches_geom, str) else reaches_geom
+if _stream_check.featureCount() == 0 and os.path.isfile(FLOWLINE_PATH):
+    print("No raster-extracted reaches; clipping mapped flowlines as fallback ...")
+    reaches_geom = processing.run("native:clip", {
+        "INPUT": FLOWLINE_PATH,
+        "OVERLAY": WATERSHED_CLIP_INPUT,
+        "OUTPUT": "TEMPORARY_OUTPUT",
+    })["OUTPUT"]
 
 # --- attribute: length, endpoint Z (real DEM), slope -----------------------
 print("Computing length and sampling real endpoint elevations ...")

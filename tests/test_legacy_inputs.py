@@ -230,8 +230,8 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
 
     calls = []
 
-    def fake_generate(junctions, output):
-        calls.append((junctions, output))
+    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, fallback_outlet_path, overwrite))
         for suffix in (".shp", ".shx", ".dbf"):
             output.with_suffix(suffix).write_text("", encoding="utf-8")
         return types.SimpleNamespace(count=2, output_path=output)
@@ -246,5 +246,55 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
 
     run_legacy_input_workflow(tmp_path / "root", "SITE_A", script_dir, phase="phase2")
 
-    assert calls == [(outputs / "junctions.gpkg", outputs / "pour_points.shp")]
+    assert calls == [(
+        outputs / "junctions.gpkg",
+        outputs / "pour_points.shp",
+        outputs / "outlet.shp",
+        False,
+    )]
     assert marker.is_file()
+
+
+def test_phase2_refreshes_stale_auto_pour_point_from_snapped_outlet(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "qgis", types.ModuleType("qgis"))
+    monkeypatch.setitem(sys.modules, "qgis.core", types.ModuleType("qgis.core"))
+    monkeypatch.setitem(sys.modules, "processing", types.ModuleType("processing"))
+    outputs = tmp_path / "root" / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    for name in (
+        "watershed_boundary.gpkg",
+        "reaches.gpkg",
+        "junctions.gpkg",
+        "outlet_snapped.gpkg",
+    ):
+        (outputs / name).touch()
+    for stem in ("outlet", "pour_points"):
+        for suffix in (".shp", ".shx", ".dbf"):
+            (outputs / f"{stem}{suffix}").touch()
+    calls = []
+
+    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, fallback_outlet_path, overwrite))
+        return types.SimpleNamespace(count=1, output_path=output)
+
+    monkeypatch.setattr("ohqbuilder.legacy_inputs.generate_pour_points", fake_generate)
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "run_phase2.py").write_text("", encoding="utf-8")
+
+    run_legacy_input_workflow(
+        tmp_path / "root",
+        "SITE_A",
+        script_dir,
+        phase="phase2",
+        options=LegacyWorkflowOptions(refresh_auto_pour_points=True),
+    )
+
+    assert calls == [
+        (
+            outputs / "junctions.gpkg",
+            outputs / "pour_points.shp",
+            outputs / "outlet_snapped.gpkg",
+            True,
+        )
+    ]
