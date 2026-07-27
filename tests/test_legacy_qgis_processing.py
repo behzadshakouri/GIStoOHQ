@@ -118,3 +118,12 @@ def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
 
     assert 'globals().get("SNAP_EDGE_FRACTION", 0.80)' in source
     assert "SELECTED OUTLET IS FAR FROM THE ROUTED STREAM" in source
+
+
+def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():
+    source = Path("scripts/legacy_gis/longestflowpath.py").read_text(encoding="utf-8")
+
+    assert "def outlet_mask_candidates(" in source
+    assert "np.abs(flow_acc[rows + row0, cols + col0])" in source
+    assert "score = (reached, distance_m, -shift2)" in source
+    assert "Refusing to write an implausibly short path" in source
