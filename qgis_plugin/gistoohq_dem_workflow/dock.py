@@ -211,6 +211,9 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         source_dir = _relative_to_config(config_path, config.get("download_dir"))
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
+        acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
+        if acquisition is not None:
+            argv.extend(["--acquisition-area", str(acquisition)])
         return argv
 
     raise QgisDockConfigError(f"Unsupported workflow command: {command}")

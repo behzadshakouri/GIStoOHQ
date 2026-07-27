@@ -32,6 +32,7 @@ ohqbuild full-run \
   --lon VERIFIED_OUTLET_LONGITUDE \
   --lat VERIFIED_OUTLET_LATITUDE \
   --target-crs EPSG:26918 \
+  --acquisition-area examples/JohnMcCormack3600/intermediate/dem_acquisition_area.geojson \
   --project-name JohnMcCormack3600 \
   --out examples/JohnMcCormack3600/JohnMcCormack3600.ohq
 ```

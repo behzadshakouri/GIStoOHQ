@@ -218,6 +218,7 @@ class LauncherState:
     method: str | None = None
     flowline_path: Path | None = None
     tile_index: Path | None = None
+    acquisition_area: Path | None = None
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -352,6 +353,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
+        if state.acquisition_area is not None:
+            argv.extend(("--acquisition-area", str(state.acquisition_area)))
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
     if step in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
         if state.root is None or not state.site:
@@ -474,6 +477,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         method=str(dem.get("method") or "") or None,
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
+        acquisition_area=path_value(dem.get("acquisition_area")),
     )
 
 
@@ -531,6 +535,7 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         method=preferred_text(form_state.method, config_state.method),
         flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
         tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
+        acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
     )
 
 
@@ -883,6 +888,20 @@ class LauncherApp:
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
+            if label in {"Config", "Manifest", "Flowlines", "Tile index"}:
+                tk.Button(
+                    frame,
+                    text="Browse…",
+                    command=lambda value=variable, is_config=label == "Config": self.browse_file(
+                        value, load_config=is_config
+                    ),
+                ).grid(row=row, column=2, sticky="w")
+            elif label in {"Raw DEM dir", "Root", "Source dir"}:
+                tk.Button(
+                    frame,
+                    text="Browse…",
+                    command=lambda value=variable: self.browse_directory(value),
+                ).grid(row=row, column=2, sticky="w")
         project_buttons = tk.LabelFrame(frame, text="Project and map")
         project_buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=4)
         tk.Button(project_buttons, text="Load config", command=self.load_config).pack(side="left")
@@ -906,6 +925,18 @@ class LauncherApp:
         tk.Button(project_buttons, text="Reset Sligo demo", command=self.reset_sligo_demo).pack(
             side="left"
         )
+        tk.Button(
+            project_buttons,
+            text="Open Sligo example",
+            command=lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
+        ).pack(side="left")
+        tk.Button(
+            project_buttons,
+            text="Open John McCormack example",
+            command=lambda: self.open_example(
+                "examples/JohnMcCormack3600/dem_workflow.example.yaml"
+            ),
+        ).pack(side="left")
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
         dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         for step in (
@@ -942,6 +973,32 @@ class LauncherApp:
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")
+
+    def _filedialog(self):
+        return importlib.import_module("tkinter.filedialog")
+
+    def browse_file(self, variable, *, load_config: bool = False) -> None:
+        selected = self._filedialog().askopenfilename(initialfile=Path(variable.get()).name)
+        if selected:
+            variable.set(selected)
+            if load_config:
+                self.load_config()
+
+    def browse_directory(self, variable) -> None:
+        current = Path(variable.get() or ".").expanduser()
+        selected = self._filedialog().askdirectory(
+            initialdir=str(current if current.is_dir() else current.parent)
+        )
+        if selected:
+            variable.set(selected)
+
+    def open_example(self, path: str) -> None:
+        candidate = Path(path)
+        if not candidate.is_file():
+            self.messages.put(f"ERROR: Example config not found: {candidate}\n")
+            return
+        self.config_var.set(str(candidate))
+        self.load_config()
 
     def open_map_picker(self, mode: str) -> None:
         try:

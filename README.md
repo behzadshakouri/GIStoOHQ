@@ -70,8 +70,16 @@ hydrologic soil groups, and soil texture; mosaics/clips the GIS sources; runs
 hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/network
 inputs; and writes the final OHQ file. QGIS processing and internet access are
 required for this production path.
+When a rectangle, polygon, or expanded acquisition GeoJSON is active, full-run uses
+its bounds both to enlarge every source-data query and to clip the materialized DEM
+and hydrography. The outlet remains the routing outlet; the drawn area controls data
+coverage rather than replacing the outlet.
 The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
 validation, and build stages, using the outlet selected on the active QGIS canvas.
+Use **Browse…** beside config and path fields to switch projects or folders. The
+launcher also includes **Open Sligo example** and **Open John McCormack example**;
+generated inputs, downloads, site outputs, and the final OHQ are written beneath the
+selected Root shown in the form.
 If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
 repeat preparation/download; the status is a refinement request rather than a crash.
 

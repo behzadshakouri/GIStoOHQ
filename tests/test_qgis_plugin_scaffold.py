@@ -55,6 +55,7 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
   "outlet": {"longitude": -76.97, "latitude": 38.99},
   "download_dir": "downloads",
   "dem_acquisition": {
+    "acquisition_area": "intermediate/area.geojson",
     "tile_manifest": "intermediate/dem_download_manifest.json",
     "raw_dem_dir": "dem/raw"
   }
@@ -97,6 +98,9 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
     assert full_run[full_run.index("--lat") + 1] == "38.99"
     assert "--target-crs" in full_run
     assert "--download-dir" in full_run
+    assert full_run[full_run.index("--acquisition-area") + 1] == str(
+        tmp_path / "intermediate/area.geojson"
+    )
 
 
 def test_qgis_plugin_download_command_requires_manifest(tmp_path):

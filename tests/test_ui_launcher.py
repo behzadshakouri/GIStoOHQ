@@ -419,6 +419,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         target_crs="EPSG:26918",
         lon=-76.99,
         lat=38.94,
+        acquisition_area=tmp_path / "intermediate" / "area.geojson",
     )
 
     command = command_for_step("full-run", state)
@@ -429,6 +430,9 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     assert command.argv[command.argv.index("--target-crs") + 1] == "EPSG:26918"
     assert command.argv[command.argv.index("--download-dir") + 1] == str(
         tmp_path / "source_downloads"
+    )
+    assert command.argv[command.argv.index("--acquisition-area") + 1] == str(
+        tmp_path / "intermediate" / "area.geojson"
     )
 
 
