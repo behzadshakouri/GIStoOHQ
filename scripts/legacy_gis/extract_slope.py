@@ -66,7 +66,27 @@ def value_or_none(value):
     is_null = getattr(value, "isNull", None)
     if callable(is_null) and is_null():
         return None
-    return value
+    wrapped_value = getattr(value, "value", None)
+    return wrapped_value() if callable(wrapped_value) else value
+
+
+def as_float(value):
+    value = value_or_none(value)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed and abs(parsed) != float("inf") else None
+
+
+def id_key(value):
+    value = value_or_none(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def format_number(value, pattern, null_text="-"):
@@ -156,7 +176,12 @@ mean_field = PREFIX + "mean"
 # map id -> mean slope
 slope_by_id = {}
 for ft in zonal.getFeatures():
-    slope_by_id[ft["id"]] = ft[mean_field]
+    slope_by_id[id_key(ft["id"])] = as_float(ft[mean_field])
+if not any(value is not None for value in slope_by_id.values()):
+    raise Exception(
+        "Slope is NULL for every subwatershed. Verify that slope_pct.tif shares the DEM "
+        "grid and overlaps subwatershed_params.gpkg before computing Tc."
+    )
 
 # --- write slope_pct + centroid coords back into the gpkg in place ---------
 layer.startEditing()
@@ -175,7 +200,7 @@ idx_cy    = layer.fields().indexFromName(CY_FIELD)
 
 for ft in layer.getFeatures():
     # slope
-    val = slope_by_id.get(ft["id"])
+    val = slope_by_id.get(id_key(ft["id"]))
     layer.changeAttributeValue(ft.id(), idx_slope,
                                round(float(val), 3) if val is not None else None)
     # centroid (point-on-surface, guaranteed inside the polygon)
