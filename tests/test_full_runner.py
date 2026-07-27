@@ -1,12 +1,41 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from ohqbuilder.full_runner import (
     acquisition_bounds,
     bounds_covering_outlet,
     buffer_covering_bounds,
+    full_run_summary,
     run_full_pipeline,
 )
+
+
+@pytest.fixture(autouse=True)
+def stub_watershed_builder(monkeypatch):
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.WatershedBuilder",
+        lambda settings: SimpleNamespace(
+            build=lambda: SimpleNamespace(subbasins=[], reaches=[], junctions=[])
+        ),
+    )
+
+
+def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
+    watershed = SimpleNamespace(
+        subbasins=[SimpleNamespace(area_km2=0.04), SimpleNamespace(area_km2=0.02)],
+        reaches=[object()],
+        junctions=[],
+    )
+
+    summary = full_run_summary(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
+
+    assert "Watershed area : 0.0600 km²" in summary
+    assert "Subbasins      : 2" in summary
+    assert "Reaches        : 1" in summary
+    assert "Junctions      : 0" in summary
+    assert str((tmp_path / "site.ohq").resolve()) in summary
 
 
 def test_bounds_covering_outlet_expands_area_with_routing_safety_margin():

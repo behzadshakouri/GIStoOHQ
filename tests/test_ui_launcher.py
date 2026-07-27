@@ -79,8 +79,10 @@ def test_command_runner_stop_terminates_active_process():
     runner.join(timeout=3)
 
     assert not runner.is_alive()
-    finished = [item for item in list(messages.queue) if isinstance(item, RunnerFinished)]
+    queued = list(messages.queue)
+    finished = [item for item in queued if isinstance(item, RunnerFinished)]
     assert finished[-1].status == 130
+    assert any("[Slow command cancelled by user]" in item for item in queued if isinstance(item, str))
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):

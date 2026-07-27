@@ -11,6 +11,7 @@ from .legacy_inputs import (
     run_hydrology_preprocessing,
     run_legacy_input_workflow,
 )
+from .builders.watershed_builder import WatershedBuilder
 from .input_downloader import download_all_inputs
 from .hms_pipeline import build_hms_project
 from .pipeline import build_ohq_project
@@ -27,6 +28,31 @@ class FullRunError(RuntimeError):
 class FullRunResult:
     output_path: Path
     hms_project_path: Path | None = None
+
+
+def full_run_summary(
+    watershed,
+    ohq_path: str | Path,
+    hms_path: str | Path,
+) -> str:
+    """Return a concise final artifact and watershed-metrics summary."""
+    subbasins = list(getattr(watershed, "subbasins", []) or [])
+    reaches = list(getattr(watershed, "reaches", []) or [])
+    junctions = list(getattr(watershed, "junctions", []) or [])
+    area_km2 = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+    return "\n".join(
+        (
+            "=" * 72,
+            "FULL-RUN SUCCESS SUMMARY",
+            f"Watershed area : {area_km2:.4f} km²",
+            f"Subbasins      : {len(subbasins)}",
+            f"Reaches        : {len(reaches)}",
+            f"Junctions      : {len(junctions)}",
+            f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
+            f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
+            "=" * 72,
+        )
+    )
 
 
 def acquisition_bounds(path: str | Path) -> tuple[float, float, float, float]:
@@ -182,8 +208,8 @@ def run_full_pipeline(
         if not built:
             raise FullRunError("OHQ builder did not produce an output path.")
         hms = build_hms_project(settings)
-        emit(f"HEC-HMS project complete: {hms.project_file}")
-        emit(f"Full-run complete: {built}")
+        watershed = WatershedBuilder(settings).build()
+        emit(full_run_summary(watershed, built, hms.project_file))
         return FullRunResult(Path(built), hms.project_file)
     except FullRunError:
         raise

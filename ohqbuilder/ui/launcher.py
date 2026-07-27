@@ -732,7 +732,10 @@ class CommandRunner(threading.Thread):
         except OSError as exc:
             status = 2
             self.messages.put(f"Could not start workflow command: {exc}\n")
-        self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
+        if self.cancelled.is_set():
+            self.messages.put(f"\n[{self.command.label} cancelled by user]\n")
+        else:
+            self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
         if self.command.label == "Validate DEM" and status == 3:
             self.messages.put(
                 "DEM validation requested a larger acquisition area. This is an actionable "

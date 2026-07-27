@@ -64,6 +64,13 @@ import importlib.util
 import os
 import sys
 import traceback
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="QgsField constructor is deprecated",
+    category=DeprecationWarning,
+)
 
 from qgis.core import QgsVectorLayer
 

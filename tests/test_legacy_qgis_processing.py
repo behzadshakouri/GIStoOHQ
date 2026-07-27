@@ -100,3 +100,21 @@ def test_zonal_parameters_fail_early_when_cn_or_slope_has_no_coverage():
     assert "CN is NULL for every subwatershed" in cn
     assert "Slope is NULL for every subwatershed" in slope
     assert 'slope_by_id[id_key(ft["id"])] = as_float' in slope
+
+
+def test_phase_runners_suppress_only_qgsfield_deprecation_noise():
+    for path in (
+        Path("scripts/legacy_gis/run_phase1.py"),
+        Path("scripts/legacy_gis/run_phase2.py"),
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert 'message="QgsField constructor is deprecated"' in source
+
+
+def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'globals().get("SNAP_EDGE_FRACTION", 0.80)' in source
+    assert "SELECTED OUTLET IS FAR FROM THE ROUTED STREAM" in source
