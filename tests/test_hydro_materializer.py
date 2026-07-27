@@ -1,4 +1,4 @@
-from ohqbuilder.hydro_materializer import _preferred_hydro_archives
+from ohqbuilder.hydro_materializer import _flowline_vector_candidates, _preferred_hydro_archives
 
 
 def test_preferred_hydro_archives_keeps_latest_vector_hu4(tmp_path):
@@ -26,3 +26,12 @@ def test_preferred_hydro_archives_falls_back_when_no_hu4(tmp_path):
     other.write_bytes(b"x")
 
     assert _preferred_hydro_archives([state, other]) == [other, state]
+
+
+def test_flowline_vector_patterns_include_demo_geojson(tmp_path):
+    geojson = tmp_path / "NHDFlowline.demo.geojson"
+    geojson.write_text("{}", encoding="utf-8")
+    notes = tmp_path / "flowline_notes.txt"
+    notes.write_text("ignore", encoding="utf-8")
+
+    assert _flowline_vector_candidates(tmp_path, tmp_path / "workspace") == [geojson]
