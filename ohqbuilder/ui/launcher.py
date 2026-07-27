@@ -145,6 +145,15 @@ def write_drawn_acquisition(path: Path, points: list[tuple[float, float]]) -> Pa
     return path
 
 
+def rectangle_from_corners(
+    first: tuple[float, float], second: tuple[float, float]
+) -> list[tuple[float, float]]:
+    """Build four rectangle vertices from two opposite map corners."""
+    x1, y1 = first
+    x2, y2 = second
+    return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+
+
 def use_expanded_acquisition(config_path: Path, config: dict[str, Any]) -> Path:
     """Promote the validation-generated expanded area to the active polygon."""
     dem = config.get("dem_acquisition")
@@ -553,8 +562,16 @@ class MapPicker:
     """Small OpenStreetMap tile picker for choosing an outlet in the Tk launcher."""
 
     def __init__(
-        self, app: "LauncherApp", *, zoom: int = 14, width: int = 768, height: int = 512
+        self,
+        app: "LauncherApp",
+        *,
+        mode: str = "Outlet",
+        zoom: int = 14,
+        width: int = 768,
+        height: int = 512,
     ) -> None:
+        if mode not in {"Outlet", "Rectangle", "Polygon"}:
+            raise LauncherError(f"Unsupported map selection mode: {mode}")
         self.app = app
         self.tk = app.tk
         self.zoom = clamp_zoom(zoom)
@@ -565,7 +582,8 @@ class MapPicker:
         self.images = []
         self.flowlines = self._load_flowlines()
         self.selection_points: list[tuple[float, float]] = []
-        self.mode = self.tk.StringVar(value="Outlet")
+        self.area_saved = False
+        self.mode = self.tk.StringVar(value=mode)
         self.window = self.tk.Toplevel(app.root)
         self.window.title("Pick Outlet on OpenStreetMap")
         self.canvas = self.tk.Canvas(self.window, width=width, height=height)
@@ -605,8 +623,13 @@ class MapPicker:
     def _draw_tiles(self) -> None:
         self.canvas.delete("all")
         self.images = []
+        instruction = {
+            "Outlet": "Click an outlet; it will snap to the configured flowline.",
+            "Rectangle": "Click the first corner, then click the opposite corner.",
+            "Polygon": "Click at least three vertices, then click Finish area.",
+        }[self.mode.get()]
         self.status.config(
-            text=f"Left-click to set outlet; right-click to recenter. Center={self.center_lon:.6f}, {self.center_lat:.6f}; zoom={self.zoom}. © OpenStreetMap contributors"
+            text=f"{instruction} Right-click recenters. zoom={self.zoom}. © OpenStreetMap contributors"
         )
         center_x, center_y = lonlat_to_tile_fraction(self.center_lon, self.center_lat, self.zoom)
         center_tile_x = math.floor(center_x)
@@ -636,16 +659,17 @@ class MapPicker:
 
     def _mode_changed(self, _value=None) -> None:
         self.selection_points = []
+        self.area_saved = False
         self._draw_tiles()
 
     def _clear_selection(self) -> None:
         self.selection_points = []
+        self.area_saved = False
         self._draw_tiles()
 
     def _selection_ring(self) -> list[tuple[float, float]]:
         if self.mode.get() == "Rectangle" and len(self.selection_points) == 2:
-            (x1, y1), (x2, y2) = self.selection_points
-            return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+            return rectangle_from_corners(*self.selection_points)
         return list(self.selection_points)
 
     def _draw_selection(self) -> None:
@@ -733,12 +757,15 @@ class MapPicker:
         self.window.destroy()
 
     def _finish_area(self) -> None:
+        if self.area_saved:
+            return
         ring = self._selection_ring()
         try:
             self.app.save_drawn_area(ring)
         except (OSError, ValueError, LauncherError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.status.config(text=f"Could not save area: {exc}")
             return
+        self.area_saved = True
         self.window.destroy()
 
     def _recenter(self, event) -> None:
@@ -816,8 +843,18 @@ class LauncherApp:
         tk.Button(
             project_buttons, text="Preview acquisition", command=self.preview_acquisition
         ).pack(side="left")
+        tk.Button(project_buttons, text="Pick outlet", command=self.pick_outlet_map).pack(
+            side="left"
+        )
         tk.Button(
-            project_buttons, text="Pick outlet / draw area", command=self.pick_outlet_map
+            project_buttons,
+            text="Draw rectangle",
+            command=lambda: self.open_map_picker("Rectangle"),
+        ).pack(side="left")
+        tk.Button(
+            project_buttons,
+            text="Draw polygon",
+            command=lambda: self.open_map_picker("Polygon"),
         ).pack(side="left")
         tk.Button(project_buttons, text="Reset Sligo demo", command=self.reset_sligo_demo).pack(
             side="left"
@@ -856,8 +893,18 @@ class LauncherApp:
         frame.rowconfigure(len(rows) + 3, weight=1)
 
     def pick_outlet_map(self) -> None:
+        self.open_map_picker("Outlet")
+
+    def open_map_picker(self, mode: str) -> None:
         try:
-            self.map_picker = MapPicker(self)
+            existing = getattr(self, "map_picker", None)
+            if existing is not None and existing.window.winfo_exists():
+                existing.mode.set(mode)
+                existing._mode_changed(mode)
+                existing.window.title(f"{mode} selection on OpenStreetMap")
+                existing.window.lift()
+                return
+            self.map_picker = MapPicker(self, mode=mode)
         except Exception as exc:  # pragma: no cover - Tk/network UI boundary
             self.messages.put(f"Map picker failed: {exc}\n")
 

@@ -11,6 +11,7 @@ from ohqbuilder.ui.launcher import (
     map_click_to_lonlat,
     nearest_point_on_lines,
     osm_tile_cache_path,
+    rectangle_from_corners,
     geojson_preview_summary,
     load_project_config,
     save_project_config,
@@ -305,6 +306,26 @@ def test_write_drawn_acquisition_closes_user_polygon(tmp_path):
     ring = data["features"][0]["geometry"]["coordinates"][0]
     assert ring[0] == ring[-1]
     assert data["features"][0]["properties"]["source"] == "launcher_map"
+
+
+def test_rectangle_from_two_opposite_clicks_has_four_distinct_corners():
+    rectangle = rectangle_from_corners((-77.01, 38.93), (-76.98, 38.95))
+
+    assert rectangle == [
+        (-77.01, 38.93),
+        (-76.98, 38.93),
+        (-76.98, 38.95),
+        (-77.01, 38.95),
+    ]
+    assert len(set(rectangle)) == 4
+
+
+def test_john_mccormack_example_config_is_loadable():
+    config = load_project_config("examples/JohnMcCormack3600/dem_workflow.example.yaml")
+
+    assert config["project"]["title"] == "3600 John McCormack Rd NE Plan Set 20240709"
+    assert config["site"]["target_crs"] == "EPSG:26918"
+    assert config["dem_acquisition"]["method"] == "outlet_buffer"
 
 
 def test_use_expanded_acquisition_promotes_validation_output(tmp_path):
