@@ -575,5 +575,7 @@ def test_run_dem_ui_shell_wrapper_exists():
 
     assert script.is_file()
     text = script.read_text(encoding="utf-8")
+    assert '.venv/bin/ohqbuild" ui' in text
     assert "ohqbuild ui" in text
-    assert "python -m ohqbuilder.cli ui" in text
+    assert 'python_command="${PYTHON:-python3}"' in text
+    assert '-m ohqbuilder.cli ui "$@"' in text

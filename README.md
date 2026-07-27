@@ -42,8 +42,22 @@ run the bundled launcher script. It uses `ohqbuild ui` when installed and falls
 back to `python -m ohqbuilder.cli ui`, so it works before packaging:
 
 ```bash
+cd /path/to/GIStoOHQ
 scripts/run_dem_ui.sh
 ```
+
+The wrapper first uses `.venv/bin/ohqbuild` when the repository virtual
+environment exists, then an `ohqbuild` found on `PATH`, and finally
+`${PYTHON:-python3} -m ohqbuilder.cli ui`. You can also launch it directly:
+
+```bash
+cd /path/to/GIStoOHQ
+source .venv/bin/activate
+ohqbuild ui
+```
+
+The launcher is a desktop Tk application, so run it from a graphical terminal.
+On Debian/Ubuntu, install `python3-tk` if Python reports that `tkinter` is missing.
 
 The Tk launcher includes a multi-basemap tile picker for choosing the outlet
 coordinate interactively. Choose OpenStreetMap roads, Esri World Imagery satellite
