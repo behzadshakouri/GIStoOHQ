@@ -184,6 +184,9 @@ def bounds_covering_outlet(
     """
 
     minx, miny, maxx, maxy = bounds
+    if minx <= lon <= maxx and miny <= lat <= maxy:
+        return bounds
+
     lat_margin = max(margin_m, 0.0) / 111_320.0
     lon_margin = lat_margin / max(math.cos(math.radians(lat)), 0.1)
     return (
@@ -203,7 +206,7 @@ def run_full_pipeline(
     project_name: str | None = None,
     output_path: str | Path | None = None,
     script_dir: str | Path | None = None,
-    buffer_m: float = 5000.0,
+    buffer_m: float | None = None,
     target_crs: str | None = None,
     site_id: str | None = None,
     download_dir: str | Path | None = None,
@@ -225,6 +228,9 @@ def run_full_pipeline(
     try:
         emit("Starting full-run pipeline.")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
+        buffer_was_supplied = buffer_m is not None
+        if buffer_m is None:
+            buffer_m = 5000.0
         if selected_bounds is not None:
             original_bounds = selected_bounds
             selected_bounds = bounds_covering_outlet(selected_bounds, lon, lat)
@@ -234,7 +240,12 @@ def run_full_pipeline(
                     "around the selected outlet."
                 )
             required_buffer = buffer_covering_bounds(lon, lat, selected_bounds)
-            buffer_m = max(buffer_m, required_buffer * 1.05)
+            # With an explicit area, its radius is the useful default.  Retain
+            # a larger value only when the caller deliberately supplied one.
+            if not buffer_was_supplied:
+                buffer_m = required_buffer * 1.05
+            else:
+                buffer_m = max(buffer_m, required_buffer * 1.05)
             emit(
                 f"Using acquisition area {Path(acquisition_area).expanduser().resolve()} "
                 f"for downloads and clipping (query buffer {buffer_m:.0f} m)."

@@ -8,6 +8,11 @@ This folder is a small no-network smoke test for the outlet-first DEM acquisitio
 
 The acquisition envelope follows the Sligo centerline and uses **1,000 m** upstream, downstream, and lateral margins. This is acquisition padding, not a request to model the downstream Northwest Branch or the whole Anacostia basin. After DEM delineation, inspect the boundary and retain only the drainage area upstream of the Sligo-side pour point. See `outlet_and_extent.geojson` for the machine-readable point and review notes.
 
+If **FULL RUN** is pressed without drawing an area, the UI first regenerates
+`intermediate/dem_acquisition_area.geojson` from these configured network and
+margin values, then passes that file to `full-run`. A stale area from an earlier
+configuration is therefore not silently reused.
+
 Public surface-water mapping supports a confluence check, but it cannot make the bundled synthetic centerline authoritative. Before design use, confirm/snap the candidate against current [USGS NLDI](https://api.water.usgs.gov/nldi/linked-data) or authoritative NHD/3DHP hydrography and visually confirm that the selected flowline is Sligo Creek rather than Northwest Branch.
 
 Run the prepare path from the repository root. The wrapper uses `ohqbuild` when installed and falls back to `python -m ohqbuilder.cli` from a source checkout:

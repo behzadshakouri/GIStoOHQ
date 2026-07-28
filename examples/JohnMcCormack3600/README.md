@@ -5,6 +5,13 @@ The repository does not include the plan-set documents or authoritative survey, 
 
 The configured acquisition area uses a **200 m half-width** (a focused 400 m by 400 m window) around the candidate. That scale is intended to assess John McCormack Road and its immediate surroundings for bioretention; it is not a watershed-scale delineation. The machine-readable point, extent, and limitations are recorded in `outlet_and_extent.geojson`. Useful authoritative follow-up sources are the [DC Open Data portal](https://opendata.dc.gov/) and [DC Water](https://www.dcwater.com/), because a surface-water web map alone cannot verify a buried storm-sewer outlet.
 
+If **FULL RUN** is pressed without drawing an area, the UI first regenerates the
+configured 400 m by 400 m default polygon and passes it to `full-run`. Because
+the outlet is already inside that polygon, full-run preserves its clipping
+bounds rather than replacing it with the former 500 m outlet safety extent. Its
+default source query radius is derived from the polygon instead of reverting to
+5,000 m. A user-drawn polygon (`method: polygon`) continues to take precedence.
+
 Launch the UI from the repository root:
 
 ```bash

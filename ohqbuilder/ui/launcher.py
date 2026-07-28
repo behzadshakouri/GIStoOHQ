@@ -428,8 +428,17 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
-        if state.acquisition_area is not None and state.acquisition_area.is_file():
+        if state.acquisition_area is not None and (
+            state.acquisition_area.is_file()
+            or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
+        ):
             argv.extend(("--acquisition-area", str(state.acquisition_area)))
+        if state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}:
+            return WorkflowCommand(
+                "Full Run: Generate Default Area, then Download to OHQ",
+                ("ohqbuild", "prepare-dem", "--config", str(state.config_path)),
+                (tuple(argv),),
+            )
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:

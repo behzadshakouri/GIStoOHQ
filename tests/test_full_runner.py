@@ -260,3 +260,39 @@ def test_full_pipeline_expands_drawn_area_that_excludes_outlet(monkeypatch, tmp_
     assert (minx, miny) == (-77.1, 38.9)
     assert maxx > -76.98
     assert maxy > 39.01
+
+
+def test_full_pipeline_preserves_area_that_already_contains_outlet(monkeypatch, tmp_path):
+    area = tmp_path / "area.geojson"
+    area.write_text(
+        '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":'
+        '{"type":"Polygon","coordinates":[[[-77.002,38.998],[-76.998,38.998],'
+        '[-76.998,39.002],[-77.002,39.002],[-77.002,38.998]]]},"properties":{}}]}',
+        encoding="utf-8",
+    )
+    calls = {}
+
+    def download(*args, **kwargs):
+        calls["download"] = kwargs
+        return SimpleNamespace(download_dir=tmp_path / "downloads")
+    monkeypatch.setattr("ohqbuilder.full_runner.download_all_inputs", download)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **kwargs: calls.setdefault("materialize", kwargs),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "x.ohq")
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "x.hms"),
+    )
+
+    run_full_pipeline(tmp_path, "SITE", lon=-77.0, lat=39.0, acquisition_area=area)
+
+    assert calls["materialize"]["clip_bounds"] == (-77.002, 38.998, -76.998, 39.002)
+    assert calls["download"]["buffer_m"] < 500.0
