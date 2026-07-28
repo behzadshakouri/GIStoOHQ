@@ -9,6 +9,7 @@ from ohqbuilder.full_runner import (
     buffer_covering_bounds,
     existing_legacy_hms_project,
     full_run_summary,
+    network_element_counts,
     run_full_pipeline,
     write_watershed_report,
 )
@@ -27,16 +28,24 @@ def stub_watershed_builder(monkeypatch):
 def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     watershed = SimpleNamespace(
         subbasins=[SimpleNamespace(area_km2=0.04), SimpleNamespace(area_km2=0.02)],
-        reaches=[object()],
-        junctions=[],
+        reaches=[object(), object(), object()],
+        junctions=[object(), object()],
+        topology=[
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="reach"),
+            SimpleNamespace(element_type="junction"),
+            SimpleNamespace(element_type="sink"),
+        ],
     )
 
     summary = full_run_summary(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
 
     assert "Watershed area : 0.0600 km²" in summary
-    assert "Subbasins      : 2" in summary
-    assert "Reaches        : 1" in summary
-    assert "Junctions      : 0" in summary
+    assert "Subbasins      : 2 extracted / 2 retained" in summary
+    assert "Reaches        : 3 extracted / 1 retained" in summary
+    assert "Junctions      : 2 extracted / 1 retained" in summary
+    assert "extracted = GIS candidates; retained = final topology/model network" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
 
 
@@ -53,8 +62,13 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
                 lag_min=8.3,
             )
         ],
-        reaches=[object()],
-        junctions=[],
+        reaches=[object(), object()],
+        junctions=[object()],
+        topology=[
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="reach"),
+            SimpleNamespace(element_type="sink"),
+        ],
     )
 
     report = write_watershed_report(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
@@ -69,6 +83,19 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert "GREEN: less than 20 m" in content
     assert "YELLOW: 20–75 m" in content
     assert "RED: greater than 75 m" in content
+    assert "Reaches: 2 extracted / 1 retained" in content
+    assert "Junctions: 1 extracted / 0 retained" in content
+    assert "elements present in the final topology/model network" in content
+
+
+def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():
+    watershed = SimpleNamespace(subbasins=[1], reaches=[1, 2], junctions=[1])
+
+    assert network_element_counts(watershed) == {
+        "subbasin": (1, 1),
+        "reach": (2, 2),
+        "junction": (1, 1),
+    }
 
 
 def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):

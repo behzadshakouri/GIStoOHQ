@@ -32,6 +32,31 @@ class FullRunResult:
     report_path: Path | None = None
 
 
+def network_element_counts(watershed) -> dict[str, tuple[int, int]]:
+    """Return ``(extracted, retained)`` counts for each modeled element type.
+
+    The GeoPackage readers expose all extracted reach/junction features, while
+    ``topology.gpkg`` contains only the elements retained after topology pruning.
+    Keeping those meanings separate prevents the final summary from presenting
+    extracted candidates as model-network elements.
+    """
+
+    collections = {
+        "subbasin": list(getattr(watershed, "subbasins", []) or []),
+        "reach": list(getattr(watershed, "reaches", []) or []),
+        "junction": list(getattr(watershed, "junctions", []) or []),
+    }
+    topology = list(getattr(watershed, "topology", []) or [])
+    retained = {kind: 0 for kind in collections}
+    for link in topology:
+        kind = str(getattr(link, "element_type", "") or "").strip().lower()
+        if kind in retained:
+            retained[kind] += 1
+    if not topology:
+        retained = {kind: len(items) for kind, items in collections.items()}
+    return {kind: (len(items), retained[kind]) for kind, items in collections.items()}
+
+
 def existing_legacy_hms_project(
     root: str | Path, site: str, project_name: str | None = None
 ) -> Path | None:
@@ -54,18 +79,27 @@ def full_run_summary(
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
-    reaches = list(getattr(watershed, "reaches", []) or [])
-    junctions = list(getattr(watershed, "junctions", []) or [])
+    counts = network_element_counts(watershed)
     area_km2 = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
     lines = [
-            "=" * 72,
-            "FULL-RUN SUCCESS SUMMARY",
-            f"Watershed area : {area_km2:.4f} km²",
-            f"Subbasins      : {len(subbasins)}",
-            f"Reaches        : {len(reaches)}",
-            f"Junctions      : {len(junctions)}",
-            f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
-            f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
+        "=" * 72,
+        "FULL-RUN SUCCESS SUMMARY",
+        f"Watershed area : {area_km2:.4f} km²",
+        (
+            f"Subbasins      : {counts['subbasin'][0]} extracted / "
+            f"{counts['subbasin'][1]} retained"
+        ),
+        (
+            f"Reaches        : {counts['reach'][0]} extracted / "
+            f"{counts['reach'][1]} retained"
+        ),
+        (
+            f"Junctions      : {counts['junction'][0]} extracted / "
+            f"{counts['junction'][1]} retained"
+        ),
+        "Counts: extracted = GIS candidates; retained = final topology/model network.",
+        f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
+        f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
     ]
     if report_path is not None:
         lines.append(f"Watershed report: {Path(report_path).expanduser().resolve()}")
@@ -89,8 +123,7 @@ def write_watershed_report(
         else ohq.with_name("watershed_report.html")
     )
     subbasins = list(getattr(watershed, "subbasins", []) or [])
-    reaches = list(getattr(watershed, "reaches", []) or [])
-    junctions = list(getattr(watershed, "junctions", []) or [])
+    counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
 
     def value(item, attribute: str, digits: int = 2) -> str:
@@ -116,8 +149,11 @@ table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #bbb;padding
 th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</style></head><body>
 <h1>GIStoOHQ Watershed Report</h1>
 <ul><li>Watershed area: <strong>{area:.4f} km²</strong></li>
-<li>Subbasins: {len(subbasins)}</li><li>Reaches: {len(reaches)}</li>
-<li>Junctions: {len(junctions)}</li></ul>
+<li>Subbasins: {counts['subbasin'][0]} extracted / {counts['subbasin'][1]} retained</li>
+<li>Reaches: {counts['reach'][0]} extracted / {counts['reach'][1]} retained</li>
+<li>Junctions: {counts['junction'][0]} extracted / {counts['junction'][1]} retained</li></ul>
+<p><em>Extracted</em> counts describe GIS candidates. <em>Retained</em> counts
+describe elements present in the final topology/model network.</p>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
