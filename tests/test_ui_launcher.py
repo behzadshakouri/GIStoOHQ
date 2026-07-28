@@ -502,21 +502,41 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         target_crs="EPSG:26918",
         lon=-76.99,
         lat=38.94,
+        method="outlet_buffer",
         acquisition_area=acquisition,
     )
 
     command = command_for_step("full-run", state)
 
-    assert command.argv[:2] == ("ohqbuild", "full-run")
-    assert command.argv[command.argv.index("--lon") + 1] == "-76.99"
-    assert command.argv[command.argv.index("--lat") + 1] == "38.94"
-    assert command.argv[command.argv.index("--target-crs") + 1] == "EPSG:26918"
-    assert command.argv[command.argv.index("--download-dir") + 1] == str(
+    assert command.argv == ("ohqbuild", "prepare-dem", "--config", str(tmp_path / "config.yaml"))
+    full_run = command.followup_argv[0]
+    assert full_run[:2] == ("ohqbuild", "full-run")
+    assert full_run[full_run.index("--lon") + 1] == "-76.99"
+    assert full_run[full_run.index("--lat") + 1] == "38.94"
+    assert full_run[full_run.index("--target-crs") + 1] == "EPSG:26918"
+    assert full_run[full_run.index("--download-dir") + 1] == str(
         tmp_path / "source_downloads"
     )
-    assert command.argv[command.argv.index("--acquisition-area") + 1] == str(
+    assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate" / "area.geojson"
     )
+
+
+def test_full_run_generates_configured_area_when_file_does_not_exist(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Demo",
+        lon=-76.99,
+        lat=38.94,
+        method="outlet_buffer",
+        acquisition_area=tmp_path / "intermediate" / "area.geojson",
+    )
+
+    command = command_for_step("full-run", state)
+
+    assert command.argv[:2] == ("ohqbuild", "prepare-dem")
+    assert "--acquisition-area" in command.followup_argv[0]
 
 
 def test_hms_buttons_build_and_validate_native_project(tmp_path):

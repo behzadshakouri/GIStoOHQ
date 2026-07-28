@@ -9,6 +9,7 @@ from ohqbuilder.full_runner import (
     buffer_covering_bounds,
     existing_legacy_hms_project,
     full_run_summary,
+    network_element_counts,
     run_full_pipeline,
     write_watershed_report,
 )
@@ -27,16 +28,24 @@ def stub_watershed_builder(monkeypatch):
 def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     watershed = SimpleNamespace(
         subbasins=[SimpleNamespace(area_km2=0.04), SimpleNamespace(area_km2=0.02)],
-        reaches=[object()],
-        junctions=[],
+        reaches=[object(), object(), object()],
+        junctions=[object(), object()],
+        topology=[
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="reach"),
+            SimpleNamespace(element_type="junction"),
+            SimpleNamespace(element_type="sink"),
+        ],
     )
 
     summary = full_run_summary(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
 
     assert "Watershed area : 0.0600 km²" in summary
-    assert "Subbasins      : 2" in summary
-    assert "Reaches        : 1" in summary
-    assert "Junctions      : 0" in summary
+    assert "Subbasins      : 2 extracted / 2 retained" in summary
+    assert "Reaches        : 3 extracted / 1 retained" in summary
+    assert "Junctions      : 2 extracted / 1 retained" in summary
+    assert "extracted = GIS candidates; retained = final topology/model network" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
 
 
@@ -53,8 +62,13 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
                 lag_min=8.3,
             )
         ],
-        reaches=[object()],
-        junctions=[],
+        reaches=[object(), object()],
+        junctions=[object()],
+        topology=[
+            SimpleNamespace(element_type="subbasin"),
+            SimpleNamespace(element_type="reach"),
+            SimpleNamespace(element_type="sink"),
+        ],
     )
 
     report = write_watershed_report(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
@@ -69,6 +83,19 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert "GREEN: less than 20 m" in content
     assert "YELLOW: 20–75 m" in content
     assert "RED: greater than 75 m" in content
+    assert "Reaches: 2 extracted / 1 retained" in content
+    assert "Junctions: 1 extracted / 0 retained" in content
+    assert "elements present in the final topology/model network" in content
+
+
+def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():
+    watershed = SimpleNamespace(subbasins=[1], reaches=[1, 2], junctions=[1])
+
+    assert network_element_counts(watershed) == {
+        "subbasin": (1, 1),
+        "reach": (2, 2),
+        "junction": (1, 1),
+    }
 
 
 def test_existing_legacy_hms_project_prefers_complete_phase2_output(tmp_path):
@@ -260,3 +287,39 @@ def test_full_pipeline_expands_drawn_area_that_excludes_outlet(monkeypatch, tmp_
     assert (minx, miny) == (-77.1, 38.9)
     assert maxx > -76.98
     assert maxy > 39.01
+
+
+def test_full_pipeline_preserves_area_that_already_contains_outlet(monkeypatch, tmp_path):
+    area = tmp_path / "area.geojson"
+    area.write_text(
+        '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":'
+        '{"type":"Polygon","coordinates":[[[-77.002,38.998],[-76.998,38.998],'
+        '[-76.998,39.002],[-77.002,39.002],[-77.002,38.998]]]},"properties":{}}]}',
+        encoding="utf-8",
+    )
+    calls = {}
+
+    def download(*args, **kwargs):
+        calls["download"] = kwargs
+        return SimpleNamespace(download_dir=tmp_path / "downloads")
+    monkeypatch.setattr("ohqbuilder.full_runner.download_all_inputs", download)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **kwargs: calls.setdefault("materialize", kwargs),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "x.ohq")
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "x.hms"),
+    )
+
+    run_full_pipeline(tmp_path, "SITE", lon=-77.0, lat=39.0, acquisition_area=area)
+
+    assert calls["materialize"]["clip_bounds"] == (-77.002, 38.998, -76.998, 39.002)
+    assert calls["download"]["buffer_m"] < 500.0
