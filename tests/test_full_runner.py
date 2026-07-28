@@ -41,11 +41,11 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
 
     summary = full_run_summary(watershed, tmp_path / "site.ohq", tmp_path / "site.hms")
 
-    assert "Watershed area : 0.0600 km²" in summary
-    assert "Subbasins      : 2 extracted / 2 retained" in summary
-    assert "Reaches        : 3 extracted / 1 retained" in summary
-    assert "Junctions      : 2 extracted / 1 retained" in summary
-    assert "extracted = GIS candidates; retained = final topology/model network" in summary
+    assert "Watershed Area\n  0.0600 km²" in summary
+    assert "GIS Extraction\n  Subbasins : 2\n  Reaches   : 3\n  Junctions : 2" in summary
+    assert "Final Model Network\n  Subbasins : 2\n  Reaches   : 1\n  Junctions : 1" in summary
+    assert "✓ OHQ model" in summary
+    assert "✓ HEC-HMS project" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
 
 
@@ -83,9 +83,10 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert "GREEN: less than 20 m" in content
     assert "YELLOW: 20–75 m" in content
     assert "RED: greater than 75 m" in content
-    assert "Reaches: 2 extracted / 1 retained" in content
-    assert "Junctions: 1 extracted / 0 retained" in content
-    assert "elements present in the final topology/model network" in content
+    assert "<h2>GIS Extraction</h2>" in content
+    assert "<li>Reaches: 2</li><li>Junctions: 1</li>" in content
+    assert "<h2>Final Model Network</h2>" in content
+    assert "<li>Reaches: 1</li><li>Junctions: 0</li>" in content
 
 
 def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():

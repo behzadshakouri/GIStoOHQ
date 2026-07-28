@@ -84,25 +84,28 @@ def full_run_summary(
     lines = [
         "=" * 72,
         "FULL-RUN SUCCESS SUMMARY",
-        f"Watershed area : {area_km2:.4f} km²",
-        (
-            f"Subbasins      : {counts['subbasin'][0]} extracted / "
-            f"{counts['subbasin'][1]} retained"
-        ),
-        (
-            f"Reaches        : {counts['reach'][0]} extracted / "
-            f"{counts['reach'][1]} retained"
-        ),
-        (
-            f"Junctions      : {counts['junction'][0]} extracted / "
-            f"{counts['junction'][1]} retained"
-        ),
-        "Counts: extracted = GIS candidates; retained = final topology/model network.",
-        f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
-        f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
+        "",
+        "Watershed Area",
+        f"  {area_km2:.4f} km²",
+        "",
+        "GIS Extraction",
+        f"  Subbasins : {counts['subbasin'][0]}",
+        f"  Reaches   : {counts['reach'][0]}",
+        f"  Junctions : {counts['junction'][0]}",
+        "",
+        "Final Model Network",
+        f"  Subbasins : {counts['subbasin'][1]}",
+        f"  Reaches   : {counts['reach'][1]}",
+        f"  Junctions : {counts['junction'][1]}",
+        "",
+        "Products",
+        f"  ✓ OHQ model       : {Path(ohq_path).expanduser().resolve()}",
+        f"  ✓ HEC-HMS project : {Path(hms_path).expanduser().resolve()}",
     ]
     if report_path is not None:
-        lines.append(f"Watershed report: {Path(report_path).expanduser().resolve()}")
+        lines.append(
+            f"  ✓ Watershed report: {Path(report_path).expanduser().resolve()}"
+        )
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -148,12 +151,11 @@ def write_watershed_report(
 table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #bbb;padding:.45rem;text-align:right}}
 th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</style></head><body>
 <h1>GIStoOHQ Watershed Report</h1>
-<ul><li>Watershed area: <strong>{area:.4f} km²</strong></li>
-<li>Subbasins: {counts['subbasin'][0]} extracted / {counts['subbasin'][1]} retained</li>
-<li>Reaches: {counts['reach'][0]} extracted / {counts['reach'][1]} retained</li>
-<li>Junctions: {counts['junction'][0]} extracted / {counts['junction'][1]} retained</li></ul>
-<p><em>Extracted</em> counts describe GIS candidates. <em>Retained</em> counts
-describe elements present in the final topology/model network.</p>
+<h2>Watershed Area</h2><p><strong>{area:.4f} km²</strong></p>
+<h2>GIS Extraction</h2><ul><li>Subbasins: {counts['subbasin'][0]}</li>
+<li>Reaches: {counts['reach'][0]}</li><li>Junctions: {counts['junction'][0]}</li></ul>
+<h2>Final Model Network</h2><ul><li>Subbasins: {counts['subbasin'][1]}</li>
+<li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>

@@ -639,14 +639,20 @@ for rid in sorted(ds_reach):
 
     start = rinfo[rid]["dn"]
     end = rinfo[downstream]["up"]
+    if start is None or end is None or start.distance(end) < 0.01:
+        continue
+    geometry = QgsGeometry.fromPolylineXY([start, end])
+    if geometry.isNull() or geometry.isEmpty() or not geometry.isGeosValid():
+        continue
     feature = QgsFeature(fields)
-    feature.setGeometry(QgsGeometry.fromPolylineXY([start, end]))
+    feature.setGeometry(geometry)
     feature["kind"] = "reach"
     feature["src_id"] = int(rid)
     feature["dst_reach"] = int(downstream)
     feature["dist_m"] = float(start.distance(end))
     feature["flag"] = ds_note[rid]
-    writer.addFeature(feature)
+    if not writer.addFeature(feature):
+        raise Exception("failed to write a valid reach connector")
     connector_count += 1
 
 del writer
