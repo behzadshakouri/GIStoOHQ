@@ -5,3 +5,9 @@ __pycache__/
 
 gistoohq.egg-info/
 runs/
+
+examples/SligoCreek/SligoCreekDemo/
+
+examples/SligoCreek/source_downloads/
+
+examples/SligoCreek/WS3_HMS/SligoCreekDemo/
