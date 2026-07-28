@@ -9,24 +9,26 @@ project:
 spatial_input:
   mode: outlet
 outlet:
-  # Starter location near the named property. Verify it in the map picker and
-  # move it to the actual receiving drainage outlet before downloading data.
-  longitude: -76.9974
-  latitude: 38.9370
+  # Local drainage/outlet candidate supplied in JM.kmz. This is appropriate
+  # for screening the street-scale study area, but must be reconciled with the
+  # plan-set drainage structures or a field survey before final design.
+  longitude: -76.99597205373109
+  latitude: 38.93589535566567
   input_crs: EPSG:4326
   raw_path: inputs/outlet_raw.geojson
   snap_to_flowline: false
 dem_acquisition:
   method: outlet_buffer
   acquisition_area: intermediate/dem_acquisition_area.geojson
-  upstream_km: 5
-  downstream_km: 1
-  lateral_km: 2
+  # A 200 m half-width gives a focused 400 m x 400 m street/near-area window.
+  upstream_km: 0.2
+  downstream_km: 0.2
+  lateral_km: 0.2
   auto_expand: true
   directional_expansion: true
-  boundary_safety_distance_m: 500
+  boundary_safety_distance_m: 50
   expanded_acquisition_area: intermediate/dem_acquisition_area_attempt2.geojson
-  expansion_distance_km: 2
+  expansion_distance_km: 0.1
   summary: intermediate/dem_workflow_summary.json
   watershed_boundary: intermediate/watershed_boundary.geojson
   validation_summary: intermediate/dem_boundary_validation_summary.json

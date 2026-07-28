@@ -32,6 +32,31 @@ class FullRunResult:
     report_path: Path | None = None
 
 
+def network_element_counts(watershed) -> dict[str, tuple[int, int]]:
+    """Return ``(extracted, retained)`` counts for each modeled element type.
+
+    The GeoPackage readers expose all extracted reach/junction features, while
+    ``topology.gpkg`` contains only the elements retained after topology pruning.
+    Keeping those meanings separate prevents the final summary from presenting
+    extracted candidates as model-network elements.
+    """
+
+    collections = {
+        "subbasin": list(getattr(watershed, "subbasins", []) or []),
+        "reach": list(getattr(watershed, "reaches", []) or []),
+        "junction": list(getattr(watershed, "junctions", []) or []),
+    }
+    topology = list(getattr(watershed, "topology", []) or [])
+    retained = {kind: 0 for kind in collections}
+    for link in topology:
+        kind = str(getattr(link, "element_type", "") or "").strip().lower()
+        if kind in retained:
+            retained[kind] += 1
+    if not topology:
+        retained = {kind: len(items) for kind, items in collections.items()}
+    return {kind: (len(items), retained[kind]) for kind, items in collections.items()}
+
+
 def existing_legacy_hms_project(
     root: str | Path, site: str, project_name: str | None = None
 ) -> Path | None:
@@ -54,21 +79,33 @@ def full_run_summary(
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
-    reaches = list(getattr(watershed, "reaches", []) or [])
-    junctions = list(getattr(watershed, "junctions", []) or [])
+    counts = network_element_counts(watershed)
     area_km2 = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
     lines = [
-            "=" * 72,
-            "FULL-RUN SUCCESS SUMMARY",
-            f"Watershed area : {area_km2:.4f} km²",
-            f"Subbasins      : {len(subbasins)}",
-            f"Reaches        : {len(reaches)}",
-            f"Junctions      : {len(junctions)}",
-            f"OHQ file       : {Path(ohq_path).expanduser().resolve()}",
-            f"HEC-HMS project: {Path(hms_path).expanduser().resolve()}",
+        "=" * 72,
+        "FULL-RUN SUCCESS SUMMARY",
+        "",
+        "Watershed Area",
+        f"  {area_km2:.4f} km²",
+        "",
+        "GIS Extraction",
+        f"  Subbasins : {counts['subbasin'][0]}",
+        f"  Reaches   : {counts['reach'][0]}",
+        f"  Junctions : {counts['junction'][0]}",
+        "",
+        "Final Model Network",
+        f"  Subbasins : {counts['subbasin'][1]}",
+        f"  Reaches   : {counts['reach'][1]}",
+        f"  Junctions : {counts['junction'][1]}",
+        "",
+        "Products",
+        f"  ✓ OHQ model       : {Path(ohq_path).expanduser().resolve()}",
+        f"  ✓ HEC-HMS project : {Path(hms_path).expanduser().resolve()}",
     ]
     if report_path is not None:
-        lines.append(f"Watershed report: {Path(report_path).expanduser().resolve()}")
+        lines.append(
+            f"  ✓ Watershed report: {Path(report_path).expanduser().resolve()}"
+        )
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -89,8 +126,7 @@ def write_watershed_report(
         else ohq.with_name("watershed_report.html")
     )
     subbasins = list(getattr(watershed, "subbasins", []) or [])
-    reaches = list(getattr(watershed, "reaches", []) or [])
-    junctions = list(getattr(watershed, "junctions", []) or [])
+    counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
 
     def value(item, attribute: str, digits: int = 2) -> str:
@@ -115,9 +151,11 @@ def write_watershed_report(
 table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #bbb;padding:.45rem;text-align:right}}
 th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</style></head><body>
 <h1>GIStoOHQ Watershed Report</h1>
-<ul><li>Watershed area: <strong>{area:.4f} km²</strong></li>
-<li>Subbasins: {len(subbasins)}</li><li>Reaches: {len(reaches)}</li>
-<li>Junctions: {len(junctions)}</li></ul>
+<h2>Watershed Area</h2><p><strong>{area:.4f} km²</strong></p>
+<h2>GIS Extraction</h2><ul><li>Subbasins: {counts['subbasin'][0]}</li>
+<li>Reaches: {counts['reach'][0]}</li><li>Junctions: {counts['junction'][0]}</li></ul>
+<h2>Final Model Network</h2><ul><li>Subbasins: {counts['subbasin'][1]}</li>
+<li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
@@ -184,6 +222,9 @@ def bounds_covering_outlet(
     """
 
     minx, miny, maxx, maxy = bounds
+    if minx <= lon <= maxx and miny <= lat <= maxy:
+        return bounds
+
     lat_margin = max(margin_m, 0.0) / 111_320.0
     lon_margin = lat_margin / max(math.cos(math.radians(lat)), 0.1)
     return (
@@ -203,7 +244,7 @@ def run_full_pipeline(
     project_name: str | None = None,
     output_path: str | Path | None = None,
     script_dir: str | Path | None = None,
-    buffer_m: float = 5000.0,
+    buffer_m: float | None = None,
     target_crs: str | None = None,
     site_id: str | None = None,
     download_dir: str | Path | None = None,
@@ -225,6 +266,9 @@ def run_full_pipeline(
     try:
         emit("Starting full-run pipeline.")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
+        buffer_was_supplied = buffer_m is not None
+        if buffer_m is None:
+            buffer_m = 5000.0
         if selected_bounds is not None:
             original_bounds = selected_bounds
             selected_bounds = bounds_covering_outlet(selected_bounds, lon, lat)
@@ -234,7 +278,12 @@ def run_full_pipeline(
                     "around the selected outlet."
                 )
             required_buffer = buffer_covering_bounds(lon, lat, selected_bounds)
-            buffer_m = max(buffer_m, required_buffer * 1.05)
+            # With an explicit area, its radius is the useful default.  Retain
+            # a larger value only when the caller deliberately supplied one.
+            if not buffer_was_supplied:
+                buffer_m = required_buffer * 1.05
+            else:
+                buffer_m = max(buffer_m, required_buffer * 1.05)
             emit(
                 f"Using acquisition area {Path(acquisition_area).expanduser().resolve()} "
                 f"for downloads and clipping (query buffer {buffer_m:.0f} m)."

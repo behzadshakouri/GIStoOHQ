@@ -22,6 +22,19 @@ def test_phase1_support_module_is_packaged():
     assert "QgsProject" in source
 
 
+def test_intermediate_topology_connectors_skip_invalid_zero_length_lines():
+    materialize = Path("scripts/legacy_gis/materialize_junctions.py").read_text(
+        encoding="utf-8"
+    )
+    derive = Path("scripts/legacy_gis/derive_topology_reaches.py").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (materialize, derive):
+        assert "distance(end) < 0.01" in source or "distance(dst) < 0.01" in source
+        assert "not geom.isGeosValid()" in source or "not geometry.isGeosValid()" in source
+
+
 def test_legacy_grass_helpers_prefer_current_grass_prefix():
     for script in (
         Path("scripts/legacy_gis/delineate_whole_watershed.py"),

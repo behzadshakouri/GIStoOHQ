@@ -551,17 +551,36 @@ if cw.hasError() != QgsVectorFileWriter.NoError:
 
 jpt = {jid: pt for jid, pt, _, _ in junctions}
 
+
+def add_connector(kind, src, dst, src_id, dst_id, note=""):
+    """Write only usable visual connectors; coincident endpoints are invalid lines."""
+    if src is None or dst is None or src.distance(dst) < 0.01:
+        return False
+    geom = QgsGeometry.fromPolylineXY([src, dst])
+    if geom.isNull() or geom.isEmpty() or not geom.isGeosValid():
+        return False
+    ft = QgsFeature(cflds)
+    ft.setGeometry(geom)
+    ft["kind"] = kind
+    ft["src"] = int(src_id)
+    ft["dst"] = int(dst_id)
+    ft["note"] = note or ""
+    if not cw.addFeature(ft):
+        raise Exception("failed to write a valid topology connector")
+    return True
+
+
+connector_count = 0
+skipped_connectors = 0
+
 # Incoming reach -> junction.
 for rid, jid in sorted(reach_to_junc.items()):
     a = rinfo[rid]["dn"]
     b = jpt[jid]
-    ft = QgsFeature(cflds)
-    ft.setGeometry(QgsGeometry.fromPolylineXY([a, b]))
-    ft["kind"] = "reach_in"
-    ft["src"] = int(rid)
-    ft["dst"] = int(jid)
-    ft["note"] = ""
-    cw.addFeature(ft)
+    if add_connector("reach_in", a, b, rid, jid):
+        connector_count += 1
+    else:
+        skipped_connectors += 1
 
 # Junction -> outgoing reach.
 for jid, out in sorted(junc_outflow.items()):
@@ -569,13 +588,10 @@ for jid, out in sorted(junc_outflow.items()):
         continue
     a = jpt[jid]
     b = rinfo[out]["up"]
-    ft = QgsFeature(cflds)
-    ft.setGeometry(QgsGeometry.fromPolylineXY([a, b]))
-    ft["kind"] = "junc_out"
-    ft["src"] = int(jid)
-    ft["dst"] = int(out)
-    ft["note"] = junc_note.get(jid, "")
-    cw.addFeature(ft)
+    if add_connector("junc_out", a, b, jid, out, junc_note.get(jid, "")):
+        connector_count += 1
+    else:
+        skipped_connectors += 1
 
 # Direct reach -> reach links that were not rewired through a junction.
 reaches_check = QgsVectorLayer(reaches_p, "reaches_check", "ogr")
@@ -593,19 +609,18 @@ for f in reaches_check.getFeatures():
     if ds_type != "reach" or ds is None or ds not in rinfo:
         continue
 
-    ft = QgsFeature(cflds)
-    ft.setGeometry(QgsGeometry.fromPolylineXY([
-        rinfo[rid]["dn"],
-        rinfo[ds]["up"],
-    ]))
-    ft["kind"] = "reach_direct"
-    ft["src"] = int(rid)
-    ft["dst"] = int(ds)
-    ft["note"] = ""
-    cw.addFeature(ft)
+    if add_connector(
+        "reach_direct", rinfo[rid]["dn"], rinfo[ds]["up"], rid, ds
+    ):
+        connector_count += 1
+    else:
+        skipped_connectors += 1
 
 del cw
-print("Rewrote", os.path.basename(connect_p), "through junctions")
+print(
+    "Rewrote %s through junctions: %d valid connector(s), %d coincident/invalid skipped"
+    % (os.path.basename(connect_p), connector_count, skipped_connectors)
+)
 
 
 # ---------------------------------------------------------------------------

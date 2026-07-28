@@ -230,7 +230,10 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
-        if acquisition is not None and acquisition.is_file():
+        if acquisition is not None and (
+            acquisition.is_file()
+            or dem.get("method") in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
+        ):
             argv.extend(["--acquisition-area", str(acquisition)])
         return argv
 
@@ -430,6 +433,19 @@ class DemWorkflowDock:
             self.log.append("A workflow command is already running; wait for it to finish first.")
             return
         try:
+            skip_prepare = bool(getattr(self, "skip_full_prepare_once", False))
+            self.skip_full_prepare_once = False
+            if command == "full-run" and not skip_prepare:
+                data = _read_config(Path(self.config.text()).expanduser())
+                dem = data.get("dem_acquisition", {}) if isinstance(data, dict) else {}
+                if isinstance(dem, dict) and dem.get("method") in {
+                    "outlet_buffer", "oriented_outlet_buffer", "upstream_network"
+                }:
+                    self.pending_workflow = "full-run"
+                    command = "prepare-dem"
+                    self.log.append(
+                        "Generating the configured default acquisition area before FULL RUN."
+                    )
             argv = _command_for_workflow(command, self.config.text())
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")
@@ -460,6 +476,11 @@ class DemWorkflowDock:
     def _command_finished(self, command: str, code: int, status) -> None:
         self.log.append(f"[{command} exited with {code}]")
         self.process = None
+        pending = getattr(self, "pending_workflow", None)
+        self.pending_workflow = None
+        if pending and code == 0:
+            self.skip_full_prepare_once = True
+            self.run_command(pending)
 
     def load_configured_layers(self) -> None:
         from qgis.core import QgsProject, QgsVectorLayer

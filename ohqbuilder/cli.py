@@ -696,7 +696,8 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--out", default=None)
     full.add_argument("--script-dir", default=None)
     full.add_argument(
-        "--buffer", type=float, default=5000.0, help="Source-data query buffer in meters."
+        "--buffer", type=float, default=None,
+        help="Source-data query buffer in meters; defaults to the acquisition area radius, or 5000 m without an area."
     )
     full.add_argument(
         "--target-crs", default=None, help="Optional DEM target CRS, e.g. EPSG:26912."

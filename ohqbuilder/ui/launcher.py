@@ -57,8 +57,8 @@ BASEMAP_PROVIDERS = {
 }
 
 SLIGO_DEMO_SITE = "SligoCreekDemo"
-SLIGO_DEMO_LON = -76.9765
-SLIGO_DEMO_LAT = 38.9921
+SLIGO_DEMO_LON = -76.97391566325376
+SLIGO_DEMO_LAT = 38.95840888229726
 SLIGO_DEMO_CRS = "EPSG:26918"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
@@ -428,8 +428,17 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
-        if state.acquisition_area is not None and state.acquisition_area.is_file():
+        if state.acquisition_area is not None and (
+            state.acquisition_area.is_file()
+            or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
+        ):
             argv.extend(("--acquisition-area", str(state.acquisition_area)))
+        if state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}:
+            return WorkflowCommand(
+                "Full Run: Generate Default Area, then Download to OHQ",
+                ("ohqbuild", "prepare-dem", "--config", str(state.config_path)),
+                (tuple(argv),),
+            )
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
@@ -843,8 +852,8 @@ class MapPicker:
         self.zoom = clamp_zoom(zoom)
         self.width = width
         self.height = height
-        self.center_lon = float(app.lon_var.get() or -76.9765)
-        self.center_lat = float(app.lat_var.get() or 38.9921)
+        self.center_lon = float(app.lon_var.get() or -76.97391566325376)
+        self.center_lat = float(app.lat_var.get() or 38.95840888229726)
         self.images = []
         self.flowlines = self._load_flowlines()
         self.selection_points: list[tuple[float, float]] = []

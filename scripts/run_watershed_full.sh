@@ -3,7 +3,7 @@
 #
 # Provide either LAT/LON directly or CSV_PATH plus ROW_ID. Override paths/settings
 # with environment variables as needed, for example:
-#   LAT=39.000215 LON=-77.01081 SITE=SligoCreek ./scripts/run_watershed_full.sh
+#   LAT=38.95840888229726 LON=-76.97391566325376 SITE=SligoCreek ./scripts/run_watershed_full.sh
 #   CSV_PATH=/data/sites.csv ROW_ID=SligoCreek_Mouth SITE=SligoCreek ./scripts/run_watershed_full.sh
 #   RUN_MODE=full-run ./scripts/run_watershed_full.sh
 #   DRY_RUN=1 ./scripts/run_watershed_full.sh
