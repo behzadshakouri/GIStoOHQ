@@ -231,8 +231,8 @@ by hand:
 ohqbuild init-dem-config \
   --config configs/SligoCreek.yaml \
   --site SligoCreek \
-  --lon -76.9765 \
-  --lat 38.9921 \
+  --lon -76.97391566325376 \
+  --lat 38.95840888229726 \
   --flowlines hydro/NHDFlowline.geojson \
   --tile-index indexes/usgs_3dep_tiles.geojson \
   --target-crs EPSG:26918
@@ -300,8 +300,8 @@ known upstream azimuth:
 
 ```bash
 ohqbuild dem-acquisition-area \
-  --lon -76.9765 \
-  --lat 38.9921 \
+  --lon -76.97391566325376 \
+  --lat 38.95840888229726 \
   --out intermediate/dem_acquisition_area.geojson \
   --upstream-km 35 \
   --downstream-km 3 \
@@ -341,8 +341,8 @@ You can also snap the outlet as a separate inspectable step:
 
 ```bash
 ohqbuild dem-snap-outlet \
-  --lon -76.9765 \
-  --lat 38.9921 \
+  --lon -76.97391566325376 \
+  --lat 38.95840888229726 \
   --flowlines hydro/NHDFlowline.geojson \
   --out inputs/outlet_snapped.geojson \
   --snap-distance-m 500
@@ -364,8 +364,8 @@ The same lightweight envelope can be generated directly without a project config
 
 ```bash
 ohqbuild dem-upstream-network-area \
-  --lon -76.9765 \
-  --lat 38.9921 \
+  --lon -76.97391566325376 \
+  --lat 38.95840888229726 \
   --flowlines hydro/NHDFlowline.geojson \
   --out intermediate/dem_acquisition_area.geojson \
   --upstream-trace-km 40 \
