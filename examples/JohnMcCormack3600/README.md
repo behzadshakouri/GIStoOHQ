@@ -1,11 +1,9 @@
 # 3600 John McCormack Rd NE, Washington, DC
 
 This is a starter workflow for **3600 John McCormack Rd NE Plan Set 20240709**.
-The repository does not include the plan-set documents or authoritative survey,
-outfall, drainage-boundary, or hydrography data. The coordinate in the example
-config is deliberately labeled as a starter location: open the map and verify the
-actual receiving drainage outlet or draw the project drainage boundary before a
-production run.
+The repository does not include the plan-set documents or authoritative survey, outfall, drainage-boundary, or hydrography data. The example now uses the outlet candidate supplied in `JM.kmz`: **38.93589535566567, -76.99597205373109**. Public basemaps can locate the point, but they do not establish the private/site storm-drain connection. Consequently the repository treats it as a **local drainage candidate**, not a surveyed or record-drawing-confirmed outfall. Reconcile it with the 2024-07-09 plan-set drainage structures, DC Water records, and a field survey before final design.
+
+The configured acquisition area uses a **200 m half-width** (a focused 400 m by 400 m window) around the candidate. That scale is intended to assess John McCormack Road and its immediate surroundings for bioretention; it is not a watershed-scale delineation. The machine-readable point, extent, and limitations are recorded in `outlet_and_extent.geojson`. Useful authoritative follow-up sources are the [DC Open Data portal](https://opendata.dc.gov/) and [DC Water](https://www.dcwater.com/), because a surface-water web map alone cannot verify a buried storm-sewer outlet.
 
 Launch the UI from the repository root:
 
@@ -34,8 +32,8 @@ For a network-enabled, end-to-end production run using the verified outlet, use:
 ohqbuild full-run \
   --root examples/JohnMcCormack3600 \
   --site JohnMcCormack3600 \
-  --lon VERIFIED_OUTLET_LONGITUDE \
-  --lat VERIFIED_OUTLET_LATITUDE \
+  --lon -76.99597205373109 \
+  --lat 38.93589535566567 \
   --target-crs EPSG:26918 \
   --acquisition-area examples/JohnMcCormack3600/intermediate/dem_acquisition_area.geojson \
   --project-name JohnMcCormack3600 \
