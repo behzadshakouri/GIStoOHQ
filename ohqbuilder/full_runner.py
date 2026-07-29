@@ -20,6 +20,7 @@ from .settings import BuilderSettings
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_comparison import compare_watersheds
+from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
 
 
 class FullRunError(RuntimeError):
@@ -317,6 +318,23 @@ def run_full_pipeline(
             clip_center_lat=lat,
             clip_buffer_m=buffer_m,
         )
+        materialized_hydro = getattr(materialized, "hydro", None)
+        catchment_path = getattr(materialized_hydro, "catchment_path", None)
+        if catchment_path is not None:
+            try:
+                traced = trace_upstream_catchments(
+                    materialized_hydro.output_path,
+                    catchment_path,
+                    Path(root).expanduser().resolve()
+                    / site
+                    / "outputs"
+                    / "NHDPlus_upstream_candidate.gpkg",
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                )
+                emit(f"Wrote NHDPlus upstream watershed candidate: {traced}")
+            except NhdplusTraceError as exc:
+                emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.
         options = LegacyWorkflowOptions(
             auto_outlet=True,

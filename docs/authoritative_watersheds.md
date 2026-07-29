@@ -31,6 +31,12 @@ When present in the downloaded NHDPlus vector package, catchments are clipped to
 the DEM extent and written to `outputs/NHDPlusCatchment_clip.gpkg`. This provides
 the polygon/reach linkage needed for a later upstream trace from the verified
 outlet while keeping NHDPlus catchments distinct from WBD hydrologic units.
+When the flowlines expose `FromNode`/`ToNode` connectivity and their reach IDs
+match catchment `FEATUREID`/`NHDPlusID` values, `full-run` snaps the supplied outlet
+to the nearest reach, traces all upstream reaches, and writes
+`outputs/NHDPlus_upstream_candidate.gpkg`. Its companion JSON records the selected
+reach, snap distance, field mapping, and feature counts. Missing connectivity is
+reported for review rather than guessed from line orientation.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a
