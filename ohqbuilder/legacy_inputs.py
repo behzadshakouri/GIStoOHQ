@@ -21,6 +21,7 @@ _PHASE_SCRIPTS = {
     "phase1": "run_phase1.py",
     "phase2": "run_phase2.py",
 }
+REQUIRED_REACH_WRITER_REVISION = "stale-layer-release-v2"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,28 @@ class LegacyInputWorkflowError(RuntimeError):
 
 def default_script_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "scripts" / "legacy_gis"
+
+
+def verify_reach_writer_revision(script_dir: str | Path | None = None) -> Path:
+    """Reject mixed installs where the Python runner sees stale legacy scripts."""
+
+    directory = (
+        Path(script_dir).expanduser().resolve()
+        if script_dir is not None
+        else default_script_dir().resolve()
+    )
+    script = directory / "extract_reaches.py"
+    if not script.is_file():
+        raise LegacyInputWorkflowError(f"Legacy reach script not found: {script}")
+    source = script.read_text(encoding="utf-8")
+    marker = f'REACH_WRITER_REVISION = "{REQUIRED_REACH_WRITER_REVISION}"'
+    if marker not in source:
+        raise LegacyInputWorkflowError(
+            "The installed full-run code and legacy GIS scripts are from different "
+            f"revisions. Expected {marker} in {script}. Update the repository and "
+            "reinstall/update the QGIS plugin before rerunning."
+        )
+    return script
 
 
 def _module_available(name: str) -> bool:

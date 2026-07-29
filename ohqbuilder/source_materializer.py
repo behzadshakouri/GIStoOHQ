@@ -7,6 +7,11 @@ import shutil
 
 from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
+from .wbd_materializer import (
+    WbdMaterializeError,
+    materialize_wbd_reference,
+    materialize_wbd_service_reference,
+)
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,7 @@ class SourceMaterializeResult:
     hydro: HydroMaterializeResult
     landcover: Path | None = None
     cn_lookup: Path | None = None
+    wbd_reference: Path | None = None
 
 
 def find_product_dir(source_dir: str | Path, product: str) -> Path:
@@ -90,6 +96,64 @@ def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | Non
     return target
 
 
+def materialize_optional_wbd(
+    root: Path,
+    site: str,
+    source_dir: Path,
+    bounds: tuple[float, float, float, float] | None,
+    bounds_crs: str,
+) -> Path | None:
+    """Create a clipped HUC12 reference when both WBD data and bounds are available."""
+
+    if bounds is None:
+        return None
+    target = root / site / "outputs" / "WBDHU12_reference.gpkg"
+    hydro_fallback = False
+    try:
+        wbd_dir = find_product_dir(source_dir, "wbd")
+    except FileNotFoundError:
+        try:
+            # NHDPlus HR vector distributions commonly carry WBDHU layers. Use
+            # that authoritative copy instead of assuming TNM exposes WBD as a
+            # separate point-query download product.
+            wbd_dir = find_product_dir(source_dir, "hydro")
+            hydro_fallback = True
+        except FileNotFoundError:
+            wbd_dir = None
+    local_error = None
+    if wbd_dir is not None:
+        try:
+            return materialize_wbd_reference(
+                wbd_dir,
+                target,
+                clip_bounds=bounds,
+                clip_bounds_crs=bounds_crs,
+            )
+        except WbdMaterializeError as exc:
+            local_error = exc
+    try:
+        return materialize_wbd_service_reference(
+            target,
+            clip_bounds=bounds,
+            clip_bounds_crs=bounds_crs,
+        )
+    except WbdMaterializeError as exc:
+        warning = root / site / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
+        warning.parent.mkdir(parents=True, exist_ok=True)
+        source_kind = (
+            "hydro fallback"
+            if hydro_fallback
+            else "standalone WBD download or official WBD web service"
+        )
+        details = f"{local_error}; web service fallback: {exc}" if local_error else str(exc)
+        warning.write_text(
+            f"WBD reference unavailable from {source_kind}: {details}\n"
+            "The DEM watershed workflow may continue, but no WBD validation was performed.\n",
+            encoding="utf-8",
+        )
+        return None
+
+
 def materialize_source_inputs(
     root: str | Path,
     site: str,
@@ -140,4 +204,7 @@ def materialize_source_inputs(
     )
     landcover = materialize_landcover(root_path, site, downloads)
     cn_lookup = materialize_cn_lookup(root_path)
-    return SourceMaterializeResult(dem, hydro, landcover, cn_lookup)
+    wbd_reference = materialize_optional_wbd(
+        root_path, site, downloads, selected_bounds, clip_bounds_crs
+    )
+    return SourceMaterializeResult(dem, hydro, landcover, cn_lookup, wbd_reference)
