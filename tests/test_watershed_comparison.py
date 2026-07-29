@@ -33,8 +33,8 @@ def test_compare_watersheds_reports_best_huc_and_disagreement(tmp_path):
     payload = json.loads(result.read_text())
     assert payload["best_match"]["reference_id"] == "near"
     assert 0 < payload["best_match"]["iou"] < 1
-    assert payload["best_match"]["commission_area_km2"] > 0
-    assert payload["best_match"]["omission_area_km2"] == pytest.approx(0.0, abs=1e-9)
+    assert payload["best_match"]["omission_area_km2"] > 0
+    assert payload["best_match"]["commission_area_km2"] == pytest.approx(0.0, abs=1e-9)
     assert payload["measurement_crs"].startswith("EPSG:")
     assert payload["disagreement_geopackage"] == str(disagreement.resolve())
     import fiona

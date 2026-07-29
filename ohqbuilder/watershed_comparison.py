@@ -63,8 +63,10 @@ def compare_watersheds(
                 "generated_area_km2": basin_area / 1_000_000.0,
                 "reference_area_km2": reference_area / 1_000_000.0,
                 "intersection_area_km2": intersection_area / 1_000_000.0,
-                "omission_area_km2": basin.difference(geometry).area / 1_000_000.0,
-                "commission_area_km2": geometry.difference(basin).area / 1_000_000.0,
+                # Omission is reference area missed by the generated basin;
+                # commission is generated area absent from the reference.
+                "omission_area_km2": geometry.difference(basin).area / 1_000_000.0,
+                "commission_area_km2": basin.difference(geometry).area / 1_000_000.0,
                 "iou": intersection_area / union_area if union_area else 0.0,
                 "boundary_hausdorff_m": basin.boundary.hausdorff_distance(geometry.boundary),
             }

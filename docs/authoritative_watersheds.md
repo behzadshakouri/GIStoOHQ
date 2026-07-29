@@ -37,6 +37,9 @@ to the nearest reach, traces all upstream reaches, and writes
 `outputs/NHDPlus_upstream_candidate.gpkg`. Its companion JSON records the selected
 reach, snap distance, field mapping, and feature counts. Missing connectivity is
 reported for review rather than guessed from line orientation.
+The trace rejects an outlet more than 500 m from the nearest NHDPlus reach by
+default; change `--nhdplus-snap-distance-m` only when the larger movement has been
+checked against local hydrography.
 After the DEM delineation finishes, `full-run` compares it with the NHDPlus
 upstream boundary and writes `watershed_nhdplus_comparison.json`. Both WBD and
 NHDPlus comparisons now include a disagreement GeoPackage with separate

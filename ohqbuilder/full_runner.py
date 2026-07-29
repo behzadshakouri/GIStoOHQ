@@ -144,8 +144,8 @@ def write_watershed_report(
             f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
             f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
             f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
-            f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
             f"<td>{float(best.get('commission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
             f"<td>{float(best.get('boundary_hausdorff_m', 0.0)):.1f}</td>"
             f"<td><code>{escape(str(payload.get('disagreement_geopackage') or '—'))}</code></td>"
             "</tr>"
@@ -288,6 +288,7 @@ def run_full_pipeline(
     soil_top_depth: float = 30.0,
     acquisition_area: str | Path | None = None,
     use_reviewed_pour_points: bool = False,
+    nhdplus_snap_distance_m: float = 500.0,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -364,6 +365,7 @@ def run_full_pipeline(
                     / "NHDPlus_upstream_candidate.gpkg",
                     outlet_lon=lon,
                     outlet_lat=lat,
+                    maximum_snap_distance_m=nhdplus_snap_distance_m,
                 )
                 emit(f"Wrote NHDPlus upstream watershed candidate: {nhdplus_candidate}")
                 try:

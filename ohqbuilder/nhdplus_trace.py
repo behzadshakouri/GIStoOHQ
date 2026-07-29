@@ -36,6 +36,16 @@ def _trace_upstream_indices(records, outlet_index):
     return selected
 
 
+def _validate_snap_distance(distance_m: float, maximum_m: float) -> None:
+    if maximum_m < 0:
+        raise NhdplusTraceError("Maximum snap distance cannot be negative")
+    if distance_m > maximum_m:
+        raise NhdplusTraceError(
+            f"Nearest NHDPlus reach is {distance_m:.1f} m from the outlet, exceeding "
+            f"the {maximum_m:.1f} m limit"
+        )
+
+
 def trace_upstream_catchments(
     flowline_path: str | Path,
     catchment_path: str | Path,
@@ -43,6 +53,7 @@ def trace_upstream_catchments(
     *,
     outlet_lon: float,
     outlet_lat: float,
+    maximum_snap_distance_m: float = 500.0,
 ) -> Path:
     """Trace upstream by NHD FromNode/ToNode and dissolve matching catchments."""
 
@@ -71,6 +82,7 @@ def trace_upstream_catchments(
     distances = metric_flowlines.geometry.distance(outlet)
     outlet_index = distances.idxmin()
     outlet_distance = float(distances.loc[outlet_index])
+    _validate_snap_distance(outlet_distance, maximum_snap_distance_m)
     outlet_row = flowlines.loc[outlet_index]
 
     records = (

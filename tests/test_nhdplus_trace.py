@@ -1,6 +1,11 @@
 import pytest
 
-from ohqbuilder.nhdplus_trace import _field, _trace_upstream_indices
+from ohqbuilder.nhdplus_trace import (
+    NhdplusTraceError,
+    _field,
+    _trace_upstream_indices,
+    _validate_snap_distance,
+)
 
 
 def test_field_alias_matching_is_case_insensitive():
@@ -25,3 +30,11 @@ def test_trace_upstream_indices_follows_branches_and_ignores_downstream():
     assert _trace_upstream_indices(records, "outlet") == {
         "outlet", "left", "right", "headwater"
     }
+
+
+def test_snap_distance_rejects_large_or_invalid_limits():
+    _validate_snap_distance(500.0, 500.0)
+    with pytest.raises(NhdplusTraceError, match="exceeding the 500.0 m limit"):
+        _validate_snap_distance(500.1, 500.0)
+    with pytest.raises(NhdplusTraceError, match="cannot be negative"):
+        _validate_snap_distance(0.0, -1.0)

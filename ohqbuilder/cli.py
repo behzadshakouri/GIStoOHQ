@@ -738,6 +738,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Require an existing promoted pour_points.shp and prevent automatic replacement.",
     )
+    full.add_argument(
+        "--nhdplus-snap-distance-m",
+        type=float,
+        default=500.0,
+        help="Maximum outlet-to-NHDPlus reach snap distance in meters (default: 500).",
+    )
 
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
 
@@ -970,6 +976,7 @@ def main(argv: list[str] | None = None) -> int:
                 soil_top_depth=args.soil_top_depth,
                 acquisition_area=args.acquisition_area,
                 use_reviewed_pour_points=args.use_reviewed_pour_points,
+                nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:
