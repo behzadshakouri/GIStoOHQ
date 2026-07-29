@@ -123,6 +123,9 @@ same snap-limit and reviewed-point controls plus an explicit overwrite checkbox;
 the plugin never overwrites promoted points merely because its promotion button
 was clicked. Project keys `nhdplus_snap_distance_m` and
 `use_reviewed_pour_points` remain supported as command defaults.
+After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
+pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
+for acquisition and tracing instead of recreating it from stale longitude/latitude.
 For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
 enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
 [`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and

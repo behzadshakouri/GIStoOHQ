@@ -39,6 +39,7 @@ def download_all_inputs(
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
     progress: Callable[[str], None] | None = None,
+    use_existing_outlet: bool = False,
 ) -> InputDownloadResult:
     """Download every Python-supported source input for one site.
 
@@ -73,6 +74,7 @@ def download_all_inputs(
         max_tiles=max_tiles,
         max_file_size_mb=max_file_size_mb,
         progress=progress,
+        skip_outlet=use_existing_outlet,
     )
     center = (lon, lat)
     if progress:

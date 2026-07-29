@@ -136,9 +136,11 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
         str(config),
         use_reviewed_pour_points=False,
         nhdplus_snap_distance_m=25.0,
+        use_existing_outlet=True,
     )
     assert "--use-reviewed-pour-points" not in overridden
     assert overridden[overridden.index("--nhdplus-snap-distance-m") + 1] == "25.0"
+    assert "--use-existing-outlet" in overridden
     assert _command_for_workflow(
         "promote-pour-points", str(config), overwrite_promoted_pour_points=True
     )[-1] == "--overwrite"

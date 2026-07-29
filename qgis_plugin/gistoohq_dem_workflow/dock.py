@@ -148,6 +148,7 @@ def _command_for_workflow(
     use_reviewed_pour_points: bool | None = None,
     nhdplus_snap_distance_m: float | None = None,
     overwrite_promoted_pour_points: bool = False,
+    use_existing_outlet: bool = False,
 ) -> list[str]:
     config_path = Path(config_text).expanduser()
     config = _read_config(config_path)
@@ -259,6 +260,8 @@ def _command_for_workflow(
         )
         if use_reviewed:
             argv.append("--use-reviewed-pour-points")
+        if use_existing_outlet:
+            argv.append("--use-existing-outlet")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
@@ -370,6 +373,8 @@ class DemWorkflowDock:
         controls.addWidget(self.nhdplus_snap_distance)
         self.overwrite_promoted = QCheckBox("Overwrite promoted points")
         controls.addWidget(self.overwrite_promoted)
+        self.use_existing_outlet = QCheckBox("Use edited outlet.shp")
+        controls.addWidget(self.use_existing_outlet)
         layout.addLayout(controls)
         outlet_button = QPushButton("Pick Outlet on Map")
         outlet_button.clicked.connect(self.pick_outlet)
@@ -496,6 +501,7 @@ class DemWorkflowDock:
                 use_reviewed_pour_points=self.reviewed_points.isChecked(),
                 nhdplus_snap_distance_m=self.nhdplus_snap_distance.value(),
                 overwrite_promoted_pour_points=self.overwrite_promoted.isChecked(),
+                use_existing_outlet=self.use_existing_outlet.isChecked(),
             )
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")

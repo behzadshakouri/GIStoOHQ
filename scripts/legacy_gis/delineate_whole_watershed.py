@@ -70,7 +70,11 @@ FLOWDIR_REL = globals().get("FLOWDIR_REL", "flow_dir.tif")
 FLOWACC_REL = globals().get("FLOWACC_REL", "flow_acc.tif")
 
 SNAP = bool(globals().get("SNAP", True))
-SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
+OUTLET_SEARCH_RADIUS_M = float(
+    globals().get("OUTLET_SEARCH_RADIUS_M", globals().get("SNAP_RADIUS_M", 150.0))
+)
+# Backward-compatible internal name used by existing helper calls.
+SNAP_RADIUS_M = OUTLET_SEARCH_RADIUS_M
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
 SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
@@ -426,8 +430,14 @@ def print_alignment_guidance(snap_acc=None, moved=None):
     print("   ", FLOWDIR_PATH)
     print("   ", os.path.join(site_path, "clipped_dem_utm.tif"))
     print("\n  Use Identify Features on flow_acc.tif along the intended channel near")
-    print("  the outlet. A real downstream channel cell should have accumulation")
-    print("  far greater than the small snapped value shown above.")
+    print("  the outlet.")
+    if snap_acc is not None and abs(snap_acc) >= MIN_SNAP_ACC_CELLS:
+        print("  The selected cell has high accumulation consistent with a routed")
+        print("  watershed outlet, but the source outlet is too far from it. Verify")
+        print("  that this routed cell is the intended named-watershed outlet.")
+    else:
+        print("  The selected cell has low accumulation and may not represent the")
+        print("  intended downstream channel.")
     print("\n  Safest correction:")
     print("   1. Display flow_acc.tif with a stretched/log renderer.")
     print("   2. Move outlet.shp directly onto the highest-accumulation raster cell")
@@ -449,7 +459,8 @@ print("Outlet     :", OUTLET_PATH)
 print("Flow dir   :", FLOWDIR_PATH)
 print("Flow acc   :", FLOWACC_PATH)
 print("Boundary   :", BOUNDARY_OUT)
-print("Snap       :", SNAP, "| radius:", SNAP_RADIUS_M, "m")
+print("Snap       :", SNAP, "| search radius:", OUTLET_SEARCH_RADIUS_M, "m")
+print("Max move   :", MAX_OUTLET_SNAP_M, "m")
 
 for path in (OUTLET_PATH, FLOWDIR_PATH, FLOWACC_PATH):
     if not os.path.isfile(path):

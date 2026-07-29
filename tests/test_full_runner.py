@@ -237,6 +237,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "max_file_size_mb": None,
         "soil_pixel_size": 0.0002,
         "soil_top_depth": 15,
+        "use_existing_outlet": False,
     }
     assert result.output_path == Path(tmp_path / "SITE_A.ohq")
     assert result.hms_project_path == tmp_path / "SITE_A.hms"

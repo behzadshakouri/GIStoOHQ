@@ -28,6 +28,23 @@ class FullRunError(RuntimeError):
     """Raised when the download-to-OHQ workflow cannot finish."""
 
 
+def existing_outlet_lonlat(root: str | Path, site: str) -> tuple[float, float]:
+    """Read the single reviewed outlet and return its EPSG:4326 coordinate."""
+
+    import geopandas as gpd
+
+    path = Path(root).expanduser().resolve() / site / "outputs" / "outlet.shp"
+    if not path.is_file():
+        raise FullRunError(f"Reviewed outlet not found: {path}")
+    frame = gpd.read_file(path)
+    if len(frame) != 1 or frame.crs is None or frame.geometry.isna().any():
+        raise FullRunError("Reviewed outlet must contain one point with a valid CRS")
+    if not frame.geometry.geom_type.eq("Point").all():
+        raise FullRunError("Reviewed outlet geometry must be a point")
+    point = frame.to_crs("EPSG:4326").geometry.iloc[0]
+    return float(point.x), float(point.y)
+
+
 @dataclass(frozen=True)
 class FullRunResult:
     output_path: Path
@@ -289,6 +306,7 @@ def run_full_pipeline(
     acquisition_area: str | Path | None = None,
     use_reviewed_pour_points: bool = False,
     nhdplus_snap_distance_m: float = 50.0,
+    use_existing_outlet: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -301,6 +319,9 @@ def run_full_pipeline(
 
     try:
         emit("Starting full-run pipeline.")
+        if use_existing_outlet:
+            lon, lat = existing_outlet_lonlat(root, site)
+            emit(f"Using reviewed existing outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         buffer_was_supplied = buffer_m is not None
         if buffer_m is None:
@@ -338,6 +359,7 @@ def run_full_pipeline(
             soil_pixel_size=soil_pixel_size,
             soil_top_depth=soil_top_depth,
             progress=emit,
+            use_existing_outlet=use_existing_outlet,
         )
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")

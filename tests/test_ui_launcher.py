@@ -506,6 +506,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         acquisition_area=acquisition,
         use_reviewed_pour_points=True,
         nhdplus_snap_distance_m=50.0,
+        use_existing_outlet=True,
     )
 
     command = command_for_step("full-run", state)
@@ -524,6 +525,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
     assert "--use-reviewed-pour-points" in full_run
     assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50.0"
+    assert "--use-existing-outlet" in full_run
 
 
 def test_launcher_promotes_reviewed_pour_points(tmp_path):

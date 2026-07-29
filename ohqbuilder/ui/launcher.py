@@ -298,6 +298,7 @@ class LauncherState:
     use_reviewed_pour_points: bool = False
     nhdplus_snap_distance_m: float = 50.0
     overwrite_promoted_pour_points: bool = False
+    use_existing_outlet: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -435,6 +436,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         argv.extend(("--nhdplus-snap-distance-m", str(state.nhdplus_snap_distance_m)))
         if state.use_reviewed_pour_points:
             argv.append("--use-reviewed-pour-points")
+        if state.use_existing_outlet:
+            argv.append("--use-existing-outlet")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -668,6 +671,7 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         use_reviewed_pour_points=form_state.use_reviewed_pour_points,
         nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
         overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
+        use_existing_outlet=form_state.use_existing_outlet,
     )
 
 
@@ -1132,6 +1136,7 @@ class LauncherApp:
         self.reviewed_points_var = tk.BooleanVar(value=False)
         self.nhdplus_snap_var = tk.StringVar(value="50")
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
+        self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
@@ -1215,6 +1220,11 @@ class LauncherApp:
             text="Overwrite existing promoted pour points",
             variable=self.overwrite_promoted_var,
         ).grid(row=3, column=2, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Use edited existing outlet.shp",
+            variable=self.use_existing_outlet_var,
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1424,6 +1434,7 @@ class LauncherApp:
             use_reviewed_pour_points=self.reviewed_points_var.get(),
             nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
+            use_existing_outlet=self.use_existing_outlet_var.get(),
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1442,6 +1453,7 @@ class LauncherApp:
         self.reviewed_points_var.set(state.use_reviewed_pour_points)
         self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
+        self.use_existing_outlet_var.set(state.use_existing_outlet)
 
     def load_config(self) -> None:
         try:

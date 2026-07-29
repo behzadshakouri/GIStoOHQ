@@ -31,9 +31,33 @@ def test_download_all_inputs_runs_source_downloaders_from_coordinate(monkeypatch
 
     assert result.download_dir == phase1.download_dir
     assert [name for name, _ in calls] == ["phase1", "hsg", "texture"]
-    assert calls[0][1]["products"] == "demlr,hydro,wbd,roads,landcover,atlas14"
+    assert calls[0][1]["products"] == "demlr,hydro,roads,landcover,atlas14"
+    assert calls[0][1]["skip_outlet"] is False
     assert calls[1][1]["center"] == (-111.2, 35.1)
     assert calls[2][1]["top_depth"] == 20
+
+
+def test_download_all_inputs_preserves_reviewed_outlet(monkeypatch, tmp_path):
+    calls = []
+    phase1 = SimpleNamespace(download_dir=tmp_path / "source_downloads")
+    monkeypatch.setattr(
+        "ohqbuilder.input_downloader.fetch_phase1_inputs",
+        lambda *args, **kwargs: calls.append(kwargs) or phase1,
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.input_downloader.retrieve_hydrologic_soil_groups",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.input_downloader.retrieve_soil_texture",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+
+    download_all_inputs(
+        tmp_path, "SITE", lon=-77.0, lat=39.0, use_existing_outlet=True
+    )
+
+    assert calls[0]["skip_outlet"] is True
 
 
 def test_cli_download_inputs(monkeypatch, tmp_path, capsys):

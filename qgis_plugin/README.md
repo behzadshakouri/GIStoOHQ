@@ -6,6 +6,8 @@ application. Full-run honors the project-config keys `nhdplus_snap_distance_m`
 and `use_reviewed_pour_points`; dock controls can override them for the current
 run. Promotion only overwrites an existing point dataset when **Overwrite promoted
 points** is checked. QGIS 3.28 or newer is required.
+Use **Use edited outlet.shp** after manually correcting the outlet on the QGIS
+canvas; the full run will preserve it and derive its EPSG:4326 coordinate.
 
 ## Install from a source checkout
 

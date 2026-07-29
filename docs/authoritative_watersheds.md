@@ -46,6 +46,11 @@ reported for review rather than guessed from line orientation.
 The trace and DEM delineation reject an outlet movement greater than 50 m by
 default; change `--nhdplus-snap-distance-m` only when the larger movement has been
 checked against local hydrography.
+The DEM script deliberately keeps a wider 150 m `OUTLET_SEARCH_RADIUS_M` for
+diagnostics while enforcing the 50 m `MAX_OUTLET_SNAP_M` acceptance limit. After
+editing `outputs/outlet.shp` in QGIS, rerun with `--use-existing-outlet`; full-run
+will read that point, transform it to EPSG:4326 for downloads/tracing, and will not
+recreate the shapefile from the old command-line longitude/latitude.
 After the DEM delineation finishes, `full-run` compares it with the NHDPlus
 upstream boundary and writes `watershed_nhdplus_comparison.json`. Both WBD and
 NHDPlus comparisons now include a disagreement GeoPackage with separate

@@ -744,6 +744,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=50.0,
         help="Maximum outlet movement for NHDPlus and DEM routing snaps (default: 50 m).",
     )
+    full.add_argument(
+        "--use-existing-outlet",
+        action="store_true",
+        help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
+    )
 
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
 
@@ -977,6 +982,7 @@ def main(argv: list[str] | None = None) -> int:
                 acquisition_area=args.acquisition_area,
                 use_reviewed_pour_points=args.use_reviewed_pour_points,
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
+                use_existing_outlet=args.use_existing_outlet,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:
