@@ -527,7 +527,12 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
 
 
 def test_launcher_promotes_reviewed_pour_points(tmp_path):
-    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="Demo")
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Demo",
+        overwrite_promoted_pour_points=True,
+    )
 
     command = command_for_step("promote-pour-points", state)
 

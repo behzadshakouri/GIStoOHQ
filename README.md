@@ -119,8 +119,10 @@ The QGIS dock exposes the same full-run action and individual hydrology, GIS-inp
 validation, and build stages, using the outlet selected on the active QGIS canvas.
 The Tk launcher now exposes the NHDPlus snap limit, a **Use reviewed pour points**
 toggle, and a **Promote reviewed pour points** action. The QGIS dock exposes the
-promotion action and reads `nhdplus_snap_distance_m` and
-`use_reviewed_pour_points` from the project config when building a full run.
+same snap-limit and reviewed-point controls plus an explicit overwrite checkbox;
+the plugin never overwrites promoted points merely because its promotion button
+was clicked. Project keys `nhdplus_snap_distance_m` and
+`use_reviewed_pour_points` remain supported as command defaults.
 For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
 enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
 [`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and

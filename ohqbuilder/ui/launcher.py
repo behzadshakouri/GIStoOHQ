@@ -297,6 +297,7 @@ class LauncherState:
     acquisition_area: Path | None = None
     use_reviewed_pour_points: bool = False
     nhdplus_snap_distance_m: float = 500.0
+    overwrite_promoted_pour_points: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -449,12 +450,15 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
     if step == "promote-pour-points":
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required to promote pour points.")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(state.root),
+            "--site", state.site,
+        ]
+        if state.overwrite_promoted_pour_points:
+            argv.append("--overwrite")
         return WorkflowCommand(
             "Promote Reviewed Pour Points",
-            (
-                "ohqbuild", "promote-pour-points", "--root", str(state.root),
-                "--site", state.site, "--overwrite",
-            ),
+            tuple(argv),
         )
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
@@ -663,6 +667,7 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
         use_reviewed_pour_points=form_state.use_reviewed_pour_points,
         nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
+        overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
     )
 
 
@@ -1126,6 +1131,7 @@ class LauncherApp:
         self.tile_index_var = tk.StringVar(value="")
         self.reviewed_points_var = tk.BooleanVar(value=False)
         self.nhdplus_snap_var = tk.StringVar(value="500")
+        self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
@@ -1204,6 +1210,11 @@ class LauncherApp:
             text="Use reviewed pour points",
             variable=self.reviewed_points_var,
         ).grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Overwrite existing promoted pour points",
+            variable=self.overwrite_promoted_var,
+        ).grid(row=3, column=2, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1412,6 +1423,7 @@ class LauncherApp:
             tile_index=optional_path(self.tile_index_var.get()),
             use_reviewed_pour_points=self.reviewed_points_var.get(),
             nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 500.0,
+            overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1429,6 +1441,7 @@ class LauncherApp:
         self.tile_index_var.set(str(state.tile_index or ""))
         self.reviewed_points_var.set(state.use_reviewed_pour_points)
         self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
+        self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
 
     def load_config(self) -> None:
         try:

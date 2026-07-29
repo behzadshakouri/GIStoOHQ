@@ -129,8 +129,19 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
     )
     assert _command_for_workflow("promote-pour-points", str(config)) == [
         "ohqbuild", "promote-pour-points", "--root", str(tmp_path / "project-root"),
-        "--site", "SligoCreek", "--overwrite",
+        "--site", "SligoCreek",
     ]
+    overridden = _command_for_workflow(
+        "full-run",
+        str(config),
+        use_reviewed_pour_points=False,
+        nhdplus_snap_distance_m=25.0,
+    )
+    assert "--use-reviewed-pour-points" not in overridden
+    assert overridden[overridden.index("--nhdplus-snap-distance-m") + 1] == "25.0"
+    assert _command_for_workflow(
+        "promote-pour-points", str(config), overwrite_promoted_pour_points=True
+    )[-1] == "--overwrite"
 
 
 def test_qgis_plugin_download_command_requires_manifest(tmp_path):
