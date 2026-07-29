@@ -85,6 +85,37 @@ def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):
     assert "Boundary Hausdorff : 87.5 m" in summary
 
 
+def test_full_run_summary_reports_nhd_reach_alignment(tmp_path):
+    comparison = tmp_path / "reaches_nhd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "tolerance_m": 30.0,
+                "generated_length_km": 42.1,
+                "reference_length_km": 45.2,
+                "generated_within_tolerance_pct": 91.2,
+                "reference_within_tolerance_pct": 84.3,
+                "mean_lateral_offset_m": 12.6,
+                "hausdorff_distance_m": 125.4,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = full_run_summary(
+        SimpleNamespace(subbasins=[], reaches=[], junctions=[]),
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        reach_comparison_paths=[comparison],
+    )
+
+    assert "Reach Network Comparison (NHD)" in summary
+    assert "Generated near NHD  : 91.2%" in summary
+    assert "NHD near generated  : 84.3%" in summary
+    assert "Mean lateral offset : 12.6 m" in summary
+    assert "Network Hausdorff   : 125.4 m" in summary
+
+
 def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     watershed = SimpleNamespace(
         subbasins=[
@@ -158,6 +189,37 @@ def test_watershed_report_includes_reference_comparisons(tmp_path):
     assert "reach-42" in content
     assert ">0.812<" in content
     assert "disagreement.gpkg" in content
+
+
+def test_watershed_report_includes_reach_network_comparison(tmp_path):
+    comparison = tmp_path / "reaches_nhd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "tolerance_m": 30.0,
+                "generated_length_km": 42.1,
+                "reference_length_km": 45.2,
+                "generated_within_tolerance_pct": 91.2,
+                "reference_within_tolerance_pct": 84.3,
+                "mean_lateral_offset_m": 12.6,
+                "hausdorff_distance_m": 125.4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = write_watershed_report(
+        SimpleNamespace(subbasins=[], reaches=[], junctions=[]),
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        reach_comparison_paths=[comparison],
+    )
+
+    content = report.read_text(encoding="utf-8")
+    assert "Reach-network comparison" in content
+    assert ">91.2%<" in content
+    assert ">84.3%<" in content
+    assert ">12.6<" in content
+    assert ">125.4<" in content
 
 
 def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():

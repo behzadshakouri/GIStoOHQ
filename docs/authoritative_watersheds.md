@@ -143,3 +143,10 @@ The full-run success summary prints the best matching reference identifier, both
 areas, signed area difference, IoU, omission and commission areas, and boundary
 Hausdorff distance. This makes a successful WBD service fallback visible in the
 terminal even though the earlier TNM package query may still report zero downloads.
+
+Full runs also compare `reaches.gpkg` with `NHDFlowline_clip.gpkg` inside the final
+watershed. The report records total network lengths, the percentage of each network
+within a 30 m tolerance of the other, sampled mean lateral offset, and network
+Hausdorff distance. These
+metrics identify channel-placement disagreement separately from polygon-boundary
+disagreement; they do not automatically replace DEM-derived reaches with NHD lines.

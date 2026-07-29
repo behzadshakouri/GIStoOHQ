@@ -21,6 +21,7 @@ from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_comparison import compare_watersheds
 from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
+from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 
 
@@ -98,6 +99,7 @@ def full_run_summary(
     hms_path: str | Path,
     report_path: str | Path | None = None,
     comparison_paths: list[str | Path] | None = None,
+    reach_comparison_paths: list[str | Path] | None = None,
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
@@ -154,6 +156,25 @@ def full_run_summary(
                 f"  Boundary Hausdorff : {float(best.get('boundary_hausdorff_m', 0.0)):.1f} m",
             ]
         )
+    for comparison_path in reach_comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        lines.extend(
+            [
+                "",
+                "Reach Network Comparison (NHD)",
+                f"  Alignment tolerance : {float(payload['tolerance_m']):.1f} m",
+                f"  Generated length    : {float(payload['generated_length_km']):.3f} km",
+                f"  NHD length          : {float(payload['reference_length_km']):.3f} km",
+                "  Generated near NHD  : "
+                f"{float(payload['generated_within_tolerance_pct']):.1f}%",
+                "  NHD near generated  : "
+                f"{float(payload['reference_within_tolerance_pct']):.1f}%",
+                f"  Mean lateral offset : {float(payload['mean_lateral_offset_m']):.1f} m",
+                f"  Network Hausdorff   : {float(payload['hausdorff_distance_m']):.1f} m",
+            ]
+        )
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -164,6 +185,7 @@ def write_watershed_report(
     hms_path: str | Path,
     output_path: str | Path | None = None,
     comparison_paths: list[str | Path] | None = None,
+    reach_comparison_paths: list[str | Path] | None = None,
 ) -> Path:
     """Write a portable HTML summary for model review and regression baselines."""
 
@@ -206,6 +228,34 @@ def write_watershed_report(
             + "</tbody></table>"
         )
 
+    reach_rows = []
+    for comparison_path in reach_comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        reach_rows.append(
+            "<tr>"
+            f"<td>{float(payload['tolerance_m']):.1f}</td>"
+            f"<td>{float(payload['generated_length_km']):.3f}</td>"
+            f"<td>{float(payload['reference_length_km']):.3f}</td>"
+            f"<td>{float(payload['generated_within_tolerance_pct']):.1f}%</td>"
+            f"<td>{float(payload['reference_within_tolerance_pct']):.1f}%</td>"
+            f"<td>{float(payload['mean_lateral_offset_m']):.1f}</td>"
+            f"<td>{float(payload['hausdorff_distance_m']):.1f}</td>"
+            "</tr>"
+        )
+    reach_comparison_section = ""
+    if reach_rows:
+        reach_comparison_section = (
+            "<h2>Reach-network comparison</h2>"
+            "<p>Generated reaches are compared with NHD flowlines clipped to the watershed.</p>"
+            "<table><thead><tr><th>Tolerance (m)</th><th>Generated length (km)</th>"
+            "<th>NHD length (km)</th><th>Generated near NHD</th><th>NHD near generated</th>"
+            "<th>Mean offset (m)</th><th>Hausdorff (m)</th></tr></thead><tbody>"
+            + "".join(reach_rows)
+            + "</tbody></table>"
+        )
+
     def value(item, attribute: str, digits: int = 2) -> str:
         raw = getattr(item, attribute, None)
         return "—" if raw is None else f"{float(raw):.{digits}f}"
@@ -236,6 +286,7 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 {comparison_section}
+{reach_comparison_section}
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>
@@ -468,8 +519,26 @@ def run_full_pipeline(
         run_legacy_input_workflow(root, site, script_dir, "all", options)
         comparison_path = None
         comparison_paths = []
+        reach_comparison_paths = []
         wbd_reference = getattr(materialized, "wbd_reference", None)
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
+        generated_reaches = generated_boundary.with_name("reaches.gpkg")
+        if (
+            materialized_hydro is not None
+            and generated_reaches.is_file()
+            and generated_boundary.is_file()
+        ):
+            try:
+                reach_comparison = compare_reach_networks(
+                    generated_reaches,
+                    materialized_hydro.output_path,
+                    generated_boundary.with_name("reaches_nhd_comparison.json"),
+                    watershed_path=generated_boundary,
+                )
+                reach_comparison_paths.append(reach_comparison)
+                emit(f"Wrote NHD reach-network comparison metrics: {reach_comparison}")
+            except ReachComparisonError as exc:
+                emit(f"NHD reach-network comparison requires review: {exc}")
         if wbd_reference is not None and generated_boundary.is_file():
             comparison_path = compare_watersheds(
                 generated_boundary,
@@ -511,7 +580,11 @@ def run_full_pipeline(
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
         report_path = write_watershed_report(
-            watershed, built, hms_path, comparison_paths=comparison_paths
+            watershed,
+            built,
+            hms_path,
+            comparison_paths=comparison_paths,
+            reach_comparison_paths=reach_comparison_paths,
         )
         emit(
             full_run_summary(
@@ -520,6 +593,7 @@ def run_full_pipeline(
                 hms_path,
                 report_path,
                 comparison_paths=comparison_paths,
+                reach_comparison_paths=reach_comparison_paths,
             )
         )
         return FullRunResult(Path(built), hms_path, report_path, comparison_path)
