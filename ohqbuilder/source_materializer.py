@@ -7,6 +7,7 @@ import shutil
 
 from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
+from .wbd_materializer import materialize_wbd_reference
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class SourceMaterializeResult:
     hydro: HydroMaterializeResult
     landcover: Path | None = None
     cn_lookup: Path | None = None
+    wbd_reference: Path | None = None
 
 
 def find_product_dir(source_dir: str | Path, product: str) -> Path:
@@ -90,6 +92,29 @@ def materialize_landcover(root: Path, site: str, source_dir: Path) -> Path | Non
     return target
 
 
+def materialize_optional_wbd(
+    root: Path,
+    site: str,
+    source_dir: Path,
+    bounds: tuple[float, float, float, float] | None,
+    bounds_crs: str,
+) -> Path | None:
+    """Create a clipped HUC12 reference when both WBD data and bounds are available."""
+
+    if bounds is None:
+        return None
+    try:
+        wbd_dir = find_product_dir(source_dir, "wbd")
+    except FileNotFoundError:
+        return None
+    return materialize_wbd_reference(
+        wbd_dir,
+        root / site / "outputs" / "WBDHU12_reference.gpkg",
+        clip_bounds=bounds,
+        clip_bounds_crs=bounds_crs,
+    )
+
+
 def materialize_source_inputs(
     root: str | Path,
     site: str,
@@ -140,4 +165,7 @@ def materialize_source_inputs(
     )
     landcover = materialize_landcover(root_path, site, downloads)
     cn_lookup = materialize_cn_lookup(root_path)
-    return SourceMaterializeResult(dem, hydro, landcover, cn_lookup)
+    wbd_reference = materialize_optional_wbd(
+        root_path, site, downloads, selected_bounds, clip_bounds_crs
+    )
+    return SourceMaterializeResult(dem, hydro, landcover, cn_lookup, wbd_reference)

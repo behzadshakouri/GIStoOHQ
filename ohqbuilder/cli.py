@@ -209,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument(
         "--products",
         default="dem",
-        help="dem/demhr, demlr, hydro, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
+        help="dem/demhr, demlr, hydro, wbd, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
     )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
@@ -453,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--products",
         default="all",
-        help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).",
+        help="dem, demlr, hydro, wbd, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).",
     )
     fetch.add_argument(
         "--download-dir",
@@ -1052,6 +1052,9 @@ def main(argv: list[str] | None = None) -> int:
         cn_lookup = getattr(result, "cn_lookup", None)
         if cn_lookup is not None:
             print(f"Wrote CN lookup: {cn_lookup}")
+        wbd_reference = getattr(result, "wbd_reference", None)
+        if wbd_reference is not None:
+            print(f"Wrote WBD HUC12 reference: {wbd_reference}")
         return 0
 
     if args.command == "init-dem-config":
