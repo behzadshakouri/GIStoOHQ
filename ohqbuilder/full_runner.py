@@ -118,6 +118,7 @@ def write_watershed_report(
     ohq_path: str | Path,
     hms_path: str | Path,
     output_path: str | Path | None = None,
+    comparison_paths: list[str | Path] | None = None,
 ) -> Path:
     """Write a portable HTML summary for model review and regression baselines."""
 
@@ -131,6 +132,34 @@ def write_watershed_report(
     subbasins = list(getattr(watershed, "subbasins", []) or [])
     counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+
+    comparison_rows = []
+    for comparison_path in comparison_paths or []:
+        path = Path(comparison_path).expanduser().resolve()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        best = payload.get("best_match") or {}
+        comparison_rows.append(
+            "<tr>"
+            f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
+            f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
+            f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('commission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('boundary_hausdorff_m', 0.0)):.1f}</td>"
+            f"<td><code>{escape(str(payload.get('disagreement_geopackage') or '—'))}</code></td>"
+            "</tr>"
+        )
+    comparison_section = ""
+    if comparison_rows:
+        comparison_section = (
+            "<h2>Boundary comparisons</h2>"
+            "<p>Reference matches are review evidence, not automatically accepted boundaries.</p>"
+            "<table><thead><tr><th>Reference layer</th><th>Reference ID</th><th>IoU</th>"
+            "<th>Generated only (km²)</th><th>Reference only (km²)</th>"
+            "<th>Hausdorff (m)</th><th>Disagreement map</th></tr></thead><tbody>"
+            + "".join(comparison_rows)
+            + "</tbody></table>"
+        )
 
     def value(item, attribute: str, digits: int = 2) -> str:
         raw = getattr(item, attribute, None)
@@ -161,6 +190,7 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
+{comparison_section}
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>
@@ -346,6 +376,7 @@ def run_full_pipeline(
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)
         comparison_path = None
+        comparison_paths = []
         wbd_reference = getattr(materialized, "wbd_reference", None)
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
         if wbd_reference is not None and generated_boundary.is_file():
@@ -358,6 +389,7 @@ def run_full_pipeline(
                 ),
             )
             emit(f"Wrote WBD comparison metrics: {comparison_path}")
+            comparison_paths.append(comparison_path)
         if nhdplus_candidate is not None and generated_boundary.is_file():
             nhd_comparison = compare_watersheds(
                 generated_boundary,
@@ -370,6 +402,7 @@ def run_full_pipeline(
                 ),
             )
             emit(f"Wrote NHDPlus comparison metrics: {nhd_comparison}")
+            comparison_paths.append(nhd_comparison)
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
@@ -386,7 +419,9 @@ def run_full_pipeline(
         if hms_path is None:
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
-        report_path = write_watershed_report(watershed, built, hms_path)
+        report_path = write_watershed_report(
+            watershed, built, hms_path, comparison_paths=comparison_paths
+        )
         emit(full_run_summary(watershed, built, hms_path, report_path))
         return FullRunResult(Path(built), hms_path, report_path, comparison_path)
     except FullRunError:

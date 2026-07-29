@@ -42,6 +42,10 @@ upstream boundary and writes `watershed_nhdplus_comparison.json`. Both WBD and
 NHDPlus comparisons now include a disagreement GeoPackage with separate
 `intersection`, `generated_only`, and `reference_only` layers, making roads,
 culverts, confluences, and boundary errors directly inspectable in QGIS.
+The final `watershed_report.html` summarizes the best WBD and NHDPlus match,
+including IoU, generated-only area, reference-only area, Hausdorff distance, and
+the disagreement-map path. This keeps the boundary decision beside the model
+parameters rather than buried in standalone JSON files.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a

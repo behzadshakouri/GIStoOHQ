@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -87,6 +88,41 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert "<li>Reaches: 2</li><li>Junctions: 1</li>" in content
     assert "<h2>Final Model Network</h2>" in content
     assert "<li>Reaches: 1</li><li>Junctions: 0</li>" in content
+
+
+def test_watershed_report_includes_reference_comparisons(tmp_path):
+    comparison = tmp_path / "watershed_nhdplus_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "reference_layer": "upstream_boundary",
+                "disagreement_geopackage": str(tmp_path / "disagreement.gpkg"),
+                "best_match": {
+                    "reference_id": "reach-42",
+                    "iou": 0.8123,
+                    "omission_area_km2": 1.2,
+                    "commission_area_km2": 0.4,
+                    "boundary_hausdorff_m": 87.5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    watershed = SimpleNamespace(subbasins=[], reaches=[], junctions=[])
+
+    report = write_watershed_report(
+        watershed,
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        comparison_paths=[comparison],
+    )
+
+    content = report.read_text(encoding="utf-8")
+    assert "Boundary comparisons" in content
+    assert "upstream_boundary" in content
+    assert "reach-42" in content
+    assert ">0.812<" in content
+    assert "disagreement.gpkg" in content
 
 
 def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():
