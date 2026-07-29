@@ -26,10 +26,20 @@ def test_sligo_inline_dem_is_georeferenced_over_demo_outlet():
 
 
 def test_parse_products_all_and_subset():
-    assert dd.parse_products("all") == ["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+    assert dd.parse_products("all") == [
+        "dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"
+    ]
     assert dd.parse_products("dem,hydro") == ["dem", "hydro"]
     assert dd.parse_products("demhr,demlr") == ["dem", "demlr"]
     assert dd.parse_products("nlcd,atlas14,roads") == ["landcover", "atlas14", "roads"]
+    assert dd.parse_products("wbd") == ["wbd"]
+
+
+def test_wbd_uses_authoritative_tnm_dataset():
+    tier = dd.PRODUCT_TIERS["wbd"][0]
+
+    assert tier.dataset == "Watershed Boundary Dataset (WBD)"
+    assert tier.formats == ("Shapefile", "FileGDB")
 
 
 def test_query_tnm_reads_current_nested_download_url(monkeypatch):

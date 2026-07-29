@@ -67,7 +67,7 @@ def download_all_inputs(
         lon=lon,
         lat=lat,
         site_id=site_id,
-        products="demlr,hydro,roads,landcover,atlas14",
+        products="demlr,hydro,wbd,roads,landcover,atlas14",
         download_dir=download_dir,
         buffer_m=buffer_m,
         max_tiles=max_tiles,

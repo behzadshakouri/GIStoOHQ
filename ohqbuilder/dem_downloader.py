@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 
-ProductKey = Literal["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+ProductKey = Literal["dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"]
 
 TNM_PRODUCTS_URL = "https://tnmaccess.nationalmap.gov/api/v1/products"
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
@@ -80,15 +80,20 @@ HYDRO_TIERS: tuple[ProductTier, ...] = (
         "NHD Best Resolution",
     ),
 )
+WBD_TIERS: tuple[ProductTier, ...] = (
+    ProductTier("Watershed Boundary Dataset (WBD)", ("Shapefile", "FileGDB"), "WBD"),
+)
 PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {
     "dem": ELEVATION_TIERS,
     "demlr": LOW_RES_ELEVATION_TIERS,
     "hydro": HYDRO_TIERS,
+    "wbd": WBD_TIERS,
 }
 DEFAULT_MAX_TILES: dict[ProductKey, int] = {
     "dem": 8,
     "demlr": 8,
     "hydro": 4,
+    "wbd": 4,
     "roads": 1,
     "landcover": 1,
     "atlas14": 1,
@@ -103,16 +108,16 @@ ATLAS14_RETURN_PERIODS = ("2yr", "5yr", "10yr", "25yr", "50yr", "100yr")
 def parse_products(value: str) -> list[ProductKey]:
     selected = [part.strip().lower() for part in value.split(",") if part.strip()]
     if "all" in selected:
-        return ["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+        return ["dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"]
     products: list[ProductKey] = []
     for key in selected:
         if key == "demhr":
             key = "dem"
         if key == "nlcd":
             key = "landcover"
-        if key not in {"dem", "demlr", "hydro", "roads", "landcover", "atlas14"}:
+        if key not in {"dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"}:
             raise ValueError(
-                "products must be 'dem' (or 'demhr'), 'demlr', 'hydro', 'roads', "
+                "products must be 'dem' (or 'demhr'), 'demlr', 'hydro', 'wbd', 'roads', "
                 "'landcover' (or 'nlcd'), 'atlas14', 'all', or a comma-separated subset"
             )
         products.append(key)  # type: ignore[arg-type]
