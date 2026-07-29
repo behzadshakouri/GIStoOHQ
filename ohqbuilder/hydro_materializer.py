@@ -67,6 +67,22 @@ def _flowline_vector_candidates(sources: Path, workspace: Path) -> list[Path]:
     return [path for path in candidates if "flowline" in path.stem.lower()]
 
 
+def _catchment_vector_candidates(sources: Path, workspace: Path) -> list[Path]:
+    """Find NHDPlus catchment vectors without confusing WBD boundary layers."""
+
+    vector_patterns = ("*.shp", "*.geojson", "*.gpkg")
+    candidates = [
+        path
+        for pattern in vector_patterns
+        for path in list(sources.rglob(pattern)) + list(workspace.rglob(pattern))
+    ]
+    return [
+        path
+        for path in candidates
+        if "catchment" in path.stem.lower() and "wbd" not in path.stem.lower()
+    ]
+
+
 class HydroMaterializeError(RuntimeError):
     """Raised when downloaded hydrography cannot be converted to flowlines."""
 
@@ -76,6 +92,8 @@ class HydroMaterializeResult:
     output_path: Path
     source_count: int
     feature_count: int
+    catchment_path: Path | None = None
+    catchment_count: int = 0
 
 
 def materialize_flowlines(
@@ -117,6 +135,7 @@ def materialize_flowlines(
                 raise HydroMaterializeError(f"Invalid hydrography archive: {archive_path}") from exc
 
         candidates = _flowline_vector_candidates(sources, workspace)
+        catchment_candidates = _catchment_vector_candidates(sources, workspace)
         if not candidates:
             raise HydroMaterializeError(
                 f"No NHD flowline vector file was found under downloaded products: {sources}"
@@ -138,11 +157,34 @@ def materialize_flowlines(
         with rasterio.open(dem) as dataset:
             if dataset.crs is None:
                 raise HydroMaterializeError(f"Materialized DEM has no CRS: {dem}")
-            combined = combined.to_crs(dataset.crs)
-            clipped = combined[combined.intersects(box(*dataset.bounds))].copy()
-            clipped = clipped.clip(box(*dataset.bounds))
+            dem_crs = dataset.crs
+            dem_bounds = dataset.bounds
+            combined = combined.to_crs(dem_crs)
+            clipped = combined[combined.intersects(box(*dem_bounds))].copy()
+            clipped = clipped.clip(box(*dem_bounds))
         if clipped.empty:
             raise HydroMaterializeError("No downloaded flowlines intersect the materialized DEM.")
         target.parent.mkdir(parents=True, exist_ok=True)
         clipped.to_file(target, layer="NHDFlowline_clip", driver="GPKG")
-    return HydroMaterializeResult(target, len(candidates), len(clipped))
+        catchment_target = None
+        catchment_count = 0
+        catchment_frames = []
+        for candidate in catchment_candidates:
+            frame = gpd.read_file(candidate)
+            if not frame.empty and frame.crs is not None:
+                catchment_frames.append(frame.to_crs(dem_crs))
+        if catchment_frames:
+            catchments = gpd.GeoDataFrame(
+                pd.concat(catchment_frames, ignore_index=True), crs=dem_crs
+            )
+            catchments = catchments[catchments.intersects(box(*dem_bounds))].copy()
+            catchments = catchments.clip(box(*dem_bounds))
+            if not catchments.empty:
+                catchment_target = target.with_name("NHDPlusCatchment_clip.gpkg")
+                catchments.to_file(
+                    catchment_target, layer="NHDPlusCatchment_clip", driver="GPKG"
+                )
+                catchment_count = len(catchments)
+    return HydroMaterializeResult(
+        target, len(candidates), len(clipped), catchment_target, catchment_count
+    )
