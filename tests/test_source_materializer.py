@@ -7,6 +7,7 @@ from ohqbuilder.cli import main
 from ohqbuilder.source_materializer import (
     find_product_dir,
     materialize_cn_lookup,
+    materialize_optional_wbd,
     resolve_hydro_source_dir,
     materialize_landcover,
     materialize_source_inputs,
@@ -121,6 +122,56 @@ def test_materialize_cn_lookup_copies_table_to_legacy_root(tmp_path):
 
 def test_materialize_landcover_is_optional(tmp_path):
     assert materialize_landcover(tmp_path, "SITE_A", tmp_path) is None
+
+
+def test_materialize_optional_wbd_writes_review_layer(monkeypatch, tmp_path):
+    downloads = tmp_path / "downloads" / "site-id" / "wbd"
+    downloads.mkdir(parents=True)
+    expected = tmp_path / "SITE_A" / "outputs" / "WBDHU12_reference.gpkg"
+    calls = []
+
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_reference",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or expected,
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", downloads.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result == expected
+    assert calls[0][0][0] == downloads
+    assert calls[0][0][1] == expected
+    assert calls[0][1]["clip_bounds"] == (-77.1, 38.9, -76.9, 39.1)
+
+
+def test_materialize_optional_wbd_skips_without_bounds_or_download(tmp_path):
+    assert materialize_optional_wbd(tmp_path, "SITE_A", tmp_path, None, "EPSG:4326") is None
+    assert (
+        materialize_optional_wbd(
+            tmp_path, "SITE_A", tmp_path, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+        )
+        is None
+    )
+
+
+def test_materialize_optional_wbd_falls_back_to_hydro_package(monkeypatch, tmp_path):
+    hydro = tmp_path / "downloads" / "site-id" / "hydro"
+    hydro.mkdir(parents=True)
+    (hydro / "NHDPlusHR.zip").write_bytes(b"fixture")
+    expected = tmp_path / "SITE_A" / "outputs" / "WBDHU12_reference.gpkg"
+    calls = []
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_reference",
+        lambda *args, **kwargs: calls.append(args) or expected,
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", hydro.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result == expected
+    assert calls[0][0] == hydro
 
 
 def test_materialize_source_inputs_forwards_user_clip_bounds(monkeypatch, tmp_path):

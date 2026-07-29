@@ -19,6 +19,9 @@ from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
+from .watershed_comparison import compare_watersheds
+from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
+from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 
 
 class FullRunError(RuntimeError):
@@ -30,6 +33,7 @@ class FullRunResult:
     output_path: Path
     hms_project_path: Path | None = None
     report_path: Path | None = None
+    comparison_path: Path | None = None
 
 
 def network_element_counts(watershed) -> dict[str, tuple[int, int]]:
@@ -115,6 +119,7 @@ def write_watershed_report(
     ohq_path: str | Path,
     hms_path: str | Path,
     output_path: str | Path | None = None,
+    comparison_paths: list[str | Path] | None = None,
 ) -> Path:
     """Write a portable HTML summary for model review and regression baselines."""
 
@@ -128,6 +133,34 @@ def write_watershed_report(
     subbasins = list(getattr(watershed, "subbasins", []) or [])
     counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+
+    comparison_rows = []
+    for comparison_path in comparison_paths or []:
+        path = Path(comparison_path).expanduser().resolve()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        best = payload.get("best_match") or {}
+        comparison_rows.append(
+            "<tr>"
+            f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
+            f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
+            f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('commission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('boundary_hausdorff_m', 0.0)):.1f}</td>"
+            f"<td><code>{escape(str(payload.get('disagreement_geopackage') or '—'))}</code></td>"
+            "</tr>"
+        )
+    comparison_section = ""
+    if comparison_rows:
+        comparison_section = (
+            "<h2>Boundary comparisons</h2>"
+            "<p>Reference matches are review evidence, not automatically accepted boundaries.</p>"
+            "<table><thead><tr><th>Reference layer</th><th>Reference ID</th><th>IoU</th>"
+            "<th>Generated only (km²)</th><th>Reference only (km²)</th>"
+            "<th>Hausdorff (m)</th><th>Disagreement map</th></tr></thead><tbody>"
+            + "".join(comparison_rows)
+            + "</tbody></table>"
+        )
 
     def value(item, attribute: str, digits: int = 2) -> str:
         raw = getattr(item, attribute, None)
@@ -158,6 +191,7 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
+{comparison_section}
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>
@@ -253,6 +287,8 @@ def run_full_pipeline(
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
     acquisition_area: str | Path | None = None,
+    use_reviewed_pour_points: bool = False,
+    nhdplus_snap_distance_m: float = 50.0,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -305,22 +341,96 @@ def run_full_pipeline(
         )
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")
-        materialize_source_inputs(
+        materialized = materialize_source_inputs(
             root,
             site,
             source_dir=fetched.download_dir,
             target_crs=target_crs,
             clip_bounds=selected_bounds,
+            clip_center_lon=lon,
+            clip_center_lat=lat,
+            clip_buffer_m=buffer_m,
         )
+        materialized_hydro = getattr(materialized, "hydro", None)
+        catchment_path = getattr(materialized_hydro, "catchment_path", None)
+        nhdplus_candidate = None
+        if catchment_path is not None:
+            try:
+                nhdplus_candidate = trace_upstream_catchments(
+                    materialized_hydro.output_path,
+                    catchment_path,
+                    Path(root).expanduser().resolve()
+                    / site
+                    / "outputs"
+                    / "NHDPlus_upstream_candidate.gpkg",
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                    maximum_snap_distance_m=nhdplus_snap_distance_m,
+                )
+                emit(f"Wrote NHDPlus upstream watershed candidate: {nhdplus_candidate}")
+                try:
+                    candidates = generate_pour_point_candidates(
+                        nhdplus_candidate,
+                        Path(root).expanduser().resolve()
+                        / site
+                        / "outputs"
+                        / "pour_point_candidates.gpkg",
+                        outlet_lon=lon,
+                        outlet_lat=lat,
+                    )
+                    emit(f"Wrote pour-point review candidates: {candidates}")
+                except PourPointCandidateError as exc:
+                    emit(f"Pour-point candidate generation requires review: {exc}")
+            except NhdplusTraceError as exc:
+                emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.
+        if use_reviewed_pour_points:
+            reviewed_points = (
+                Path(root).expanduser().resolve() / site / "outputs" / "pour_points.shp"
+            )
+            if not reviewed_points.is_file():
+                raise FullRunError(
+                    "--use-reviewed-pour-points requires outputs/pour_points.shp; "
+                    "run promote-pour-points after reviewing candidates first."
+                )
+            emit(f"Using reviewed pour points without automatic replacement: {reviewed_points}")
         options = LegacyWorkflowOptions(
             auto_outlet=True,
-            auto_pour_points=True,
-            refresh_auto_pour_points=True,
+            auto_pour_points=not use_reviewed_pour_points,
+            refresh_auto_pour_points=not use_reviewed_pour_points,
+            child_options={"MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m},
         )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)
+        comparison_path = None
+        comparison_paths = []
+        wbd_reference = getattr(materialized, "wbd_reference", None)
+        generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
+        if wbd_reference is not None and generated_boundary.is_file():
+            comparison_path = compare_watersheds(
+                generated_boundary,
+                wbd_reference,
+                generated_boundary.with_name("watershed_wbd_comparison.json"),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_wbd_disagreement.gpkg"
+                ),
+            )
+            emit(f"Wrote WBD comparison metrics: {comparison_path}")
+            comparison_paths.append(comparison_path)
+        if nhdplus_candidate is not None and generated_boundary.is_file():
+            nhd_comparison = compare_watersheds(
+                generated_boundary,
+                nhdplus_candidate,
+                generated_boundary.with_name("watershed_nhdplus_comparison.json"),
+                reference_layer="upstream_boundary",
+                reference_id_fields=("outlet_reach_id",),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_nhdplus_disagreement.gpkg"
+                ),
+            )
+            emit(f"Wrote NHDPlus comparison metrics: {nhd_comparison}")
+            comparison_paths.append(nhd_comparison)
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
@@ -337,9 +447,11 @@ def run_full_pipeline(
         if hms_path is None:
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
-        report_path = write_watershed_report(watershed, built, hms_path)
+        report_path = write_watershed_report(
+            watershed, built, hms_path, comparison_paths=comparison_paths
+        )
         emit(full_run_summary(watershed, built, hms_path, report_path))
-        return FullRunResult(Path(built), hms_path, report_path)
+        return FullRunResult(Path(built), hms_path, report_path, comparison_path)
     except FullRunError:
         raise
     except Exception as exc:
