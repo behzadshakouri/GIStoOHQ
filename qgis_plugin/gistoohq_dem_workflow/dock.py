@@ -141,7 +141,14 @@ def _target_crs(config: dict) -> str | None:
     return None
 
 
-def _command_for_workflow(command: str, config_text: str) -> list[str]:
+def _command_for_workflow(
+    command: str,
+    config_text: str,
+    *,
+    use_reviewed_pour_points: bool | None = None,
+    nhdplus_snap_distance_m: float | None = None,
+    overwrite_promoted_pour_points: bool = False,
+) -> list[str]:
     config_path = Path(config_text).expanduser()
     config = _read_config(config_path)
     if not isinstance(config, dict):
@@ -183,6 +190,16 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
     if command in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build"}:
         root = _relative_to_config(config_path, config.get("root") or ".")
         return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
+
+    if command == "promote-pour-points":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(root),
+            "--site", _site_name(config),
+        ]
+        if overwrite_promoted_pour_points:
+            argv.append("--overwrite")
+        return argv
 
     if command == "build-hms":
         root = _relative_to_config(config_path, config.get("root") or ".")
@@ -229,6 +246,19 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         source_dir = _relative_to_config(config_path, config.get("download_dir"))
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
+        snap_distance = (
+            nhdplus_snap_distance_m
+            if nhdplus_snap_distance_m is not None
+            else config.get("nhdplus_snap_distance_m", 500.0)
+        )
+        argv.extend(["--nhdplus-snap-distance-m", str(snap_distance)])
+        use_reviewed = (
+            use_reviewed_pour_points
+            if use_reviewed_pour_points is not None
+            else bool(config.get("use_reviewed_pour_points"))
+        )
+        if use_reviewed:
+            argv.append("--use-reviewed-pour-points")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
@@ -315,6 +345,8 @@ class DemWorkflowDock:
             QHBoxLayout,
             QLabel,
             QLineEdit,
+            QCheckBox,
+            QDoubleSpinBox,
             QPushButton,
             QTextEdit,
         )
@@ -328,6 +360,17 @@ class DemWorkflowDock:
         self.config = QLineEdit("config.example.json")
         row.addWidget(self.config)
         layout.addLayout(row)
+        controls = QHBoxLayout()
+        self.reviewed_points = QCheckBox("Use reviewed pour points")
+        controls.addWidget(self.reviewed_points)
+        controls.addWidget(QLabel("NHDPlus snap max (m)"))
+        self.nhdplus_snap_distance = QDoubleSpinBox()
+        self.nhdplus_snap_distance.setRange(0.0, 100000.0)
+        self.nhdplus_snap_distance.setValue(500.0)
+        controls.addWidget(self.nhdplus_snap_distance)
+        self.overwrite_promoted = QCheckBox("Overwrite promoted points")
+        controls.addWidget(self.overwrite_promoted)
+        layout.addLayout(controls)
         outlet_button = QPushButton("Pick Outlet on Map")
         outlet_button.clicked.connect(self.pick_outlet)
         layout.addWidget(outlet_button)
@@ -350,6 +393,7 @@ class DemWorkflowDock:
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
             ("FULL RUN: Download All Data to OHQ", "full-run"),
+            ("Promote Reviewed Pour Points", "promote-pour-points"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
@@ -446,7 +490,13 @@ class DemWorkflowDock:
                     self.log.append(
                         "Generating the configured default acquisition area before FULL RUN."
                     )
-            argv = _command_for_workflow(command, self.config.text())
+            argv = _command_for_workflow(
+                command,
+                self.config.text(),
+                use_reviewed_pour_points=self.reviewed_points.isChecked(),
+                nhdplus_snap_distance_m=self.nhdplus_snap_distance.value(),
+                overwrite_promoted_pour_points=self.overwrite_promoted.isChecked(),
+            )
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")
             return

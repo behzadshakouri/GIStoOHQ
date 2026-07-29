@@ -67,7 +67,7 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
         "--lat", "34.1", "--lon", "-111.2",
         "--site-id", "source-id", "--download-dir", str(tmp_path / "raw"),
         "--max-tiles", "6", "--soil-pixel-size", "0.0002",
-        "--soil-top-depth", "20",
+        "--soil-top-depth", "20", "--use-reviewed-pour-points",
     ])
     assert status == 0
     assert calls[0][2]["lat"] == 34.1
@@ -77,6 +77,8 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
     assert calls[0][2]["max_tiles"] == 6
     assert calls[0][2]["soil_pixel_size"] == 0.0002
     assert calls[0][2]["soil_top_depth"] == 20
+    assert calls[0][2]["use_reviewed_pour_points"] is True
+    assert calls[0][2]["nhdplus_snap_distance_m"] == 500.0
     assert "Full pipeline complete" in capsys.readouterr().out
 
 
