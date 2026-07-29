@@ -51,6 +51,11 @@ If the NHDPlus upstream trace succeeds, `full-run` also writes
 nodes receiving at least two upstream reaches, with `reason`, `n_in`, and
 `review_status` attributes. This is a review layer only: Phase 2 does not consume
 it until a future user-approval step promotes selected candidates.
+After setting candidate `review_status` values to `approved` or `required`, run
+`ohqbuild promote-pour-points --root ROOT --site SITE`. The command requires one
+selected watershed outlet, unique candidate IDs, boundary containment, and 100 m
+minimum spacing by default before writing `outputs/pour_points.shp`. Use
+`--minimum-spacing-m` to set a justified site-specific distance.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a

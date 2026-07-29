@@ -32,6 +32,7 @@ from .legacy_inputs import (
 )
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
+from .pour_point_candidates import PourPointCandidateError, promote_pour_point_candidates
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
 from .hms_pipeline import build_hms_project, validate_hms_project
@@ -199,6 +200,18 @@ def build_parser() -> argparse.ArgumentParser:
         "defaults to <root>/<site>/outputs/outlet.shp.",
     )
     pour.add_argument("--overwrite", action="store_true")
+
+    promote = sub.add_parser(
+        "promote-pour-points",
+        help="Validate approved review candidates and write Phase 2 pour_points.shp.",
+    )
+    promote.add_argument("--root", required=True)
+    promote.add_argument("--site", required=True)
+    promote.add_argument("--candidates", default=None)
+    promote.add_argument("--boundary", default=None)
+    promote.add_argument("--out", default=None)
+    promote.add_argument("--minimum-spacing-m", type=float, default=100.0)
+    promote.add_argument("--overwrite", action="store_true")
 
     dl = sub.add_parser(
         "download-data",
@@ -894,6 +907,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"create-pour-points failed: {exc}")
             return 2
         print(f"Generated {result.count} pour point(s): {result.output_path}")
+        return 0
+    if args.command == "promote-pour-points":
+        site_path = Path(args.site).expanduser()
+        if not site_path.is_absolute():
+            site_path = Path(args.root).expanduser().resolve() / site_path
+        outputs = site_path.resolve() / "outputs"
+        try:
+            promoted = promote_pour_point_candidates(
+                args.candidates or outputs / "pour_point_candidates.gpkg",
+                args.boundary or outputs / "watershed_boundary.gpkg",
+                args.out or outputs / "pour_points.shp",
+                minimum_spacing_m=args.minimum_spacing_m,
+                overwrite=args.overwrite,
+            )
+        except PourPointCandidateError as exc:
+            print(f"promote-pour-points failed: {exc}")
+            return 2
+        print(f"Wrote approved Phase 2 pour points: {promoted}")
         return 0
     if args.command == "create-outlet":
         site_path = Path(args.site).expanduser()
