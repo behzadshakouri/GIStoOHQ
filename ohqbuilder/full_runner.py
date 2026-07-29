@@ -21,6 +21,7 @@ from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_comparison import compare_watersheds
 from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
+from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 
 
 class FullRunError(RuntimeError):
@@ -364,6 +365,19 @@ def run_full_pipeline(
                     outlet_lat=lat,
                 )
                 emit(f"Wrote NHDPlus upstream watershed candidate: {nhdplus_candidate}")
+                try:
+                    candidates = generate_pour_point_candidates(
+                        nhdplus_candidate,
+                        Path(root).expanduser().resolve()
+                        / site
+                        / "outputs"
+                        / "pour_point_candidates.gpkg",
+                        outlet_lon=lon,
+                        outlet_lat=lat,
+                    )
+                    emit(f"Wrote pour-point review candidates: {candidates}")
+                except PourPointCandidateError as exc:
+                    emit(f"Pour-point candidate generation requires review: {exc}")
             except NhdplusTraceError as exc:
                 emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.

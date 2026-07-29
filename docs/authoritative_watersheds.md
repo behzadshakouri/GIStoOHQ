@@ -46,6 +46,11 @@ The final `watershed_report.html` summarizes the best WBD and NHDPlus match,
 including IoU, generated-only area, reference-only area, Hausdorff distance, and
 the disagreement-map path. This keeps the boundary decision beside the model
 parameters rather than buried in standalone JSON files.
+If the NHDPlus upstream trace succeeds, `full-run` also writes
+`outputs/pour_point_candidates.gpkg`. It contains the snapped watershed outlet and
+nodes receiving at least two upstream reaches, with `reason`, `n_in`, and
+`review_status` attributes. This is a review layer only: Phase 2 does not consume
+it until a future user-approval step promotes selected candidates.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a
