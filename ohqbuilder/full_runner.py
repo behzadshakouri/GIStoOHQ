@@ -287,6 +287,7 @@ def run_full_pipeline(
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
     acquisition_area: str | Path | None = None,
+    use_reviewed_pour_points: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -381,10 +382,20 @@ def run_full_pipeline(
             except NhdplusTraceError as exc:
                 emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.
+        if use_reviewed_pour_points:
+            reviewed_points = (
+                Path(root).expanduser().resolve() / site / "outputs" / "pour_points.shp"
+            )
+            if not reviewed_points.is_file():
+                raise FullRunError(
+                    "--use-reviewed-pour-points requires outputs/pour_points.shp; "
+                    "run promote-pour-points after reviewing candidates first."
+                )
+            emit(f"Using reviewed pour points without automatic replacement: {reviewed_points}")
         options = LegacyWorkflowOptions(
             auto_outlet=True,
-            auto_pour_points=True,
-            refresh_auto_pour_points=True,
+            auto_pour_points=not use_reviewed_pour_points,
+            refresh_auto_pour_points=not use_reviewed_pour_points,
         )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)

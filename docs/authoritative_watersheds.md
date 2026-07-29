@@ -56,6 +56,10 @@ After setting candidate `review_status` values to `approved` or `required`, run
 selected watershed outlet, unique candidate IDs, boundary containment, and 100 m
 minimum spacing by default before writing `outputs/pour_points.shp`. Use
 `--minimum-spacing-m` to set a justified site-specific distance.
+To rebuild the complete project with those approved points, rerun `full-run` with
+`--use-reviewed-pour-points`. This mode requires the promoted shapefile and turns
+off automatic pour-point creation and refresh, preventing the reviewed selection
+from being silently replaced before Phase 2.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a
