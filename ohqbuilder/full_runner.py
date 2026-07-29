@@ -11,6 +11,7 @@ from .legacy_inputs import (
     LegacyWorkflowOptions,
     run_hydrology_preprocessing,
     run_legacy_input_workflow,
+    verify_reach_writer_revision,
 )
 from .builders.watershed_builder import WatershedBuilder
 from .input_downloader import download_all_inputs
@@ -513,6 +514,11 @@ def run_full_pipeline(
             auto_pour_points=not use_reviewed_pour_points,
             refresh_auto_pour_points=not use_reviewed_pour_points,
             child_options={"MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m},
+        )
+        reach_script = verify_reach_writer_revision(script_dir)
+        emit(
+            "Legacy reach writer revision: stale-layer-release-v2 "
+            f"({reach_script})"
         )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)

@@ -14,6 +14,7 @@ from ohqbuilder.full_runner import (
     run_full_pipeline,
     write_watershed_report,
 )
+from ohqbuilder.legacy_inputs import LegacyInputWorkflowError, verify_reach_writer_revision
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,20 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     assert "✓ OHQ model" in summary
     assert "✓ HEC-HMS project" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
+
+
+def test_reach_writer_revision_detects_stale_legacy_script(tmp_path):
+    script = tmp_path / "extract_reaches.py"
+    script.write_text('raise Exception("reaches.gpkg was written but is invalid")\n')
+
+    with pytest.raises(LegacyInputWorkflowError, match="different revisions"):
+        verify_reach_writer_revision(tmp_path)
+
+
+def test_reach_writer_revision_accepts_current_legacy_script():
+    script = verify_reach_writer_revision()
+
+    assert script.name == "extract_reaches.py"
 
 
 def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):

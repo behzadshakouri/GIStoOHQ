@@ -78,6 +78,7 @@ def test_reach_output_releases_stale_qgis_handle_before_rewrite():
     assert 'REACHES_OUT + "|layername=reaches"' in source
     assert "size_bytes=%s" in source
     assert "reaches.gpkg contains zero features" in source
+    assert 'REACH_WRITER_REVISION = "stale-layer-release-v2"' in source
 
 
 def test_phase2_accepts_single_reach_watershed_without_interior_junctions():

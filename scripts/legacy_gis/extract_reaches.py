@@ -48,6 +48,8 @@ from qgis.core import (
 )
 from ws3io import release_and_delete
 
+REACH_WRITER_REVISION = "stale-layer-release-v2"
+
 
 def _module_spec_available(name):
     try:
@@ -122,6 +124,7 @@ REACHES_OUT    = os.path.join(OUT_DIR, "reaches.gpkg")
 print("Site     :", site_path)
 print("Flow acc :", FLOWACC_PATH)
 print("Outputs  :", OUT_DIR)
+print("Writer revision:", REACH_WRITER_REVISION)
 
 def _require_valid_projected_crs(layer, label):
     if not layer.isValid():
