@@ -320,9 +320,10 @@ def run_full_pipeline(
         )
         materialized_hydro = getattr(materialized, "hydro", None)
         catchment_path = getattr(materialized_hydro, "catchment_path", None)
+        nhdplus_candidate = None
         if catchment_path is not None:
             try:
-                traced = trace_upstream_catchments(
+                nhdplus_candidate = trace_upstream_catchments(
                     materialized_hydro.output_path,
                     catchment_path,
                     Path(root).expanduser().resolve()
@@ -332,7 +333,7 @@ def run_full_pipeline(
                     outlet_lon=lon,
                     outlet_lat=lat,
                 )
-                emit(f"Wrote NHDPlus upstream watershed candidate: {traced}")
+                emit(f"Wrote NHDPlus upstream watershed candidate: {nhdplus_candidate}")
             except NhdplusTraceError as exc:
                 emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.
@@ -352,8 +353,23 @@ def run_full_pipeline(
                 generated_boundary,
                 wbd_reference,
                 generated_boundary.with_name("watershed_wbd_comparison.json"),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_wbd_disagreement.gpkg"
+                ),
             )
             emit(f"Wrote WBD comparison metrics: {comparison_path}")
+        if nhdplus_candidate is not None and generated_boundary.is_file():
+            nhd_comparison = compare_watersheds(
+                generated_boundary,
+                nhdplus_candidate,
+                generated_boundary.with_name("watershed_nhdplus_comparison.json"),
+                reference_layer="upstream_boundary",
+                reference_id_fields=("outlet_reach_id",),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_nhdplus_disagreement.gpkg"
+                ),
+            )
+            emit(f"Wrote NHDPlus comparison metrics: {nhd_comparison}")
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)

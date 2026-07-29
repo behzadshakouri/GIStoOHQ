@@ -37,6 +37,11 @@ to the nearest reach, traces all upstream reaches, and writes
 `outputs/NHDPlus_upstream_candidate.gpkg`. Its companion JSON records the selected
 reach, snap distance, field mapping, and feature counts. Missing connectivity is
 reported for review rather than guessed from line orientation.
+After the DEM delineation finishes, `full-run` compares it with the NHDPlus
+upstream boundary and writes `watershed_nhdplus_comparison.json`. Both WBD and
+NHDPlus comparisons now include a disagreement GeoPackage with separate
+`intersection`, `generated_only`, and `reference_only` layers, making roads,
+culverts, confluences, and boundary errors directly inspectable in QGIS.
 
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a
