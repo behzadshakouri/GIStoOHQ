@@ -105,6 +105,10 @@ recommended decision process and validation metrics.
 When materialization bounds are available, `materialize-inputs` extracts the
 intersecting HUC12 features to `outputs/WBDHU12_reference.gpkg`, ready to overlay
 with the generated watershed in QGIS.
+When the downloaded NHDPlus package includes catchment polygons,
+`materialize-inputs` also writes `outputs/NHDPlusCatchment_clip.gpkg`. These retain
+their source reach identifiers for subsequent upstream-network tracing; they are
+not treated as HUC subdivisions.
 When a rectangle, polygon, or expanded acquisition GeoJSON is active, full-run uses
 its bounds both to enlarge every source-data query and to clip the materialized DEM
 and hydrography. The outlet remains the routing outlet; the drawn area controls data

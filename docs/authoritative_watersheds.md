@@ -27,6 +27,11 @@ IoU feature as a review candidate—not an automatically accepted boundary.
 | 3DEP | Terrain-driven divides and local flow paths | Unconditioned DEMs can route across culverts, roads, and urban drainage |
 | Local lidar / stormwater GIS | Fine urban terrain, pipes, culverts, and engineered drainage | Coverage and licensing vary by jurisdiction |
 
+When present in the downloaded NHDPlus vector package, catchments are clipped to
+the DEM extent and written to `outputs/NHDPlusCatchment_clip.gpkg`. This provides
+the polygon/reach linkage needed for a later upstream trace from the verified
+outlet while keeping NHDPlus catchments distinct from WBD hydrologic units.
+
 WBD hierarchy is useful context, but HUC level must not be chosen merely to obtain
 more polygons. HUC subdivisions are nested hydrologic units; they are not a
 national set of tributary-scale catchments at an arbitrary outlet.

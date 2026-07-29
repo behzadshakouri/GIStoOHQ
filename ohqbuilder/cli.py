@@ -1046,6 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM: {result.dem.output_path}")
         print(f"Wrote flowlines: {result.hydro.output_path}")
+        catchment_path = getattr(result.hydro, "catchment_path", None)
+        if catchment_path is not None:
+            print(f"Wrote NHDPlus catchments: {catchment_path}")
         landcover = getattr(result, "landcover", None)
         if landcover is not None:
             print(f"Wrote landcover: {landcover}")
