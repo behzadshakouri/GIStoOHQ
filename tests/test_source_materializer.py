@@ -12,6 +12,7 @@ from ohqbuilder.source_materializer import (
     materialize_landcover,
     materialize_source_inputs,
 )
+from ohqbuilder.wbd_materializer import WbdMaterializeError
 
 
 def test_materialize_source_inputs_combines_dem_and_hydro(monkeypatch, tmp_path):
@@ -172,6 +173,27 @@ def test_materialize_optional_wbd_falls_back_to_hydro_package(monkeypatch, tmp_p
 
     assert result == expected
     assert calls[0][0] == hydro
+
+
+def test_materialize_optional_wbd_warns_and_continues_for_wrong_package(monkeypatch, tmp_path):
+    wbd = tmp_path / "downloads" / "site-id" / "wbd"
+    wbd.mkdir(parents=True)
+    (wbd / "NHDPLUS_H_0206_HU4_RASTER.zip").write_bytes(b"fixture")
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_reference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            WbdMaterializeError("Detected NHDPlus HR raster; no vector HUC12 layer")
+        ),
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", wbd.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result is None
+    warning = tmp_path / "SITE_A" / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
+    assert "NHDPlus HR raster" in warning.read_text(encoding="utf-8")
+    assert "may continue" in warning.read_text(encoding="utf-8")
 
 
 def test_materialize_source_inputs_forwards_user_clip_bounds(monkeypatch, tmp_path):

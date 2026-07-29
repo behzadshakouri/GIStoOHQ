@@ -4,6 +4,7 @@ import importlib.util
 import tempfile
 import zipfile
 from pathlib import Path
+import re
 
 
 class WbdMaterializeError(RuntimeError):
@@ -24,10 +25,30 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         zipped.extractall(destination)
 
 
+def _normalized_layer_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _find_hu12_layer(layer_names: list[str]) -> str | None:
+    preferred = {"wbdhu12", "hu12", "watershedboundarydatasethu12"}
+    for name in layer_names:
+        if _normalized_layer_name(name) in preferred:
+            return name
+    for name in layer_names:
+        normalized = _normalized_layer_name(name)
+        if "wbd" in normalized and "hu12" in normalized:
+            return name
+    return None
+
+
 def _find_huc12_source(root: Path) -> tuple[Path, str | None]:
     """Return the preferred HUC12 vector dataset and optional geodatabase layer."""
 
-    shapefiles = sorted(root.rglob("WBDHU12.shp"))
+    shapefiles = sorted(
+        path
+        for path in root.rglob("*.shp")
+        if _find_hu12_layer([path.stem]) is not None
+    )
     if shapefiles:
         return shapefiles[0], None
 
@@ -36,12 +57,19 @@ def _find_huc12_source(root: Path) -> tuple[Path, str | None]:
     containers = sorted(root.rglob("*.gpkg")) + sorted(
         path for path in root.rglob("*.gdb") if path.is_dir()
     )
+    available = []
     for path in containers:
         layers = fiona.listlayers(path)
-        match = next((layer for layer in layers if layer.upper() == "WBDHU12"), None)
+        available.extend(f"{path.name}: {layer}" for layer in layers)
+        match = _find_hu12_layer(layers)
         if match:
             return path, match
-    raise WbdMaterializeError("The downloaded WBD package does not contain a WBDHU12 layer")
+    archive_names = [path.name for path in root.rglob("*.zip")]
+    details = available or archive_names or ["(no vector layers found)"]
+    raise WbdMaterializeError(
+        "The selected package does not contain a recognizable WBD HUC12 vector layer. "
+        "Available layers/products: " + ", ".join(details)
+    )
 
 
 def materialize_wbd_reference(

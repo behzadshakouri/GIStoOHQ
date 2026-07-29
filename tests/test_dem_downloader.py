@@ -38,8 +38,27 @@ def test_parse_products_all_and_subset():
 def test_wbd_uses_authoritative_tnm_dataset():
     tier = dd.PRODUCT_TIERS["wbd"][0]
 
-    assert tier.dataset == "National Hydrography Dataset Plus High Resolution (NHDPlus HR)"
+    assert tier.dataset == "Watershed Boundary Dataset (WBD)"
     assert tier.formats == ("Shapefile", "FileGDB")
+
+
+def test_wbd_product_selection_rejects_nhdplus_rasters():
+    raster = dd.DownloadItem(
+        "NHDPLUS_H_0206_HU4_20220324_RASTER.zip",
+        "https://example.test/NHDPLUS_H_0206_HU4_RASTER.zip",
+        "NHDPlus HR",
+        "raster",
+    )
+    vector = dd.DownloadItem(
+        "WBD_02_20250101_GDB.zip",
+        "https://example.test/WBD_02_20250101_GDB.zip",
+        "Watershed Boundary Dataset (WBD)",
+        "WBD vector",
+    )
+
+    assert dd.classify_hydro_product(raster) == "nhdplus_raster"
+    assert dd.classify_hydro_product(vector) == "wbd_vector"
+    assert dd._prefer_wbd_packages([raster, vector]) == [vector]
 
 
 def test_query_tnm_reads_current_nested_download_url(monkeypatch):

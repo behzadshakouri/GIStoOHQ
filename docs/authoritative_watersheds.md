@@ -1,21 +1,24 @@
 # Authoritative U.S. watershed references
 
-GIStoOHQ obtains WBDHU layers from the downloaded NHDPlus HR/NHD vector package.
-TNM point-product searches do not consistently advertise WBD as an independent
-product, which can incorrectly return zero results even where WBD coverage exists.
-Use `hydro` in production downloads; `wbd` remains an explicit alias that fetches
-the same hydro package as the WBD carrier:
+GIStoOHQ queries the standalone USGS Watershed Boundary Dataset (WBD) product for
+explicit `wbd` downloads and accepts vector formats only. Production full runs
+also inspect the downloaded NHDPlus HR/NHD vector package as a fallback because
+some distributions carry WBDHU layers:
 
 ```bash
 ohqbuild download-data sites.csv --products wbd --download source_downloads
 ohqbuild download-data sites.csv --products dem,hydro --download source_downloads
 ```
 
-`download-inputs` and `full-run` request hydrography once rather than issuing a
-second, unreliable WBD product query. During
+`download-inputs` and `full-run` request hydrography once and inspect that vector
+package for WBDHU before continuing without a WBD reference. During
 `materialize-inputs` or `full-run`, GIStoOHQ extracts intersecting HUC12 features
 to `outputs/WBDHU12_reference.gpkg` when materialization bounds are available. It
 does not silently substitute that reference for the model watershed.
+Standalone WBD selection rejects NHDPlus `_RASTER` archives. If neither a valid
+standalone WBD vector package nor a vector hydro package containing an HU12 layer
+is available, the run continues with DEM delineation and writes
+`outputs/WBD_MATERIALIZATION_WARNING.txt` instead of treating WBD as mandatory.
 After delineation, `full-run` writes `outputs/watershed_wbd_comparison.json` with
 per-HUC12 area, intersection, omission, commission, IoU, and boundary Hausdorff
 distance. Metrics use a locally estimated projected CRS and identify the highest-

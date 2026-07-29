@@ -7,7 +7,7 @@ import shutil
 
 from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
-from .wbd_materializer import materialize_wbd_reference
+from .wbd_materializer import WbdMaterializeError, materialize_wbd_reference
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,7 @@ def materialize_optional_wbd(
 
     if bounds is None:
         return None
+    hydro_fallback = False
     try:
         wbd_dir = find_product_dir(source_dir, "wbd")
     except FileNotFoundError:
@@ -111,16 +112,28 @@ def materialize_optional_wbd(
             # that authoritative copy instead of assuming TNM exposes WBD as a
             # separate point-query download product.
             wbd_dir = find_product_dir(source_dir, "hydro")
+            hydro_fallback = True
         except FileNotFoundError:
             return None
         if not list(wbd_dir.rglob("WBDHU12.shp")) and not list(wbd_dir.rglob("*.zip")):
             return None
-    return materialize_wbd_reference(
-        wbd_dir,
-        root / site / "outputs" / "WBDHU12_reference.gpkg",
-        clip_bounds=bounds,
-        clip_bounds_crs=bounds_crs,
-    )
+    try:
+        return materialize_wbd_reference(
+            wbd_dir,
+            root / site / "outputs" / "WBDHU12_reference.gpkg",
+            clip_bounds=bounds,
+            clip_bounds_crs=bounds_crs,
+        )
+    except WbdMaterializeError as exc:
+        warning = root / site / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
+        warning.parent.mkdir(parents=True, exist_ok=True)
+        source_kind = "hydro fallback" if hydro_fallback else "standalone WBD download"
+        warning.write_text(
+            f"WBD reference unavailable from {source_kind}: {exc}\n"
+            "The DEM watershed workflow may continue, but no WBD validation was performed.\n",
+            encoding="utf-8",
+        )
+        return None
 
 
 def materialize_source_inputs(

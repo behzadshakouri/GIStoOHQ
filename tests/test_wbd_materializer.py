@@ -4,6 +4,7 @@ import pytest
 
 from ohqbuilder.wbd_materializer import (
     WbdMaterializeError,
+    _find_hu12_layer,
     _safe_extract,
     materialize_wbd_reference,
 )
@@ -29,6 +30,12 @@ def test_safe_extract_accepts_normal_members(tmp_path):
     _safe_extract(archive, destination)
 
     assert (destination / "Shape" / "WBDHU12.dbf").read_text() == "fixture"
+
+
+def test_find_hu12_layer_accepts_provider_name_variants():
+    assert _find_hu12_layer(["WBD_HU12_1"]) == "WBD_HU12_1"
+    assert _find_hu12_layer(["metadata", "WBD/WBDHU12"]) == "WBD/WBDHU12"
+    assert _find_hu12_layer(["WBDHU10"]) is None
 
 
 def test_materialize_wbd_reference_selects_intersecting_huc12(tmp_path):
