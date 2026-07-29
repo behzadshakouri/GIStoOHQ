@@ -150,3 +150,10 @@ within a 30 m tolerance of the other, sampled mean lateral offset, and network
 Hausdorff distance. These
 metrics identify channel-placement disagreement separately from polygon-boundary
 disagreement; they do not automatically replace DEM-derived reaches with NHD lines.
+
+WBD selection is outlet-aware. When the service returns several HUC12 features,
+GIStoOHQ first restricts selection to polygons containing the modeled outlet and
+then chooses the highest-IoU feature. A reference with less than half or more than
+twice the generated basin area is labeled `regional_context_not_equivalent` rather
+than presented as an equivalent named-stream watershed. It remains useful regional
+context, but its low IoU is not by itself evidence that DEM delineation failed.

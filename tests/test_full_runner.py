@@ -73,6 +73,8 @@ def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):
                 "reference_layer": "WBDHU12_reference",
                 "best_match": {
                     "reference_id": "020700100101",
+                    "reference_scope": "comparable_scale",
+                    "contains_outlet": True,
                     "generated_area_km2": 38.3443,
                     "reference_area_km2": 40.0,
                     "iou": 0.8123,
@@ -95,6 +97,8 @@ def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):
 
     assert "Boundary Comparison (WBDHU12_reference)" in summary
     assert "Reference ID       : 020700100101" in summary
+    assert "Reference scope    : comparable_scale" in summary
+    assert "Contains outlet    : True" in summary
     assert "Area difference    : -4.14%" in summary
     assert "Intersection/Union : 0.812" in summary
     assert "Boundary Hausdorff : 87.5 m" in summary

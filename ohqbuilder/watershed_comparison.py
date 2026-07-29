@@ -16,6 +16,8 @@ def compare_watersheds(
     reference_layer: str = "WBDHU12_reference",
     reference_id_fields: tuple[str, ...] = ("huc12",),
     disagreement_path: str | Path | None = None,
+    outlet_lon: float | None = None,
+    outlet_lat: float | None = None,
 ) -> Path:
     """Compare a generated basin with every intersecting WBD feature.
 
@@ -24,7 +26,12 @@ def compare_watersheds(
     necessarily the named-stream watershed.
     """
 
+    if (outlet_lon is None) != (outlet_lat is None):
+        raise WatershedComparisonError(
+            "Both outlet longitude and latitude are required for outlet-aware selection"
+        )
     import geopandas as gpd
+    from shapely.geometry import Point
 
     generated = gpd.read_file(generated_path)
     reference = gpd.read_file(reference_path, layer=reference_layer)
@@ -42,6 +49,12 @@ def compare_watersheds(
     basin_area = basin.area
     if basin_area <= 0:
         raise WatershedComparisonError("Generated watershed has zero area")
+
+    outlet = None
+    if outlet_lon is not None and outlet_lat is not None:
+        outlet = gpd.GeoSeries(
+            [Point(outlet_lon, outlet_lat)], crs="EPSG:4326"
+        ).to_crs(metric_crs)[0]
 
     comparisons = []
     for index, row in references.iterrows():
@@ -69,10 +82,20 @@ def compare_watersheds(
                 "commission_area_km2": basin.difference(geometry).area / 1_000_000.0,
                 "iou": intersection_area / union_area if union_area else 0.0,
                 "boundary_hausdorff_m": basin.boundary.hausdorff_distance(geometry.boundary),
+                "contains_outlet": bool(geometry.covers(outlet)) if outlet is not None else None,
+                "reference_to_generated_area_ratio": reference_area / basin_area,
             }
         )
     comparisons.sort(key=lambda item: item["iou"], reverse=True)
-    best_id = comparisons[0]["reference_id"]
+    outlet_matches = [item for item in comparisons if item["contains_outlet"]]
+    best_match = outlet_matches[0] if outlet_matches else comparisons[0]
+    area_ratio = best_match["reference_to_generated_area_ratio"]
+    best_match["reference_scope"] = (
+        "comparable_scale"
+        if 0.5 <= area_ratio <= 2.0
+        else "regional_context_not_equivalent"
+    )
+    best_id = best_match["reference_id"]
     best_index = next(
         index
         for index, row in references.iterrows()
@@ -112,7 +135,12 @@ def compare_watersheds(
         "interpretation": (
             "WBD HUC12 units are comparison references, not automatically the named-stream basin."
         ),
-        "best_match": comparisons[0],
+        "selection_method": (
+            "highest_iou_among_outlet_containing_references"
+            if outlet_matches
+            else "highest_iou"
+        ),
+        "best_match": best_match,
         "comparisons": comparisons,
     }
     target = Path(output_path).expanduser().resolve()

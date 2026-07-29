@@ -148,6 +148,8 @@ def full_run_summary(
                 "",
                 f"Boundary Comparison ({payload.get('reference_layer', 'reference')})",
                 f"  Reference ID       : {best.get('reference_id', '—')}",
+                f"  Reference scope    : {best.get('reference_scope', 'not classified')}",
+                f"  Contains outlet    : {best.get('contains_outlet', 'not evaluated')}",
                 f"  Generated area     : {generated_area:.4f} km²",
                 f"  Reference area     : {reference_area:.4f} km²",
                 f"  Area difference    : {area_difference_pct:+.2f}%",
@@ -210,6 +212,8 @@ def write_watershed_report(
             "<tr>"
             f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
             f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
+            f"<td>{escape(str(best.get('reference_scope', 'not classified')))}</td>"
+            f"<td>{escape(str(best.get('contains_outlet', 'not evaluated')))}</td>"
             f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
             f"<td>{float(best.get('commission_area_km2', 0.0)):.3f}</td>"
             f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
@@ -222,7 +226,8 @@ def write_watershed_report(
         comparison_section = (
             "<h2>Boundary comparisons</h2>"
             "<p>Reference matches are review evidence, not automatically accepted boundaries.</p>"
-            "<table><thead><tr><th>Reference layer</th><th>Reference ID</th><th>IoU</th>"
+            "<table><thead><tr><th>Reference layer</th><th>Reference ID</th>"
+            "<th>Scope</th><th>Contains outlet</th><th>IoU</th>"
             "<th>Generated only (km²)</th><th>Reference only (km²)</th>"
             "<th>Hausdorff (m)</th><th>Disagreement map</th></tr></thead><tbody>"
             + "".join(comparison_rows)
@@ -553,6 +558,8 @@ def run_full_pipeline(
                 disagreement_path=generated_boundary.with_name(
                     "watershed_wbd_disagreement.gpkg"
                 ),
+                outlet_lon=lon,
+                outlet_lat=lat,
             )
             emit(f"Wrote WBD comparison metrics: {comparison_path}")
             comparison_paths.append(comparison_path)
