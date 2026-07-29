@@ -8,12 +8,12 @@ outlet:
   # Sligo Creek/ Northwest Branch confluence candidate supplied in SC.kmz.
   # Keep this point on Sligo Creek; moving it downstream would delineate part
   # of the larger Anacostia system instead of the Sligo Creek watershed.
-  longitude: -76.97391566325376
-  latitude: 38.95840888229726
+  longitude: -76.9744266065
+  latitude: 38.9571888036
   input_crs: EPSG:4326
   raw_path: inputs/outlet_raw.geojson
   snap_to_flowline: true
-  snap_distance_m: 500
+  snap_distance_m: 50
   snapped_path: inputs/outlet_snapped.geojson
 dem_acquisition:
   method: upstream_network
