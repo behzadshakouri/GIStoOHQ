@@ -117,6 +117,10 @@ full-run expands the clipping bounds with a 500 m outlet safety margin so the DE
 flow-direction, and flow-accumulation rasters remain consistent with the outlet.
 The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
 validation, and build stages, using the outlet selected on the active QGIS canvas.
+The Tk launcher now exposes the NHDPlus snap limit, a **Use reviewed pour points**
+toggle, and a **Promote reviewed pour points** action. The QGIS dock exposes the
+promotion action and reads `nhdplus_snap_distance_m` and
+`use_reviewed_pour_points` from the project config when building a full run.
 For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
 enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
 [`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and

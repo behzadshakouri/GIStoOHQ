@@ -184,6 +184,13 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         root = _relative_to_config(config_path, config.get("root") or ".")
         return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
 
+    if command == "promote-pour-points":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        return [
+            "ohqbuild", "promote-pour-points", "--root", str(root),
+            "--site", _site_name(config), "--overwrite",
+        ]
+
     if command == "build-hms":
         root = _relative_to_config(config_path, config.get("root") or ".")
         return [
@@ -229,6 +236,11 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         source_dir = _relative_to_config(config_path, config.get("download_dir"))
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
+        argv.extend(
+            ["--nhdplus-snap-distance-m", str(config.get("nhdplus_snap_distance_m", 500.0))]
+        )
+        if config.get("use_reviewed_pour_points"):
+            argv.append("--use-reviewed-pour-points")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
@@ -350,6 +362,7 @@ class DemWorkflowDock:
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
             ("FULL RUN: Download All Data to OHQ", "full-run"),
+            ("Promote Reviewed Pour Points", "promote-pour-points"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))

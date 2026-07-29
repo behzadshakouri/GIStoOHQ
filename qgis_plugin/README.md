@@ -1,8 +1,9 @@
 # GIStoOHQ QGIS plugin
 
-The plugin provides a QGIS dock for the same DEM, hydrology, full-run, OHQ, and
-HEC-HMS commands exposed by the command-line application. QGIS 3.28 or newer is
-required.
+The plugin provides a QGIS dock for the same DEM, hydrology, full-run, OHQ,
+HEC-HMS, and reviewed pour-point promotion workflows exposed by the command-line
+application. Full-run honors the project-config keys `nhdplus_snap_distance_m`
+and `use_reviewed_pour_points`. QGIS 3.28 or newer is required.
 
 ## Install from a source checkout
 

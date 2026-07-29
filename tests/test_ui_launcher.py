@@ -504,6 +504,8 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         lat=38.94,
         method="outlet_buffer",
         acquisition_area=acquisition,
+        use_reviewed_pour_points=True,
+        nhdplus_snap_distance_m=50.0,
     )
 
     command = command_for_step("full-run", state)
@@ -519,6 +521,19 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
     assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate" / "area.geojson"
+    )
+    assert "--use-reviewed-pour-points" in full_run
+    assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50.0"
+
+
+def test_launcher_promotes_reviewed_pour_points(tmp_path):
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="Demo")
+
+    command = command_for_step("promote-pour-points", state)
+
+    assert command.argv == (
+        "ohqbuild", "promote-pour-points", "--root", str(tmp_path),
+        "--site", "Demo", "--overwrite",
     )
 
 
