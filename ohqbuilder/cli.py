@@ -32,6 +32,7 @@ from .legacy_inputs import (
 )
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
+from .pour_point_candidates import PourPointCandidateError, promote_pour_point_candidates
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
 from .hms_pipeline import build_hms_project, validate_hms_project
@@ -200,6 +201,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pour.add_argument("--overwrite", action="store_true")
 
+    promote = sub.add_parser(
+        "promote-pour-points",
+        help="Validate approved review candidates and write Phase 2 pour_points.shp.",
+    )
+    promote.add_argument("--root", required=True)
+    promote.add_argument("--site", required=True)
+    promote.add_argument("--candidates", default=None)
+    promote.add_argument("--boundary", default=None)
+    promote.add_argument("--out", default=None)
+    promote.add_argument("--minimum-spacing-m", type=float, default=100.0)
+    promote.add_argument("--overwrite", action="store_true")
+
     dl = sub.add_parser(
         "download-data",
         help="Query/download USGS DEM and hydrography products for site coordinates.",
@@ -209,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument(
         "--products",
         default="dem",
-        help="dem/demhr, demlr, hydro, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
+        help="dem/demhr, demlr, hydro, wbd, roads, landcover/nlcd, atlas14, all, or a comma-separated subset (default: dem).",
     )
     dl.add_argument("--download", default=None, help="Directory for per-site downloads.")
     dl.add_argument("--id-col", default=None, help="Column used for per-site folder names.")
@@ -453,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument(
         "--products",
         default="all",
-        help="dem, demlr, hydro, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).",
+        help="dem, demlr, hydro, wbd, roads, landcover/nlcd, atlas14, all, or comma-separated subset (default: all).",
     )
     fetch.add_argument(
         "--download-dir",
@@ -720,6 +733,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="EPSG:4326 GeoJSON area used to size downloads and clip materialized DEM/hydrography.",
     )
+    full.add_argument(
+        "--use-reviewed-pour-points",
+        action="store_true",
+        help="Require an existing promoted pour_points.shp and prevent automatic replacement.",
+    )
+    full.add_argument(
+        "--nhdplus-snap-distance-m",
+        type=float,
+        default=50.0,
+        help="Maximum outlet movement for NHDPlus and DEM routing snaps (default: 50 m).",
+    )
+    full.add_argument(
+        "--use-existing-outlet",
+        action="store_true",
+        help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
+    )
 
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
 
@@ -895,6 +924,24 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Generated {result.count} pour point(s): {result.output_path}")
         return 0
+    if args.command == "promote-pour-points":
+        site_path = Path(args.site).expanduser()
+        if not site_path.is_absolute():
+            site_path = Path(args.root).expanduser().resolve() / site_path
+        outputs = site_path.resolve() / "outputs"
+        try:
+            promoted = promote_pour_point_candidates(
+                args.candidates or outputs / "pour_point_candidates.gpkg",
+                args.boundary or outputs / "watershed_boundary.gpkg",
+                args.out or outputs / "pour_points.shp",
+                minimum_spacing_m=args.minimum_spacing_m,
+                overwrite=args.overwrite,
+            )
+        except PourPointCandidateError as exc:
+            print(f"promote-pour-points failed: {exc}")
+            return 2
+        print(f"Wrote approved Phase 2 pour points: {promoted}")
+        return 0
     if args.command == "create-outlet":
         site_path = Path(args.site).expanduser()
         if not site_path.is_absolute():
@@ -933,6 +980,9 @@ def main(argv: list[str] | None = None) -> int:
                 soil_pixel_size=args.soil_pixel_size,
                 soil_top_depth=args.soil_top_depth,
                 acquisition_area=args.acquisition_area,
+                use_reviewed_pour_points=args.use_reviewed_pour_points,
+                nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
+                use_existing_outlet=args.use_existing_outlet,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:
@@ -1046,12 +1096,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote DEM: {result.dem.output_path}")
         print(f"Wrote flowlines: {result.hydro.output_path}")
+        catchment_path = getattr(result.hydro, "catchment_path", None)
+        if catchment_path is not None:
+            print(f"Wrote NHDPlus catchments: {catchment_path}")
         landcover = getattr(result, "landcover", None)
         if landcover is not None:
             print(f"Wrote landcover: {landcover}")
         cn_lookup = getattr(result, "cn_lookup", None)
         if cn_lookup is not None:
             print(f"Wrote CN lookup: {cn_lookup}")
+        wbd_reference = getattr(result, "wbd_reference", None)
+        if wbd_reference is not None:
+            print(f"Wrote WBD HUC12 reference: {wbd_reference}")
         return 0
 
     if args.command == "init-dem-config":
