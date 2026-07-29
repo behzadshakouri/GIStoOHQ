@@ -146,14 +146,22 @@ def test_materialize_optional_wbd_writes_review_layer(monkeypatch, tmp_path):
     assert calls[0][1]["clip_bounds"] == (-77.1, 38.9, -76.9, 39.1)
 
 
-def test_materialize_optional_wbd_skips_without_bounds_or_download(tmp_path):
-    assert materialize_optional_wbd(tmp_path, "SITE_A", tmp_path, None, "EPSG:4326") is None
-    assert (
-        materialize_optional_wbd(
-            tmp_path, "SITE_A", tmp_path, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
-        )
-        is None
+def test_materialize_optional_wbd_uses_service_without_download(monkeypatch, tmp_path):
+    expected = tmp_path / "SITE_A" / "outputs" / "WBDHU12_reference.gpkg"
+    calls = []
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_service_reference",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or expected,
     )
+
+    assert materialize_optional_wbd(tmp_path, "SITE_A", tmp_path, None, "EPSG:4326") is None
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", tmp_path, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result == expected
+    assert calls[0][0] == (expected,)
+    assert calls[0][1]["clip_bounds"] == (-77.1, 38.9, -76.9, 39.1)
 
 
 def test_materialize_optional_wbd_falls_back_to_hydro_package(monkeypatch, tmp_path):
@@ -185,6 +193,12 @@ def test_materialize_optional_wbd_warns_and_continues_for_wrong_package(monkeypa
             WbdMaterializeError("Detected NHDPlus HR raster; no vector HUC12 layer")
         ),
     )
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_service_reference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            WbdMaterializeError("service unavailable")
+        ),
+    )
 
     result = materialize_optional_wbd(
         tmp_path, "SITE_A", wbd.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
@@ -194,6 +208,32 @@ def test_materialize_optional_wbd_warns_and_continues_for_wrong_package(monkeypa
     warning = tmp_path / "SITE_A" / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
     assert "NHDPlus HR raster" in warning.read_text(encoding="utf-8")
     assert "may continue" in warning.read_text(encoding="utf-8")
+
+
+def test_materialize_optional_wbd_uses_service_after_local_package_failure(
+    monkeypatch, tmp_path
+):
+    wbd = tmp_path / "downloads" / "site-id" / "wbd"
+    wbd.mkdir(parents=True)
+    (wbd / "bad.zip").write_bytes(b"fixture")
+    expected = tmp_path / "SITE_A" / "outputs" / "WBDHU12_reference.gpkg"
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_reference",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            WbdMaterializeError("local package has no HUC12")
+        ),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_service_reference",
+        lambda *args, **kwargs: expected,
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", wbd.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result == expected
+    assert not (tmp_path / "SITE_A" / "outputs" / "WBD_MATERIALIZATION_WARNING.txt").exists()
 
 
 def test_materialize_source_inputs_forwards_user_clip_bounds(monkeypatch, tmp_path):

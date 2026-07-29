@@ -7,7 +7,11 @@ import shutil
 
 from .dem_materializer import DemMaterializeResult, bounds_from_lonlat_buffer, materialize_dem, parse_bounds
 from .hydro_materializer import HydroMaterializeResult, materialize_flowlines
-from .wbd_materializer import WbdMaterializeError, materialize_wbd_reference
+from .wbd_materializer import (
+    WbdMaterializeError,
+    materialize_wbd_reference,
+    materialize_wbd_service_reference,
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,7 @@ def materialize_optional_wbd(
 
     if bounds is None:
         return None
+    target = root / site / "outputs" / "WBDHU12_reference.gpkg"
     hydro_fallback = False
     try:
         wbd_dir = find_product_dir(source_dir, "wbd")
@@ -114,22 +119,35 @@ def materialize_optional_wbd(
             wbd_dir = find_product_dir(source_dir, "hydro")
             hydro_fallback = True
         except FileNotFoundError:
-            return None
-        if not list(wbd_dir.rglob("WBDHU12.shp")) and not list(wbd_dir.rglob("*.zip")):
-            return None
+            wbd_dir = None
+    local_error = None
+    if wbd_dir is not None:
+        try:
+            return materialize_wbd_reference(
+                wbd_dir,
+                target,
+                clip_bounds=bounds,
+                clip_bounds_crs=bounds_crs,
+            )
+        except WbdMaterializeError as exc:
+            local_error = exc
     try:
-        return materialize_wbd_reference(
-            wbd_dir,
-            root / site / "outputs" / "WBDHU12_reference.gpkg",
+        return materialize_wbd_service_reference(
+            target,
             clip_bounds=bounds,
             clip_bounds_crs=bounds_crs,
         )
     except WbdMaterializeError as exc:
         warning = root / site / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
         warning.parent.mkdir(parents=True, exist_ok=True)
-        source_kind = "hydro fallback" if hydro_fallback else "standalone WBD download"
+        source_kind = (
+            "hydro fallback"
+            if hydro_fallback
+            else "standalone WBD download or official WBD web service"
+        )
+        details = f"{local_error}; web service fallback: {exc}" if local_error else str(exc)
         warning.write_text(
-            f"WBD reference unavailable from {source_kind}: {exc}\n"
+            f"WBD reference unavailable from {source_kind}: {details}\n"
             "The DEM watershed workflow may continue, but no WBD validation was performed.\n",
             encoding="utf-8",
         )

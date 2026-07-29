@@ -6,6 +6,7 @@ from ohqbuilder.wbd_materializer import (
     WbdMaterializeError,
     _find_hu12_layer,
     _safe_extract,
+    _service_hu12_layer,
     materialize_wbd_reference,
 )
 
@@ -35,7 +36,32 @@ def test_safe_extract_accepts_normal_members(tmp_path):
 def test_find_hu12_layer_accepts_provider_name_variants():
     assert _find_hu12_layer(["WBD_HU12_1"]) == "WBD_HU12_1"
     assert _find_hu12_layer(["metadata", "WBD/WBDHU12"]) == "WBD/WBDHU12"
+    assert _find_hu12_layer(["12-digit HU (Subwatershed)"]) == "12-digit HU (Subwatershed)"
     assert _find_hu12_layer(["WBDHU10"]) is None
+
+
+def test_service_hu12_layer_discovers_layer_id_from_name(monkeypatch):
+    monkeypatch.setattr(
+        "ohqbuilder.wbd_materializer._read_json",
+        lambda *args, **kwargs: {
+            "layers": [
+                {"id": 4, "name": "WBDHU10"},
+                {"id": 6, "name": "WBD_HU12"},
+            ]
+        },
+    )
+
+    assert _service_hu12_layer("https://example.test/MapServer", timeout=1.0) == 6
+
+
+def test_service_hu12_layer_reports_available_layers(monkeypatch):
+    monkeypatch.setattr(
+        "ohqbuilder.wbd_materializer._read_json",
+        lambda *args, **kwargs: {"layers": [{"id": 4, "name": "WBDHU10"}]},
+    )
+
+    with pytest.raises(WbdMaterializeError, match="Available layers: WBDHU10"):
+        _service_hu12_layer("https://example.test/MapServer", timeout=1.0)
 
 
 def test_materialize_wbd_reference_selects_intersecting_huc12(tmp_path):

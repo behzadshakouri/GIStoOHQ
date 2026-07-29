@@ -132,3 +132,9 @@ routed cell within the maximum accepted movement (50 m by default). The wider
 search radius (150 m by default) is diagnostic only when no qualifying routed cell
 exists inside the accepted limit. This prevents a reviewed outlet from moving
 farther downstream on each run merely because accumulation increases downstream.
+
+If TNM returns no standalone WBD package, materialization now queries the official
+WBD ArcGIS service, discovers the HUC12 layer by name, and writes the same clipped
+`WBDHU12_reference.gpkg` review layer. Service failure remains non-fatal: the run
+continues in DEM/NHD mode and records `WBD_MATERIALIZATION_WARNING.txt` so the
+absence of an authoritative polygon cannot be mistaken for a completed comparison.
