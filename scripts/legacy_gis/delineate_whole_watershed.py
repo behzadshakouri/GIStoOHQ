@@ -342,7 +342,7 @@ def wipe_temp_dir(temp_dir):
 
 
 def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
-    """Snap to the greatest absolute accumulation within a circular radius."""
+    """Snap inside the accepted move limit, using the wider radius for diagnosis."""
     dataset = gdal.Open(raster_path)
     if dataset is None:
         raise Exception(
@@ -399,10 +399,27 @@ def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
         )
 
     magnitude = np.abs(subset)
+    accepted = valid & (distance <= MAX_OUTLET_SNAP_M)
+    accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)
+    diagnostic_channel = valid & (magnitude >= MIN_SNAP_ACC_CELLS)
+
+    # Do not repeatedly "walk" a valid outlet downstream by selecting the
+    # greatest accumulation anywhere in the wider diagnostic search window.
+    # Prefer a routed cell inside the maximum accepted movement.  A qualifying
+    # cell outside that limit is selected only to explain why the run stopped.
+    if np.any(accepted_channel):
+        selection_mask = accepted_channel
+    elif np.any(diagnostic_channel):
+        selection_mask = diagnostic_channel
+    elif np.any(accepted):
+        selection_mask = accepted
+    else:
+        selection_mask = valid
+
     score = magnitude.copy()
     if SNAP_DISTANCE_WEIGHT > 0:
         score = score / (1.0 + SNAP_DISTANCE_WEIGHT * distance)
-    score[~valid] = -np.inf
+    score[~selection_mask] = -np.inf
 
     flat_index = int(np.argmax(score))
     local_row, local_col = np.unravel_index(flat_index, score.shape)
@@ -461,6 +478,7 @@ print("Flow acc   :", FLOWACC_PATH)
 print("Boundary   :", BOUNDARY_OUT)
 print("Snap       :", SNAP, "| search radius:", OUTLET_SEARCH_RADIUS_M, "m")
 print("Max move   :", MAX_OUTLET_SNAP_M, "m")
+print("Selection  : strongest routed cell within max move; wider radius is diagnostic")
 
 for path in (OUTLET_PATH, FLOWDIR_PATH, FLOWACC_PATH):
     if not os.path.isfile(path):

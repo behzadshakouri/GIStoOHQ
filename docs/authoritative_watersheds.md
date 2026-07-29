@@ -126,3 +126,9 @@ Automatic threshold searches can overfit a reference polygon while producing a
 physically poor channel network. Treat low agreement as a review flag. Never move
 the outlet, change depression handling, or burn channels solely to maximize IoU
 without recording the change and verifying that it is hydrologically plausible.
+
+The raster outlet snap uses two distinct limits. It first chooses the strongest
+routed cell within the maximum accepted movement (50 m by default). The wider
+search radius (150 m by default) is diagnostic only when no qualifying routed cell
+exists inside the accepted limit. This prevents a reviewed outlet from moving
+farther downstream on each run merely because accumulation increases downstream.
