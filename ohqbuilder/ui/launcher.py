@@ -57,8 +57,8 @@ BASEMAP_PROVIDERS = {
 }
 
 SLIGO_DEMO_SITE = "SligoCreekDemo"
-SLIGO_DEMO_LON = -76.97391566325376
-SLIGO_DEMO_LAT = 38.95840888229726
+SLIGO_DEMO_LON = -76.9744266065
+SLIGO_DEMO_LAT = 38.9571888036
 SLIGO_DEMO_CRS = "EPSG:26918"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
@@ -258,6 +258,7 @@ WorkflowStep = Literal[
     "build-ohq",
     "run-to-ohq",
     "full-run",
+    "promote-pour-points",
     "build-hms",
     "validate-hms",
 ]
@@ -294,6 +295,10 @@ class LauncherState:
     flowline_path: Path | None = None
     tile_index: Path | None = None
     acquisition_area: Path | None = None
+    use_reviewed_pour_points: bool = False
+    nhdplus_snap_distance_m: float = 50.0
+    overwrite_promoted_pour_points: bool = False
+    use_existing_outlet: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -428,6 +433,11 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
+        argv.extend(("--nhdplus-snap-distance-m", str(state.nhdplus_snap_distance_m)))
+        if state.use_reviewed_pour_points:
+            argv.append("--use-reviewed-pour-points")
+        if state.use_existing_outlet:
+            argv.append("--use-existing-outlet")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -440,6 +450,19 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
                 (tuple(argv),),
             )
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
+    if step == "promote-pour-points":
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required to promote pour points.")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(state.root),
+            "--site", state.site,
+        ]
+        if state.overwrite_promoted_pour_points:
+            argv.append("--overwrite")
+        return WorkflowCommand(
+            "Promote Reviewed Pour Points",
+            tuple(argv),
+        )
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for HEC-HMS commands.")
@@ -583,6 +606,8 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
         acquisition_area=path_value(dem.get("acquisition_area")),
+        use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
+        nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
     )
 
 
@@ -611,6 +636,8 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "dem_acquisition", "tile_index", path_text(state.tile_index))
     updated["root"] = path_text(state.root, ".")
     updated["download_dir"] = path_text(state.source_dir, "source_downloads")
+    updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
+    updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
     return updated
 
 
@@ -641,6 +668,10 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
         tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
         acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
+        use_reviewed_pour_points=form_state.use_reviewed_pour_points,
+        nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
+        overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
+        use_existing_outlet=form_state.use_existing_outlet,
     )
 
 
@@ -852,8 +883,8 @@ class MapPicker:
         self.zoom = clamp_zoom(zoom)
         self.width = width
         self.height = height
-        self.center_lon = float(app.lon_var.get() or -76.97391566325376)
-        self.center_lat = float(app.lat_var.get() or 38.95840888229726)
+        self.center_lon = float(app.lon_var.get() or SLIGO_DEMO_LON)
+        self.center_lat = float(app.lat_var.get() or SLIGO_DEMO_LAT)
         self.images = []
         self.flowlines = self._load_flowlines()
         self.selection_points: list[tuple[float, float]] = []
@@ -1102,6 +1133,10 @@ class LauncherApp:
         self.method_var = tk.StringVar(value="upstream_network")
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
+        self.reviewed_points_var = tk.BooleanVar(value=False)
+        self.nhdplus_snap_var = tk.StringVar(value="50")
+        self.overwrite_promoted_var = tk.BooleanVar(value=False)
+        self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
@@ -1124,6 +1159,7 @@ class LauncherApp:
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
+            ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
@@ -1174,6 +1210,21 @@ class LauncherApp:
         )
         recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
+        tk.Checkbutton(
+            project_buttons,
+            text="Use reviewed pour points",
+            variable=self.reviewed_points_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Overwrite existing promoted pour points",
+            variable=self.overwrite_promoted_var,
+        ).grid(row=3, column=2, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Use edited existing outlet.shp",
+            variable=self.use_existing_outlet_var,
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1214,6 +1265,7 @@ class LauncherApp:
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
+            ("Promote reviewed pour points", "promote-pour-points"),
         )):
             button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
@@ -1379,6 +1431,10 @@ class LauncherApp:
             method=self.method_var.get().strip() or None,
             flowline_path=optional_path(self.flowline_var.get()),
             tile_index=optional_path(self.tile_index_var.get()),
+            use_reviewed_pour_points=self.reviewed_points_var.get(),
+            nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
+            overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
+            use_existing_outlet=self.use_existing_outlet_var.get(),
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1394,6 +1450,10 @@ class LauncherApp:
         self.method_var.set(state.method or "")
         self.flowline_var.set(str(state.flowline_path or ""))
         self.tile_index_var.set(str(state.tile_index or ""))
+        self.reviewed_points_var.set(state.use_reviewed_pour_points)
+        self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
+        self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
+        self.use_existing_outlet_var.set(state.use_existing_outlet)
 
     def load_config(self) -> None:
         try:

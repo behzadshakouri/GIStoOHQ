@@ -70,6 +70,17 @@ def test_reach_extraction_adapts_threshold_to_tiny_demo_accumulation():
     assert "No raster-extracted reaches; clipping mapped flowlines as fallback" in source
 
 
+def test_reach_output_releases_stale_qgis_handle_before_rewrite():
+    source = Path("scripts/legacy_gis/extract_reaches.py").read_text(encoding="utf-8")
+
+    assert "from ws3io import release_and_delete" in source
+    assert "release_and_delete(REACHES_OUT)" in source
+    assert 'REACHES_OUT + "|layername=reaches"' in source
+    assert "size_bytes=%s" in source
+    assert "reaches.gpkg contains zero features" in source
+    assert 'REACH_WRITER_REVISION = "stale-layer-release-v2"' in source
+
+
 def test_phase2_accepts_single_reach_watershed_without_interior_junctions():
     source = Path("scripts/legacy_gis/run_phase2.py").read_text(encoding="utf-8")
 
@@ -136,6 +147,17 @@ def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
     assert 'return "YELLOW"' in source
     assert 'return "RED"' in source
     assert 'QgsField("quality", QVariant.String)' in source
+
+
+def test_outlet_snap_prioritizes_cells_inside_maximum_accepted_move():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "accepted = valid & (distance <= MAX_OUTLET_SNAP_M)" in source
+    assert "accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)" in source
+    assert "selection_mask = accepted_channel" in source
+    assert "score[~selection_mask] = -np.inf" in source
 
 
 def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():
