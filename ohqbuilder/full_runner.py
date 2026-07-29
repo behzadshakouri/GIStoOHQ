@@ -321,7 +321,10 @@ def run_full_pipeline(
         emit("Starting full-run pipeline.")
         if use_existing_outlet:
             lon, lat = existing_outlet_lonlat(root, site)
-            emit(f"Using reviewed existing outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
+            emit("Outlet source: existing outputs/outlet.shp")
+            emit(f"Reviewed outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
+        else:
+            emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         buffer_was_supplied = buffer_m is not None
         if buffer_m is None:

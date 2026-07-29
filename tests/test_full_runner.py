@@ -246,6 +246,32 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     assert phase_options["options"].child_options == {"MAX_OUTLET_SNAP_M": 50.0}
 
 
+def test_full_pipeline_reports_cli_outlet_recreation(monkeypatch, tmp_path):
+    messages = []
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.materialize_source_inputs", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(tmp_path, "SITE", lon=-77.0, lat=39.0, progress=messages.append)
+
+    assert "Outlet source: CLI longitude/latitude (outlet.shp will be recreated)" in messages
+
+
 def test_full_pipeline_requires_and_preserves_reviewed_pour_points(monkeypatch, tmp_path):
     outputs = tmp_path / "SITE_A" / "outputs"
     outputs.mkdir(parents=True)

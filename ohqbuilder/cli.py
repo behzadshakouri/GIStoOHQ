@@ -746,6 +746,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     full.add_argument(
         "--use-existing-outlet",
+        "--preserve-existing-outlet",
+        dest="use_existing_outlet",
         action="store_true",
         help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
     )

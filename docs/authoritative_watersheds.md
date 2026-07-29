@@ -51,6 +51,9 @@ diagnostics while enforcing the 50 m `MAX_OUTLET_SNAP_M` acceptance limit. After
 editing `outputs/outlet.shp` in QGIS, rerun with `--use-existing-outlet`; full-run
 will read that point, transform it to EPSG:4326 for downloads/tracing, and will not
 recreate the shapefile from the old command-line longitude/latitude.
+The log always states either `Outlet source: existing outputs/outlet.shp` or
+`Outlet source: CLI longitude/latitude (outlet.shp will be recreated)`. The alias
+`--preserve-existing-outlet` is accepted for the same explicit preservation mode.
 After the DEM delineation finishes, `full-run` compares it with the NHDPlus
 upstream boundary and writes `watershed_nhdplus_comparison.json`. Both WBD and
 NHDPlus comparisons now include a disagreement GeoPackage with separate

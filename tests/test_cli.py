@@ -94,6 +94,22 @@ def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
     ]) == 2
 
 
+def test_full_run_cli_accepts_preserve_existing_outlet_alias(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        "ohqbuilder.cli.run_full_pipeline",
+        lambda *args, **kwargs: calls.append(kwargs) or FullRunResult(tmp_path / "final.ohq"),
+    )
+
+    status = main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "34.1", "--lon", "-111.2", "--preserve-existing-outlet",
+    ])
+
+    assert status == 0
+    assert calls[0]["use_existing_outlet"] is True
+
+
 def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):
     calls = []
 
