@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Literal
 
-ProductKey = Literal["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+ProductKey = Literal["dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"]
 
 TNM_PRODUCTS_URL = "https://tnmaccess.nationalmap.gov/api/v1/products"
 CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
@@ -80,15 +80,20 @@ HYDRO_TIERS: tuple[ProductTier, ...] = (
         "NHD Best Resolution",
     ),
 )
+WBD_TIERS: tuple[ProductTier, ...] = (
+    ProductTier("Watershed Boundary Dataset (WBD)", ("Shapefile", "FileGDB"), "WBD vector"),
+)
 PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {
     "dem": ELEVATION_TIERS,
     "demlr": LOW_RES_ELEVATION_TIERS,
     "hydro": HYDRO_TIERS,
+    "wbd": WBD_TIERS,
 }
 DEFAULT_MAX_TILES: dict[ProductKey, int] = {
     "dem": 8,
     "demlr": 8,
     "hydro": 4,
+    "wbd": 4,
     "roads": 1,
     "landcover": 1,
     "atlas14": 1,
@@ -103,16 +108,16 @@ ATLAS14_RETURN_PERIODS = ("2yr", "5yr", "10yr", "25yr", "50yr", "100yr")
 def parse_products(value: str) -> list[ProductKey]:
     selected = [part.strip().lower() for part in value.split(",") if part.strip()]
     if "all" in selected:
-        return ["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+        return ["dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"]
     products: list[ProductKey] = []
     for key in selected:
         if key == "demhr":
             key = "dem"
         if key == "nlcd":
             key = "landcover"
-        if key not in {"dem", "demlr", "hydro", "roads", "landcover", "atlas14"}:
+        if key not in {"dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"}:
             raise ValueError(
-                "products must be 'dem' (or 'demhr'), 'demlr', 'hydro', 'roads', "
+                "products must be 'dem' (or 'demhr'), 'demlr', 'hydro', 'wbd', 'roads', "
                 "'landcover' (or 'nlcd'), 'atlas14', 'all', or a comma-separated subset"
             )
         products.append(key)  # type: ignore[arg-type]
@@ -220,6 +225,37 @@ def _hydro_hu4_key(item: DownloadItem) -> str:
 def _is_hydro_raster_package(item: DownloadItem) -> bool:
     text = f"{item.title} {_filename_from_url(item.url, item.title)}"
     return bool(re.search(r"(?:^|[_-])raster(?:[_\.-]|$)", text, re.IGNORECASE))
+
+
+def classify_hydro_product(item: DownloadItem) -> str:
+    """Classify TNM hydro/WBD candidates before selecting a download."""
+
+    text = " ".join((item.title, item.url, item.dataset, item.resolution)).lower()
+    if "nhdplus" in text and "raster" in text:
+        return "nhdplus_raster"
+    if "watershed boundary dataset" in text or re.search(r"(?:^|[_\W])wbd(?:[_\W]|$)", text):
+        return "wbd_vector" if "raster" not in text else "unknown"
+    if "nhdplus" in text and any(
+        token in text for token in ("gdb", "geodatabase", "gpkg", "shape", "vector")
+    ):
+        return "nhdplus_vector"
+    if "nhd" in text and "raster" not in text:
+        return "nhd_vector"
+    return "unknown"
+
+
+def _prefer_wbd_packages(items: list[DownloadItem]) -> list[DownloadItem]:
+    """Keep only standalone vector WBD products; never accept NHDPlus rasters."""
+
+    valid = [item for item in items if classify_hydro_product(item) == "wbd_vector"]
+    return sorted(
+        valid,
+        key=lambda item: (
+            item.size_bytes if item.size_bytes is not None else 10**18,
+            _item_date_key(item),
+            item.title,
+        ),
+    )
 
 
 def _hydro_vector_rank(item: DownloadItem) -> int:
@@ -455,6 +491,8 @@ def _tnm_product_result(
         if product == "hydro":
             found = sorted(found, key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18)
             deduped = _prefer_hydro_packages(found)
+        elif product == "wbd":
+            deduped = _prefer_wbd_packages(found)
         else:
             deduped = _dedupe_latest_by_tile(found, product) if product in {"dem", "demlr"} else found
         allowed = [

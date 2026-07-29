@@ -4,7 +4,7 @@ This folder is a small no-network smoke test for the outlet-first DEM acquisitio
 
 ## Outlet and study extent
 
-`SC.kmz` places the outlet candidate at **38.95840888229726, -76.97391566325376**, at the Sligo Creek side of its confluence with Northwest Branch. The workflow and the legacy downloader CSV now use that same coordinate. It replaces the former `39.000215, -77.010810` point, which is upstream within the watershed and therefore was not a watershed mouth.
+`SC.kmz` originally placed the outlet candidate at **38.95840888229726, -76.97391566325376**. Routing-grid review found that this point required a 142.50 m move. The workflow and downloader CSV now use the reviewed routed-cell candidate **38.9571888036, -76.9744266065** (EPSG:26918 approximately **328920.79, 4313879.55**). Verify that it is on Sligo Creek rather than Northwest Branch before design use.
 
 The acquisition envelope follows the Sligo centerline and uses **1,000 m** upstream, downstream, and lateral margins. This is acquisition padding, not a request to model the downstream Northwest Branch or the whole Anacostia basin. After DEM delineation, inspect the boundary and retain only the drainage area upstream of the Sligo-side pour point. See `outlet_and_extent.geojson` for the machine-readable point and review notes.
 
