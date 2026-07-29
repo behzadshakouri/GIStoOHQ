@@ -13,6 +13,10 @@ the source archive and records the selected dataset in its summary. During
 `materialize-inputs` or `full-run`, GIStoOHQ extracts intersecting HUC12 features
 to `outputs/WBDHU12_reference.gpkg` when materialization bounds are available. It
 does not silently substitute that reference for the model watershed.
+After delineation, `full-run` writes `outputs/watershed_wbd_comparison.json` with
+per-HUC12 area, intersection, omission, commission, IoU, and boundary Hausdorff
+distance. Metrics use a locally estimated projected CRS and identify the highest-
+IoU feature as a review candidate—not an automatically accepted boundary.
 
 ## What each national dataset can establish
 

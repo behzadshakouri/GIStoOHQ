@@ -19,6 +19,7 @@ from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
+from .watershed_comparison import compare_watersheds
 
 
 class FullRunError(RuntimeError):
@@ -30,6 +31,7 @@ class FullRunResult:
     output_path: Path
     hms_project_path: Path | None = None
     report_path: Path | None = None
+    comparison_path: Path | None = None
 
 
 def network_element_counts(watershed) -> dict[str, tuple[int, int]]:
@@ -305,12 +307,15 @@ def run_full_pipeline(
         )
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")
-        materialize_source_inputs(
+        materialized = materialize_source_inputs(
             root,
             site,
             source_dir=fetched.download_dir,
             target_crs=target_crs,
             clip_bounds=selected_bounds,
+            clip_center_lon=lon,
+            clip_center_lat=lat,
+            clip_buffer_m=buffer_m,
         )
         # Step 3: generate the GIS-derived model inputs.
         options = LegacyWorkflowOptions(
@@ -321,6 +326,16 @@ def run_full_pipeline(
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)
+        comparison_path = None
+        wbd_reference = getattr(materialized, "wbd_reference", None)
+        generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
+        if wbd_reference is not None and generated_boundary.is_file():
+            comparison_path = compare_watersheds(
+                generated_boundary,
+                wbd_reference,
+                generated_boundary.with_name("watershed_wbd_comparison.json"),
+            )
+            emit(f"Wrote WBD comparison metrics: {comparison_path}")
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
@@ -339,7 +354,7 @@ def run_full_pipeline(
         watershed = WatershedBuilder(settings).build()
         report_path = write_watershed_report(watershed, built, hms_path)
         emit(full_run_summary(watershed, built, hms_path, report_path))
-        return FullRunResult(Path(built), hms_path, report_path)
+        return FullRunResult(Path(built), hms_path, report_path, comparison_path)
     except FullRunError:
         raise
     except Exception as exc:
