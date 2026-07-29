@@ -74,6 +74,7 @@ SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
 SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
+MAX_OUTLET_SNAP_M = float(globals().get("MAX_OUTLET_SNAP_M", 50.0))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
 )
@@ -537,6 +538,13 @@ if SNAP:
     print("  movement             : %.2f m" % moved)
     snap_quality = outlet_snap_quality(moved)
     print("  outlet quality       : %s" % snap_quality)
+    if moved > MAX_OUTLET_SNAP_M:
+        print_alignment_guidance(snap_acc=snap_acc, moved=moved)
+        raise Exception(
+            "STOPPED: outlet snap movement %.2f m exceeds MAX_OUTLET_SNAP_M %.2f m. "
+            "Verify and move the outlet in QGIS before delineation."
+            % (moved, MAX_OUTLET_SNAP_M)
+        )
     if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
         print(
             "  WARNING: SELECTED OUTLET IS FAR FROM THE ROUTED STREAM. "

@@ -155,6 +155,25 @@ def test_materialize_optional_wbd_skips_without_bounds_or_download(tmp_path):
     )
 
 
+def test_materialize_optional_wbd_falls_back_to_hydro_package(monkeypatch, tmp_path):
+    hydro = tmp_path / "downloads" / "site-id" / "hydro"
+    hydro.mkdir(parents=True)
+    (hydro / "NHDPlusHR.zip").write_bytes(b"fixture")
+    expected = tmp_path / "SITE_A" / "outputs" / "WBDHU12_reference.gpkg"
+    calls = []
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_reference",
+        lambda *args, **kwargs: calls.append(args) or expected,
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path, "SITE_A", hydro.parent.parent, (-77.1, 38.9, -76.9, 39.1), "EPSG:4326"
+    )
+
+    assert result == expected
+    assert calls[0][0] == hydro
+
+
 def test_materialize_source_inputs_forwards_user_clip_bounds(monkeypatch, tmp_path):
     downloads = tmp_path / "SITE_A" / "source_downloads" / "source-id"
     (downloads / "demlr").mkdir(parents=True)

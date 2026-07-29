@@ -242,6 +242,45 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     assert result.hms_project_path == tmp_path / "SITE_A.hms"
     assert result.report_path == tmp_path / "watershed_report.html"
     assert phase_options["options"].refresh_auto_pour_points is True
+    assert phase_options["options"].child_options == {"MAX_OUTLET_SNAP_M": 50.0}
+
+
+def test_full_pipeline_requires_and_preserves_reviewed_pour_points(monkeypatch, tmp_path):
+    outputs = tmp_path / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    reviewed = outputs / "pour_points.shp"
+    reviewed.write_text("reviewed", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.materialize_source_inputs", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_legacy_input_workflow",
+        lambda *args, **kwargs: captured.setdefault("options", args[4]),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "SITE_A.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "SITE_A.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path, "SITE_A", lon=-77.0, lat=39.0, use_reviewed_pour_points=True
+    )
+
+    assert captured["options"].auto_pour_points is False
+    assert captured["options"].refresh_auto_pour_points is False
+    assert reviewed.read_text(encoding="utf-8") == "reviewed"
 
 
 def test_full_pipeline_requires_and_preserves_reviewed_pour_points(monkeypatch, tmp_path):

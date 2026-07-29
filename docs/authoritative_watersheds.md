@@ -1,15 +1,18 @@
 # Authoritative U.S. watershed references
 
-GIStoOHQ can download the USGS Watershed Boundary Dataset (WBD) with the other
-source inputs. Use `wbd` alone or include it in a comma-separated product list:
+GIStoOHQ obtains WBDHU layers from the downloaded NHDPlus HR/NHD vector package.
+TNM point-product searches do not consistently advertise WBD as an independent
+product, which can incorrectly return zero results even where WBD coverage exists.
+Use `hydro` in production downloads; `wbd` remains an explicit alias that fetches
+the same hydro package as the WBD carrier:
 
 ```bash
 ohqbuild download-data sites.csv --products wbd --download source_downloads
-ohqbuild download-data sites.csv --products dem,hydro,wbd --download source_downloads
+ohqbuild download-data sites.csv --products dem,hydro --download source_downloads
 ```
 
-`all`, `download-inputs`, and `full-run` also request WBD. The downloader retains
-the source archive and records the selected dataset in its summary. During
+`download-inputs` and `full-run` request hydrography once rather than issuing a
+second, unreliable WBD product query. During
 `materialize-inputs` or `full-run`, GIStoOHQ extracts intersecting HUC12 features
 to `outputs/WBDHU12_reference.gpkg` when materialization bounds are available. It
 does not silently substitute that reference for the model watershed.
@@ -37,7 +40,7 @@ to the nearest reach, traces all upstream reaches, and writes
 `outputs/NHDPlus_upstream_candidate.gpkg`. Its companion JSON records the selected
 reach, snap distance, field mapping, and feature counts. Missing connectivity is
 reported for review rather than guessed from line orientation.
-The trace rejects an outlet more than 500 m from the nearest NHDPlus reach by
+The trace and DEM delineation reject an outlet movement greater than 50 m by
 default; change `--nhdplus-snap-distance-m` only when the larger movement has been
 checked against local hydrography.
 After the DEM delineation finishes, `full-run` compares it with the NHDPlus

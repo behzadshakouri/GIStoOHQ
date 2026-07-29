@@ -249,7 +249,7 @@ def _command_for_workflow(
         snap_distance = (
             nhdplus_snap_distance_m
             if nhdplus_snap_distance_m is not None
-            else config.get("nhdplus_snap_distance_m", 500.0)
+            else config.get("nhdplus_snap_distance_m", 50.0)
         )
         argv.extend(["--nhdplus-snap-distance-m", str(snap_distance)])
         use_reviewed = (
@@ -363,10 +363,10 @@ class DemWorkflowDock:
         controls = QHBoxLayout()
         self.reviewed_points = QCheckBox("Use reviewed pour points")
         controls.addWidget(self.reviewed_points)
-        controls.addWidget(QLabel("NHDPlus snap max (m)"))
+        controls.addWidget(QLabel("Outlet/NHDPlus snap max (m)"))
         self.nhdplus_snap_distance = QDoubleSpinBox()
         self.nhdplus_snap_distance.setRange(0.0, 100000.0)
-        self.nhdplus_snap_distance.setValue(500.0)
+        self.nhdplus_snap_distance.setValue(50.0)
         controls.addWidget(self.nhdplus_snap_distance)
         self.overwrite_promoted = QCheckBox("Overwrite promoted points")
         controls.addWidget(self.overwrite_promoted)

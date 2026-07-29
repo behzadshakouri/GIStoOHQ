@@ -86,14 +86,14 @@ so each stage finishes before another can start; **STOP** terminates the active
 command and its child process group when a long download or GIS run must be cancelled.
 For a new real site, **FULL RUN: download all data to OHQ** invokes the terminal
 `full-run` pipeline with the form's verified outlet, root, site, CRS, and download
-directory. That pipeline downloads DEM, NHDPlus HR/NHD hydrography, WBD watershed
-boundaries, roads, land cover, Atlas 14,
+directory. That pipeline downloads DEM, NHDPlus HR/NHD hydrography (including its
+WBDHU reference layers), roads, land cover, Atlas 14,
 hydrologic soil groups, and soil texture; mosaics/clips the GIS sources; runs
 hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/network
 inputs; and writes the final OHQ file. QGIS processing and internet access are
 required for this production path.
 
-The downloaded WBD package is an **authoritative reference**, not automatically the
+The WBDHU layer extracted from the hydro package is an **authoritative reference**, not automatically the
 model boundary. HUC12 units are standardized drainage units and may contain several
 named urban streams; their internal lines are not the paper-specific subcatchments
 created at tributaries, gauges, or monitoring sites. For a U.S. project, compare the

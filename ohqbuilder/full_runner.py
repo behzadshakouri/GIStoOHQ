@@ -288,7 +288,7 @@ def run_full_pipeline(
     soil_top_depth: float = 30.0,
     acquisition_area: str | Path | None = None,
     use_reviewed_pour_points: bool = False,
-    nhdplus_snap_distance_m: float = 500.0,
+    nhdplus_snap_distance_m: float = 50.0,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -398,6 +398,7 @@ def run_full_pipeline(
             auto_outlet=True,
             auto_pour_points=not use_reviewed_pour_points,
             refresh_auto_pour_points=not use_reviewed_pour_points,
+            child_options={"MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m},
         )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)

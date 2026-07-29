@@ -80,9 +80,10 @@ HYDRO_TIERS: tuple[ProductTier, ...] = (
         "NHD Best Resolution",
     ),
 )
-WBD_TIERS: tuple[ProductTier, ...] = (
-    ProductTier("Watershed Boundary Dataset (WBD)", ("Shapefile", "FileGDB"), "WBD"),
-)
+# TNM point-product searches do not consistently expose WBD as an independent
+# product. NHDPlus HR/NHD vector distributions carry the WBDHU layers needed by
+# this workflow, so use the hydro packages as the reliable WBD carrier.
+WBD_TIERS: tuple[ProductTier, ...] = HYDRO_TIERS
 PRODUCT_TIERS: dict[ProductKey, tuple[ProductTier, ...]] = {
     "dem": ELEVATION_TIERS,
     "demlr": LOW_RES_ELEVATION_TIERS,

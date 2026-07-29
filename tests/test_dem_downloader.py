@@ -38,7 +38,7 @@ def test_parse_products_all_and_subset():
 def test_wbd_uses_authoritative_tnm_dataset():
     tier = dd.PRODUCT_TIERS["wbd"][0]
 
-    assert tier.dataset == "Watershed Boundary Dataset (WBD)"
+    assert tier.dataset == "National Hydrography Dataset Plus High Resolution (NHDPlus HR)"
     assert tier.formats == ("Shapefile", "FileGDB")
 
 

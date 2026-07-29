@@ -296,7 +296,7 @@ class LauncherState:
     tile_index: Path | None = None
     acquisition_area: Path | None = None
     use_reviewed_pour_points: bool = False
-    nhdplus_snap_distance_m: float = 500.0
+    nhdplus_snap_distance_m: float = 50.0
     overwrite_promoted_pour_points: bool = False
 
 
@@ -604,7 +604,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         tile_index=path_value(dem.get("tile_index")),
         acquisition_area=path_value(dem.get("acquisition_area")),
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
-        nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 500.0)),
+        nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
     )
 
 
@@ -1130,7 +1130,7 @@ class LauncherApp:
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
         self.reviewed_points_var = tk.BooleanVar(value=False)
-        self.nhdplus_snap_var = tk.StringVar(value="500")
+        self.nhdplus_snap_var = tk.StringVar(value="50")
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
@@ -1154,7 +1154,7 @@ class LauncherApp:
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
-            ("NHDPlus snap max (m)", self.nhdplus_snap_var),
+            ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
@@ -1422,7 +1422,7 @@ class LauncherApp:
             flowline_path=optional_path(self.flowline_var.get()),
             tile_index=optional_path(self.tile_index_var.get()),
             use_reviewed_pour_points=self.reviewed_points_var.get(),
-            nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 500.0,
+            nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
         )
 

@@ -741,8 +741,8 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument(
         "--nhdplus-snap-distance-m",
         type=float,
-        default=500.0,
-        help="Maximum outlet-to-NHDPlus reach snap distance in meters (default: 500).",
+        default=50.0,
+        help="Maximum outlet movement for NHDPlus and DEM routing snaps (default: 50 m).",
     )
 
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")

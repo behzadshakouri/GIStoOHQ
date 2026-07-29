@@ -106,7 +106,15 @@ def materialize_optional_wbd(
     try:
         wbd_dir = find_product_dir(source_dir, "wbd")
     except FileNotFoundError:
-        return None
+        try:
+            # NHDPlus HR vector distributions commonly carry WBDHU layers. Use
+            # that authoritative copy instead of assuming TNM exposes WBD as a
+            # separate point-query download product.
+            wbd_dir = find_product_dir(source_dir, "hydro")
+        except FileNotFoundError:
+            return None
+        if not list(wbd_dir.rglob("WBDHU12.shp")) and not list(wbd_dir.rglob("*.zip")):
+            return None
     return materialize_wbd_reference(
         wbd_dir,
         root / site / "outputs" / "WBDHU12_reference.gpkg",
