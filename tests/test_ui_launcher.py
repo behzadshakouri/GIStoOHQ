@@ -154,6 +154,14 @@ def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
     assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
 
 
+def test_bundled_sligo_config_uses_reviewed_routed_outlet():
+    path = Path("examples/SligoCreek/dem_workflow.example.yaml")
+    state = state_from_config(path, load_project_config(path))
+
+    assert state.lon == pytest.approx(-76.9744266065)
+    assert state.lat == pytest.approx(38.9571888036)
+
+
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     config = {
