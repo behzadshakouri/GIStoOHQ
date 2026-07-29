@@ -138,3 +138,8 @@ WBD ArcGIS service, discovers the HUC12 layer by name, and writes the same clipp
 `WBDHU12_reference.gpkg` review layer. Service failure remains non-fatal: the run
 continues in DEM/NHD mode and records `WBD_MATERIALIZATION_WARNING.txt` so the
 absence of an authoritative polygon cannot be mistaken for a completed comparison.
+
+The full-run success summary prints the best matching reference identifier, both
+areas, signed area difference, IoU, omission and commission areas, and boundary
+Hausdorff distance. This makes a successful WBD service fallback visible in the
+terminal even though the earlier TNM package query may still report zero downloads.

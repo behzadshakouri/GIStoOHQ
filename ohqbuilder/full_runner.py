@@ -97,6 +97,7 @@ def full_run_summary(
     ohq_path: str | Path,
     hms_path: str | Path,
     report_path: str | Path | None = None,
+    comparison_paths: list[str | Path] | None = None,
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
@@ -126,6 +127,32 @@ def full_run_summary(
     if report_path is not None:
         lines.append(
             f"  ✓ Watershed report: {Path(report_path).expanduser().resolve()}"
+        )
+    for comparison_path in comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        best = payload.get("best_match") or {}
+        generated_area = float(best.get("generated_area_km2", 0.0))
+        reference_area = float(best.get("reference_area_km2", 0.0))
+        area_difference_pct = (
+            100.0 * (generated_area - reference_area) / reference_area
+            if reference_area
+            else 0.0
+        )
+        lines.extend(
+            [
+                "",
+                f"Boundary Comparison ({payload.get('reference_layer', 'reference')})",
+                f"  Reference ID       : {best.get('reference_id', '—')}",
+                f"  Generated area     : {generated_area:.4f} km²",
+                f"  Reference area     : {reference_area:.4f} km²",
+                f"  Area difference    : {area_difference_pct:+.2f}%",
+                f"  Intersection/Union : {float(best.get('iou', 0.0)):.3f}",
+                f"  Generated only     : {float(best.get('commission_area_km2', 0.0)):.4f} km²",
+                f"  Reference only     : {float(best.get('omission_area_km2', 0.0)):.4f} km²",
+                f"  Boundary Hausdorff : {float(best.get('boundary_hausdorff_m', 0.0)):.1f} m",
+            ]
         )
     lines.append("=" * 72)
     return "\n".join(lines)
@@ -377,6 +404,17 @@ def run_full_pipeline(
             clip_buffer_m=buffer_m,
         )
         materialized_hydro = getattr(materialized, "hydro", None)
+        materialized_wbd = getattr(materialized, "wbd_reference", None)
+        if materialized_wbd is not None:
+            emit(
+                "WBD HUC12 reference ready (downloaded package or official service): "
+                f"{materialized_wbd}"
+            )
+        else:
+            emit(
+                "WBD HUC12 reference unavailable; continuing without authoritative "
+                "boundary comparison."
+            )
         catchment_path = getattr(materialized_hydro, "catchment_path", None)
         nhdplus_candidate = None
         if catchment_path is not None:
@@ -475,7 +513,15 @@ def run_full_pipeline(
         report_path = write_watershed_report(
             watershed, built, hms_path, comparison_paths=comparison_paths
         )
-        emit(full_run_summary(watershed, built, hms_path, report_path))
+        emit(
+            full_run_summary(
+                watershed,
+                built,
+                hms_path,
+                report_path,
+                comparison_paths=comparison_paths,
+            )
+        )
         return FullRunResult(Path(built), hms_path, report_path, comparison_path)
     except FullRunError:
         raise

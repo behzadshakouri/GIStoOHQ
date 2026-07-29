@@ -50,6 +50,41 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     assert str((tmp_path / "site.ohq").resolve()) in summary
 
 
+def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):
+    comparison = tmp_path / "watershed_wbd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "reference_layer": "WBDHU12_reference",
+                "best_match": {
+                    "reference_id": "020700100101",
+                    "generated_area_km2": 38.3443,
+                    "reference_area_km2": 40.0,
+                    "iou": 0.8123,
+                    "omission_area_km2": 3.2,
+                    "commission_area_km2": 1.5,
+                    "boundary_hausdorff_m": 87.5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    watershed = SimpleNamespace(subbasins=[], reaches=[], junctions=[])
+
+    summary = full_run_summary(
+        watershed,
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        comparison_paths=[comparison],
+    )
+
+    assert "Boundary Comparison (WBDHU12_reference)" in summary
+    assert "Reference ID       : 020700100101" in summary
+    assert "Area difference    : -4.14%" in summary
+    assert "Intersection/Union : 0.812" in summary
+    assert "Boundary Hausdorff : 87.5 m" in summary
+
+
 def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     watershed = SimpleNamespace(
         subbasins=[
