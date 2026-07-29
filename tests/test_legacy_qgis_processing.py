@@ -138,6 +138,17 @@ def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
     assert 'QgsField("quality", QVariant.String)' in source
 
 
+def test_outlet_snap_prioritizes_cells_inside_maximum_accepted_move():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "accepted = valid & (distance <= MAX_OUTLET_SNAP_M)" in source
+    assert "accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)" in source
+    assert "selection_mask = accepted_channel" in source
+    assert "score[~selection_mask] = -np.inf" in source
+
+
 def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():
     source = Path("scripts/legacy_gis/longestflowpath.py").read_text(encoding="utf-8")
 
