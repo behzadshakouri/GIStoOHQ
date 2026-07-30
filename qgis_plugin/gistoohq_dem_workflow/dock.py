@@ -425,6 +425,7 @@ class DemWorkflowDock:
         draw_button = QPushButton("Draw DEM Area Polygon")
         draw_button.clicked.connect(self.draw_acquisition_polygon)
         layout.addWidget(draw_button)
+        self.action_buttons = {}
         for label, command in (
             ("Prepare DEM", "prepare-dem"),
             ("Run Direct DEM Prep", "run-dem-prep"),
@@ -443,6 +444,7 @@ class DemWorkflowDock:
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
             layout.addWidget(button)
+            self.action_buttons[command] = button
         load_button = QPushButton("Load Configured Layers")
         load_button.clicked.connect(self.load_configured_layers)
         layout.addWidget(load_button)
@@ -451,6 +453,7 @@ class DemWorkflowDock:
         layout.addWidget(self.log)
         self.process = None
         self.widget.setWidget(self.panel)
+        self._refresh_action_buttons()
 
     def __getattr__(self, name):
         return getattr(self.widget, name)
@@ -638,6 +641,7 @@ class DemWorkflowDock:
                 "Saved pour-point candidates. Review reason/status attributes, set selected "
                 "points to approved, then run Promote Reviewed Pour Points."
             )
+            self._refresh_action_buttons()
         except (OSError, QgisDockConfigError) as exc:
             self.log.append(f"ERROR: {exc}")
 
@@ -703,6 +707,17 @@ class DemWorkflowDock:
         if self.process is not None and self.process.state() != QProcess.NotRunning:
             self.log.append("A workflow command is already running; wait for it to finish first.")
             return
+        if command == "promote-pour-points":
+            try:
+                if not self._pour_point_path().is_file():
+                    self.log.append(
+                        "No pour-point candidate file exists. Generate candidates first, "
+                        "review them in QGIS, then promote them."
+                    )
+                    return
+            except (OSError, QgisDockConfigError) as exc:
+                self.log.append(f"Cannot promote pour points: {exc}")
+                return
         try:
             skip_prepare = bool(getattr(self, "skip_full_prepare_once", False))
             self.skip_full_prepare_once = False
@@ -755,11 +770,21 @@ class DemWorkflowDock:
     def _command_finished(self, command: str, code: int, status) -> None:
         self.log.append(f"[{command} exited with {code}]")
         self.process = None
+        self._refresh_action_buttons()
         pending = getattr(self, "pending_workflow", None)
         self.pending_workflow = None
         if pending and code == 0:
             self.skip_full_prepare_once = True
             self.run_command(pending)
+
+    def _refresh_action_buttons(self) -> None:
+        button = getattr(self, "action_buttons", {}).get("promote-pour-points")
+        if button is None:
+            return
+        try:
+            button.setEnabled(self._pour_point_path().is_file())
+        except (OSError, QgisDockConfigError):
+            button.setEnabled(False)
 
     def load_configured_layers(self) -> None:
         from qgis.core import QgsProject, QgsVectorLayer

@@ -17,6 +17,8 @@ are intentionally saved with `review_status=pending`; inspect their placement an
 attributes, change accepted points to `approved`, retain exactly one required
 `watershed_outlet`, and then run **Promote Reviewed Pour Points**. Check **Use
 reviewed pour points** on the subsequent full run so they are not replaced.
+The promotion action remains disabled until `outputs/pour_point_candidates.gpkg`
+exists, and an out-of-sequence request reports the prerequisite without a traceback.
 When a provider is unavailable but the project already has complete cached source
 downloads and soil products, check **Offline: reuse downloads**. Full-run then
 skips TNM, USDA, NOAA Atlas 14, and WBD-service requests and rematerializes from

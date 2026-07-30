@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -300,6 +300,7 @@ class LauncherState:
     overwrite_promoted_pour_points: bool = False
     use_existing_outlet: bool = False
     reuse_downloads: bool = False
+    overwrite_config: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -371,6 +372,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.method:
             argv.extend(("--method", state.method))
+        if state.overwrite_config:
+            argv.append("--force")
         return WorkflowCommand("Initialize DEM Config", tuple(argv))
     if step == "prepare-dem":
         return WorkflowCommand(
@@ -689,6 +692,13 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
         return (
             "No DEM manifest exists. Configure a tile index and run prepare-dem, or use FULL RUN."
         )
+    if step == "promote-pour-points" and state.root is not None and state.site:
+        candidates = state.root / state.site / "outputs" / "pour_point_candidates.gpkg"
+        if not candidates.is_file():
+            return (
+                "No pour-point candidate file exists. Generate candidates first, review "
+                "them in QGIS, then promote them."
+            )
     if step == "materialize-inputs" and state.manifest_path is None:
         source = state.source_dir
         if source is None or not source.is_dir() or not any(source.rglob("demlr")):
@@ -712,7 +722,7 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
             return "Materialized DEM is missing. Run materialize-inputs or FULL RUN first."
         if not (site / "outputs" / "NHDFlowline_clip.gpkg").is_file():
             return "Materialized flowlines are missing. Run materialize-inputs or FULL RUN first."
-    if step in {"prepare-inputs", "build-ohq", "build-hms"} and state.root and state.site:
+    if step in {"prepare-inputs", "check-inputs", "build-ohq", "build-hms"} and state.root and state.site:
         outputs = state.root / state.site / "outputs"
         if step == "prepare-inputs":
             required = ("flow_dir.tif", "flow_acc.tif")
@@ -1127,6 +1137,7 @@ class LauncherApp:
         self.command_running = False
         self.runner: CommandRunner | None = None
         self.workflow_buttons: list[Any] = []
+        self.step_buttons: dict[WorkflowStep, Any] = {}
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
@@ -1147,6 +1158,8 @@ class LauncherApp:
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
+        else:
+            self._refresh_step_buttons()
         self._poll_messages()
 
     def _build(self) -> None:
@@ -1263,6 +1276,7 @@ class LauncherApp:
             )
             button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).grid(
             row=1, column=2, padx=2, pady=2, sticky="ew"
         )
@@ -1284,6 +1298,7 @@ class LauncherApp:
             )
             button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         for column in range(3):
             ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
@@ -1297,6 +1312,7 @@ class LauncherApp:
             )
             button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
@@ -1469,10 +1485,28 @@ class LauncherApp:
         self.use_existing_outlet_var.set(state.use_existing_outlet)
         self.reuse_downloads_var.set(state.reuse_downloads)
 
+    def _refresh_step_buttons(self) -> None:
+        """Disable commands whose on-disk prerequisites are not yet available."""
+
+        try:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            for step, button in self.step_buttons.items():
+                button.config(
+                    state="disabled" if workflow_prerequisite_error(step, state) else "normal"
+                )
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError):
+            # Keep configuration/init/full-run paths accessible while the user fixes fields.
+            for step, button in self.step_buttons.items():
+                button.config(state="normal" if step in {"init-dem-config", "full-run"} else "disabled")
+
     def load_config(self) -> None:
         try:
             config = load_project_config(self.config_var.get())
             self.apply_state(state_from_config(self.config_var.get(), config))
+            self._refresh_step_buttons()
             self.messages.put("Loaded config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
@@ -1520,6 +1554,18 @@ class LauncherApp:
             config_path = Path(self.config_var.get()).expanduser()
             if config_path.exists():
                 state = state_with_config_defaults(state, load_project_config(config_path))
+            if step == "init-dem-config" and config_path.exists():
+                from tkinter import messagebox
+
+                if not messagebox.askyesno(
+                    "Replace DEM workflow configuration?",
+                    "This will replace the existing DEM workflow configuration.\n\n"
+                    "Review the flowline and tile-index fields first. Demo inputs are not "
+                    "inserted unless explicitly requested from the CLI. Continue?",
+                ):
+                    self.messages.put("Initialize DEM Config cancelled; existing config preserved.\n")
+                    return
+                state = replace(state, overwrite_config=True)
             prerequisite = workflow_prerequisite_error(step, state)
             if prerequisite:
                 raise LauncherError(prerequisite)
@@ -1546,6 +1592,7 @@ class LauncherApp:
                 self.stop_button.config(state="disabled")
                 for button in self.workflow_buttons:
                     button.config(state="normal")
+                self._refresh_step_buttons()
                 continue
             self.log.insert("end", message)
             self.log.see("end")

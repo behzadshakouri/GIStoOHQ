@@ -489,6 +489,19 @@ def test_ui_launcher_builds_final_ohq_commands(step, subcommand):
     assert command.argv == ("ohqbuild", subcommand, "--root", "project", "--site", "Demo")
 
 
+def test_init_dem_config_force_is_only_added_after_confirmation_state(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        site="Demo",
+        lon=-77.0,
+        lat=39.0,
+        method="outlet_buffer",
+        overwrite_config=True,
+    )
+
+    assert "--force" in command_for_step("init-dem-config", state).argv
+
+
 def test_continue_to_ohq_prepares_hydrology_before_combined_run():
     state = LauncherState(config_path=Path("config.yaml"), root=Path("project"), site="Demo")
 
@@ -603,6 +616,14 @@ def test_ui_prerequisites_direct_new_project_to_full_run(tmp_path):
     assert "Prepare hydrology" in workflow_prerequisite_error("prepare-inputs", state)
     assert "Prepare GIS inputs" in workflow_prerequisite_error("build-hms", state)
     assert recommended_workflow_step(state) == "full-run"
+
+
+def test_ui_prerequisites_block_promotion_without_candidates(tmp_path):
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="Demo")
+
+    message = workflow_prerequisite_error("promote-pour-points", state)
+
+    assert "No pour-point candidate file exists" in message
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

@@ -232,6 +232,11 @@ original config behavior remains available with `workflow: legacy`.
 
 The existing three-step workflow remains available for controlled or offline runs.
 
+`init-dem-config` refuses to replace an existing project configuration unless
+`--force` is supplied. Bundled `.demo.geojson` sources are only inserted with the
+explicit `--demo-inputs` option; production initialization never selects them by
+filename or project location.
+
 For an end-to-end rerun without contacting external providers, use
 `ohqbuild full-run ... --reuse-downloads` (alias `--offline`). This requires a
 populated `--download-dir` plus the existing site soil products

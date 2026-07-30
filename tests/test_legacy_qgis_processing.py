@@ -1,5 +1,12 @@
 from pathlib import Path
 
+import pytest
+
+from ohqbuilder.legacy_inputs import (
+    LegacyInputWorkflowError,
+    run_hydrology_preprocessing,
+)
+
 
 LEGACY_SCRIPTS = [
     Path("scripts/legacy_gis/fillsink_etc.py"),
@@ -167,3 +174,18 @@ def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals()
     assert "np.abs(flow_acc[rows + row0, cols + col0])" in source
     assert "score = (reached, distance_m, -shift2)" in source
     assert "Refusing to write an implausibly short path" in source
+
+
+def test_hydrology_preflight_rejects_tiny_placeholder_dem(monkeypatch, tmp_path):
+    site = tmp_path / "Demo"
+    dem = site / "demlr" / "cliped_utm.tif"
+    flowlines = site / "outputs" / "NHDFlowline_clip.gpkg"
+    dem.parent.mkdir(parents=True)
+    flowlines.parent.mkdir(parents=True)
+    dem.write_bytes(b"placeholder")
+    flowlines.write_bytes(b"placeholder")
+    monkeypatch.setattr("ohqbuilder.legacy_inputs._require_qgis", lambda: None)
+    monkeypatch.setattr("ohqbuilder.legacy_inputs._raster_dimensions", lambda path: (10, 10))
+
+    with pytest.raises(LegacyInputWorkflowError, match="DEM is only 10 x 10 cells"):
+        run_hydrology_preprocessing(tmp_path, "Demo")

@@ -49,6 +49,8 @@ def test_qgis_plugin_dock_has_pour_point_capture_and_coordinate_entry():
     assert "manual_subwatershed_outlet" in dock
     assert 'feature["review_status"] = "pending"' in dock
     assert "finish_pour_point_capture" in dock
+    assert "No pour-point candidate file exists" in dock
+    assert "_refresh_action_buttons" in dock
 
 
 def test_qgis_plugin_dock_can_use_canvas_extent_as_area():

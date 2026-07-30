@@ -580,6 +580,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="upstream_network",
         choices=("upstream_network", "outlet_buffer", "oriented_outlet_buffer", "polygon"),
     )
+    init_dem.add_argument(
+        "--force", action="store_true", help="Replace an existing config after explicit review."
+    )
+    init_dem.add_argument(
+        "--demo-inputs",
+        action="store_true",
+        help="Explicitly use bundled Sligo smoke-test flowline and tile-index inputs.",
+    )
 
     run_dem_prep = sub.add_parser(
         "run-dem-prep",
@@ -1134,6 +1142,8 @@ def main(argv: list[str] | None = None) -> int:
                 tile_index=args.tile_index,
                 target_crs=args.target_crs,
                 method=args.method,
+                overwrite=args.force,
+                use_demo_inputs=args.demo_inputs,
             )
         except (DemWorkflowError, ValueError) as exc:
             print(f"init-dem-config failed: {exc}")
