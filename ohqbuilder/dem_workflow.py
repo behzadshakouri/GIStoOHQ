@@ -17,7 +17,6 @@ from .dem_acquisition import (
     write_outlet_point,
 )
 
-SLIGO_DEMO_CONFIG_NAME = "dem_workflow.example.yaml"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
 
@@ -64,16 +63,6 @@ def _required_float(section: dict[str, Any], key: str, label: str) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise DemWorkflowError(f"{label} must be numeric: {key}") from exc
-
-
-def _is_sligo_demo_config(path: Path) -> bool:
-    return path.name == SLIGO_DEMO_CONFIG_NAME and path.parent.name == "SligoCreek"
-
-
-def _demo_default_path(path: Path, value: Path, explicit: str | Path | None) -> str | Path | None:
-    if explicit is not None:
-        return explicit
-    return value if _is_sligo_demo_config(path) else None
 
 
 def _resolve(path: str | Path, base: Path) -> Path:
@@ -367,10 +356,17 @@ def write_dem_config_template(
     tile_index: str | Path | None = None,
     target_crs: str | None = None,
     method: str = "upstream_network",
+    overwrite: bool = False,
+    use_demo_inputs: bool = False,
 ) -> Path:
     """Write a starter DEM acquisition project config for terminal/UI workflows."""
 
     path = Path(output_path).expanduser().resolve()
+    if path.exists() and not overwrite:
+        raise DemWorkflowError(
+            f"DEM workflow config already exists: {path}. Refusing to overwrite it; "
+            "use --force only after reviewing the replacement inputs."
+        )
     dem: dict[str, Any] = {
         "method": method,
         "acquisition_area": "intermediate/dem_acquisition_area.geojson",
@@ -383,11 +379,12 @@ def write_dem_config_template(
         "boundary_safety_distance_m": 500,
         "expansion_distance_km": 5,
         "final_watershed_buffer_m": 1000,
-        "allow_acquisition_area_watershed_fallback": _is_sligo_demo_config(path),
+        "allow_acquisition_area_watershed_fallback": use_demo_inputs,
     }
     if method == "upstream_network":
-        flowline_path = _demo_default_path(path, SLIGO_DEMO_FLOWLINES, flowline_path)
-        tile_index = _demo_default_path(path, SLIGO_DEMO_TILE_INDEX, tile_index)
+        if use_demo_inputs:
+            flowline_path = flowline_path or SLIGO_DEMO_FLOWLINES
+            tile_index = tile_index or SLIGO_DEMO_TILE_INDEX
         if flowline_path is None:
             raise DemWorkflowError("flowline_path is required for upstream_network configs.")
         dem.update(
