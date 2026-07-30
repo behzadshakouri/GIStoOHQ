@@ -149,6 +149,7 @@ def _command_for_workflow(
     nhdplus_snap_distance_m: float | None = None,
     overwrite_promoted_pour_points: bool = False,
     use_existing_outlet: bool = False,
+    reuse_downloads: bool = False,
 ) -> list[str]:
     config_path = Path(config_text).expanduser()
     config = _read_config(config_path)
@@ -262,6 +263,8 @@ def _command_for_workflow(
             argv.append("--use-reviewed-pour-points")
         if use_existing_outlet:
             argv.append("--use-existing-outlet")
+        if reuse_downloads:
+            argv.append("--reuse-downloads")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
@@ -401,6 +404,8 @@ class DemWorkflowDock:
         controls.addWidget(self.overwrite_promoted)
         self.use_existing_outlet = QCheckBox("Use edited outlet.shp")
         controls.addWidget(self.use_existing_outlet)
+        self.reuse_downloads = QCheckBox("Offline: reuse downloads")
+        controls.addWidget(self.reuse_downloads)
         layout.addLayout(controls)
         outlet_button = QPushButton("Pick Outlet on Map")
         outlet_button.clicked.connect(self.pick_outlet)
@@ -719,6 +724,7 @@ class DemWorkflowDock:
                 nhdplus_snap_distance_m=self.nhdplus_snap_distance.value(),
                 overwrite_promoted_pour_points=self.overwrite_promoted.isChecked(),
                 use_existing_outlet=self.use_existing_outlet.isChecked(),
+                reuse_downloads=self.reuse_downloads.isChecked(),
             )
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")

@@ -24,6 +24,7 @@ from .watershed_comparison import compare_watersheds
 from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
 from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
+from .phase1_fetcher import write_outlet_shapefile
 
 
 class FullRunError(RuntimeError):
@@ -391,6 +392,7 @@ def run_full_pipeline(
     use_reviewed_pour_points: bool = False,
     nhdplus_snap_distance_m: float = 50.0,
     use_existing_outlet: bool = False,
+    reuse_downloads: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -432,33 +434,83 @@ def run_full_pipeline(
                 f"Using acquisition area {Path(acquisition_area).expanduser().resolve()} "
                 f"for downloads and clipping (query buffer {buffer_m:.0f} m)."
             )
-        # Step 1: download every supported source product before any merge/clip.
-        fetched = download_all_inputs(
-            root,
-            site,
-            lon=lon,
-            lat=lat,
-            site_id=site_id,
-            download_dir=download_dir,
-            buffer_m=buffer_m,
-            max_tiles=max_tiles,
-            max_file_size_mb=max_file_size_mb,
-            soil_pixel_size=soil_pixel_size,
-            soil_top_depth=soil_top_depth,
-            progress=emit,
-            use_existing_outlet=use_existing_outlet,
-        )
+        # Step 1: download every supported source product, or deliberately reuse
+        # a previously populated cache without making any remote requests.
+        if reuse_downloads:
+            source_download_dir = (
+                Path(download_dir).expanduser().resolve()
+                if download_dir
+                else Path(root).expanduser().resolve() / site / "source_downloads"
+            )
+            if not source_download_dir.is_dir() or not any(
+                path.is_file() for path in source_download_dir.rglob("*")
+            ):
+                raise FullRunError(
+                    "Offline/reuse mode requires a populated source download directory: "
+                    f"{source_download_dir}"
+                )
+            soils_dir = Path(root).expanduser().resolve() / site / "soils"
+            missing_soils = [
+                path.name
+                for path in (
+                    soils_dir / "hydrologic_soil_groups.gpkg",
+                    soils_dir / "hsg.tif",
+                    soils_dir / "soil_texture.gpkg",
+                )
+                if not path.is_file()
+            ]
+            if missing_soils:
+                raise FullRunError(
+                    "Offline/reuse mode cannot query missing soil products. Expected under "
+                    f"{soils_dir}: {', '.join(missing_soils)}"
+                )
+            atlas_table = (
+                Path(root).expanduser().resolve() / site / "atlas14" / "atlas14_pf.csv"
+            )
+            if not atlas_table.is_file():
+                raise FullRunError(
+                    "Offline/reuse mode requires the existing NOAA Atlas 14 table to "
+                    f"prevent a later web request: {atlas_table}"
+                )
+            emit(
+                "[1/6] Offline/reuse mode: skipping all remote source and soil queries; "
+                f"using {source_download_dir}"
+            )
+            if not use_existing_outlet:
+                write_outlet_shapefile(
+                    Path(root).expanduser().resolve() / site / "outputs" / "outlet.shp",
+                    lon,
+                    lat,
+                )
+        else:
+            fetched = download_all_inputs(
+                root,
+                site,
+                lon=lon,
+                lat=lat,
+                site_id=site_id,
+                download_dir=download_dir,
+                buffer_m=buffer_m,
+                max_tiles=max_tiles,
+                max_file_size_mb=max_file_size_mb,
+                soil_pixel_size=soil_pixel_size,
+                soil_top_depth=soil_top_depth,
+                progress=emit,
+                use_existing_outlet=use_existing_outlet,
+            )
+            source_download_dir = fetched.download_dir
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")
         materialized = materialize_source_inputs(
             root,
             site,
-            source_dir=fetched.download_dir,
+            source_dir=source_download_dir,
             target_crs=target_crs,
             clip_bounds=selected_bounds,
             clip_center_lon=lon,
             clip_center_lat=lat,
             clip_buffer_m=buffer_m,
+            allow_network_fallbacks=not reuse_downloads,
         )
         materialized_hydro = getattr(materialized, "hydro", None)
         materialized_wbd = getattr(materialized, "wbd_reference", None)

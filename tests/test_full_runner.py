@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ohqbuilder.full_runner import (
+    FullRunError,
     acquisition_bounds,
     bounds_covering_outlet,
     buffer_covering_bounds,
@@ -360,6 +361,64 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     assert result.report_path == tmp_path / "watershed_report.html"
     assert phase_options["options"].refresh_auto_pour_points is True
     assert phase_options["options"].child_options == {"MAX_OUTLET_SNAP_M": 50.0}
+
+
+def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path):
+    downloads = tmp_path / "downloads"
+    (downloads / "source-id" / "hydro").mkdir(parents=True)
+    (downloads / "source-id" / "hydro" / "cached.zip").write_bytes(b"cached")
+    soils = tmp_path / "SITE_A" / "soils"
+    soils.mkdir(parents=True)
+    for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
+        (soils / name).write_bytes(b"cached")
+    atlas = tmp_path / "SITE_A" / "atlas14" / "atlas14_pf.csv"
+    atlas.parent.mkdir()
+    atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
+    calls = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("remote download called")),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.write_outlet_shapefile",
+        lambda *a, **k: calls.setdefault("outlet", a),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: calls.setdefault("materialize", k),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=39.0,
+        download_dir=downloads,
+        reuse_downloads=True,
+    )
+
+    assert calls["materialize"]["source_dir"] == downloads.resolve()
+    assert calls["materialize"]["allow_network_fallbacks"] is False
+    assert calls["outlet"][1:] == (-77.0, 39.0)
+
+
+def test_full_pipeline_reuse_mode_reports_missing_cache(tmp_path):
+    with pytest.raises(FullRunError, match="populated source download directory"):
+        run_full_pipeline(tmp_path, "SITE_A", lon=-77.0, lat=39.0, reuse_downloads=True)
 
 
 def test_full_pipeline_reports_cli_outlet_recreation(monkeypatch, tmp_path):

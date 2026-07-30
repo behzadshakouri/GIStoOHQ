@@ -718,6 +718,16 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--site-id", default=None, help="Folder-safe source download ID.")
     full.add_argument("--download-dir", default=None, help="Override the raw download directory.")
     full.add_argument(
+        "--reuse-downloads",
+        "--offline",
+        dest="reuse_downloads",
+        action="store_true",
+        help=(
+            "Make no remote source, soil, or WBD-service requests; reuse the populated "
+            "--download-dir and existing site soil products."
+        ),
+    )
+    full.add_argument(
         "--max-tiles", type=int, default=None, help="Cap files per product; 0 means no cap."
     )
     full.add_argument(
@@ -985,6 +995,7 @@ def main(argv: list[str] | None = None) -> int:
                 use_reviewed_pour_points=args.use_reviewed_pour_points,
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 use_existing_outlet=args.use_existing_outlet,
+                reuse_downloads=args.reuse_downloads,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:

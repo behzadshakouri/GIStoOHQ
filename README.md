@@ -232,6 +232,14 @@ original config behavior remains available with `workflow: legacy`.
 
 The existing three-step workflow remains available for controlled or offline runs.
 
+For an end-to-end rerun without contacting external providers, use
+`ohqbuild full-run ... --reuse-downloads` (alias `--offline`). This requires a
+populated `--download-dir` plus the existing site soil products
+`hydrologic_soil_groups.gpkg`, `hsg.tif`, and `soil_texture.gpkg`, as well as the
+existing `atlas14/atlas14_pf.csv`. The mode skips TNM, USDA, NOAA Atlas 14, and
+WBD-service calls; it fails early with the missing local prerequisite instead of
+falling through to a remote request.
+
 Need to create those GIS input files first? Run the full workflow with
 `ohqbuild run` from a QGIS Python environment, or run the steps individually with
 `ohqbuild prepare-inputs`, `ohqbuild check-inputs`, and `ohqbuild build`. The

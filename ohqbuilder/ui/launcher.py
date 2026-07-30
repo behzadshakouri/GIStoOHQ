@@ -299,6 +299,7 @@ class LauncherState:
     nhdplus_snap_distance_m: float = 50.0
     overwrite_promoted_pour_points: bool = False
     use_existing_outlet: bool = False
+    reuse_downloads: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -438,6 +439,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.append("--use-reviewed-pour-points")
         if state.use_existing_outlet:
             argv.append("--use-existing-outlet")
+        if state.reuse_downloads:
+            argv.append("--reuse-downloads")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -608,6 +611,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         acquisition_area=path_value(dem.get("acquisition_area")),
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
         nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
+        reuse_downloads=bool(config.get("reuse_downloads", False)),
     )
 
 
@@ -638,6 +642,7 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     updated["download_dir"] = path_text(state.source_dir, "source_downloads")
     updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
     updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
+    updated["reuse_downloads"] = state.reuse_downloads
     return updated
 
 
@@ -672,6 +677,7 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
         overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
         use_existing_outlet=form_state.use_existing_outlet,
+        reuse_downloads=form_state.reuse_downloads,
     )
 
 
@@ -1137,6 +1143,7 @@ class LauncherApp:
         self.nhdplus_snap_var = tk.StringVar(value="50")
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self.use_existing_outlet_var = tk.BooleanVar(value=False)
+        self.reuse_downloads_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
@@ -1225,6 +1232,11 @@ class LauncherApp:
             text="Use edited existing outlet.shp",
             variable=self.use_existing_outlet_var,
         ).grid(row=4, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Offline: reuse existing downloads",
+            variable=self.reuse_downloads_var,
+        ).grid(row=4, column=2, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1435,6 +1447,7 @@ class LauncherApp:
             nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
             use_existing_outlet=self.use_existing_outlet_var.get(),
+            reuse_downloads=self.reuse_downloads_var.get(),
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1454,6 +1467,7 @@ class LauncherApp:
         self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
         self.use_existing_outlet_var.set(state.use_existing_outlet)
+        self.reuse_downloads_var.set(state.reuse_downloads)
 
     def load_config(self) -> None:
         try:

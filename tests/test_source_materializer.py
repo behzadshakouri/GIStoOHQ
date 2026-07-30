@@ -81,6 +81,28 @@ def test_resolve_hydro_source_dir_falls_back_to_bundled_hydro(tmp_path):
     assert resolve_hydro_source_dir(tmp_path, downloads) == bundled
 
 
+def test_optional_wbd_offline_mode_does_not_call_service(monkeypatch, tmp_path):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setattr(
+        "ohqbuilder.source_materializer.materialize_wbd_service_reference",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("service called")),
+    )
+
+    result = materialize_optional_wbd(
+        tmp_path,
+        "SITE_A",
+        downloads,
+        (-77.1, 38.9, -76.9, 39.1),
+        "EPSG:4326",
+        allow_service_fallback=False,
+    )
+
+    assert result is None
+    warning = tmp_path / "SITE_A" / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
+    assert "Offline/reuse mode" in warning.read_text(encoding="utf-8")
+
+
 def test_materialize_source_inputs_uses_bundled_hydro_when_download_missing(monkeypatch, tmp_path):
     downloads = tmp_path / "source_downloads"
     downloads.mkdir()

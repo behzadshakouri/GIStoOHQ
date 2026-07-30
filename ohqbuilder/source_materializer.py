@@ -102,6 +102,8 @@ def materialize_optional_wbd(
     source_dir: Path,
     bounds: tuple[float, float, float, float] | None,
     bounds_crs: str,
+    *,
+    allow_service_fallback: bool = True,
 ) -> Path | None:
     """Create a clipped HUC12 reference when both WBD data and bounds are available."""
 
@@ -131,6 +133,19 @@ def materialize_optional_wbd(
             )
         except WbdMaterializeError as exc:
             local_error = exc
+    if not allow_service_fallback:
+        if target.is_file():
+            return target
+        warning = root / site / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
+        warning.parent.mkdir(parents=True, exist_ok=True)
+        details = str(local_error) if local_error else "no local WBD vector package was found"
+        warning.write_text(
+            f"WBD reference unavailable from local downloads: {details}\n"
+            "Offline/reuse mode disabled the official WBD web-service fallback.\n"
+            "The DEM watershed workflow may continue without WBD validation.\n",
+            encoding="utf-8",
+        )
+        return None
     try:
         return materialize_wbd_service_reference(
             target,
@@ -167,6 +182,7 @@ def materialize_source_inputs(
     clip_buffer_m: float | None = None,
     clip_buffer_scale: float = 1.2,
     dem_manifest: str | Path | None = None,
+    allow_network_fallbacks: bool = True,
 ) -> SourceMaterializeResult:
     """Merge/project the DEM and extract/clip hydrography in one stage."""
 
@@ -205,6 +221,11 @@ def materialize_source_inputs(
     landcover = materialize_landcover(root_path, site, downloads)
     cn_lookup = materialize_cn_lookup(root_path)
     wbd_reference = materialize_optional_wbd(
-        root_path, site, downloads, selected_bounds, clip_bounds_crs
+        root_path,
+        site,
+        downloads,
+        selected_bounds,
+        clip_bounds_crs,
+        allow_service_fallback=allow_network_fallbacks,
     )
     return SourceMaterializeResult(dem, hydro, landcover, cn_lookup, wbd_reference)
