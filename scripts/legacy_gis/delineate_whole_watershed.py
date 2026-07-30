@@ -70,10 +70,15 @@ FLOWDIR_REL = globals().get("FLOWDIR_REL", "flow_dir.tif")
 FLOWACC_REL = globals().get("FLOWACC_REL", "flow_acc.tif")
 
 SNAP = bool(globals().get("SNAP", True))
-SNAP_RADIUS_M = float(globals().get("SNAP_RADIUS_M", 150.0))
+OUTLET_SEARCH_RADIUS_M = float(
+    globals().get("OUTLET_SEARCH_RADIUS_M", globals().get("SNAP_RADIUS_M", 150.0))
+)
+# Backward-compatible internal name used by existing helper calls.
+SNAP_RADIUS_M = OUTLET_SEARCH_RADIUS_M
 SNAP_DISTANCE_WEIGHT = float(globals().get("SNAP_DISTANCE_WEIGHT", 0.0))
 MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
 SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
+MAX_OUTLET_SNAP_M = float(globals().get("MAX_OUTLET_SNAP_M", 50.0))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
 )
@@ -337,7 +342,7 @@ def wipe_temp_dir(temp_dir):
 
 
 def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
-    """Snap to the greatest absolute accumulation within a circular radius."""
+    """Snap inside the accepted move limit, using the wider radius for diagnosis."""
     dataset = gdal.Open(raster_path)
     if dataset is None:
         raise Exception(
@@ -394,10 +399,27 @@ def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
         )
 
     magnitude = np.abs(subset)
+    accepted = valid & (distance <= MAX_OUTLET_SNAP_M)
+    accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)
+    diagnostic_channel = valid & (magnitude >= MIN_SNAP_ACC_CELLS)
+
+    # Do not repeatedly "walk" a valid outlet downstream by selecting the
+    # greatest accumulation anywhere in the wider diagnostic search window.
+    # Prefer a routed cell inside the maximum accepted movement.  A qualifying
+    # cell outside that limit is selected only to explain why the run stopped.
+    if np.any(accepted_channel):
+        selection_mask = accepted_channel
+    elif np.any(diagnostic_channel):
+        selection_mask = diagnostic_channel
+    elif np.any(accepted):
+        selection_mask = accepted
+    else:
+        selection_mask = valid
+
     score = magnitude.copy()
     if SNAP_DISTANCE_WEIGHT > 0:
         score = score / (1.0 + SNAP_DISTANCE_WEIGHT * distance)
-    score[~valid] = -np.inf
+    score[~selection_mask] = -np.inf
 
     flat_index = int(np.argmax(score))
     local_row, local_col = np.unravel_index(flat_index, score.shape)
@@ -425,8 +447,14 @@ def print_alignment_guidance(snap_acc=None, moved=None):
     print("   ", FLOWDIR_PATH)
     print("   ", os.path.join(site_path, "clipped_dem_utm.tif"))
     print("\n  Use Identify Features on flow_acc.tif along the intended channel near")
-    print("  the outlet. A real downstream channel cell should have accumulation")
-    print("  far greater than the small snapped value shown above.")
+    print("  the outlet.")
+    if snap_acc is not None and abs(snap_acc) >= MIN_SNAP_ACC_CELLS:
+        print("  The selected cell has high accumulation consistent with a routed")
+        print("  watershed outlet, but the source outlet is too far from it. Verify")
+        print("  that this routed cell is the intended named-watershed outlet.")
+    else:
+        print("  The selected cell has low accumulation and may not represent the")
+        print("  intended downstream channel.")
     print("\n  Safest correction:")
     print("   1. Display flow_acc.tif with a stretched/log renderer.")
     print("   2. Move outlet.shp directly onto the highest-accumulation raster cell")
@@ -448,7 +476,9 @@ print("Outlet     :", OUTLET_PATH)
 print("Flow dir   :", FLOWDIR_PATH)
 print("Flow acc   :", FLOWACC_PATH)
 print("Boundary   :", BOUNDARY_OUT)
-print("Snap       :", SNAP, "| radius:", SNAP_RADIUS_M, "m")
+print("Snap       :", SNAP, "| search radius:", OUTLET_SEARCH_RADIUS_M, "m")
+print("Max move   :", MAX_OUTLET_SNAP_M, "m")
+print("Selection  : strongest routed cell within max move; wider radius is diagnostic")
 
 for path in (OUTLET_PATH, FLOWDIR_PATH, FLOWACC_PATH):
     if not os.path.isfile(path):
@@ -537,6 +567,13 @@ if SNAP:
     print("  movement             : %.2f m" % moved)
     snap_quality = outlet_snap_quality(moved)
     print("  outlet quality       : %s" % snap_quality)
+    if moved > MAX_OUTLET_SNAP_M:
+        print_alignment_guidance(snap_acc=snap_acc, moved=moved)
+        raise Exception(
+            "STOPPED: outlet snap movement %.2f m exceeds MAX_OUTLET_SNAP_M %.2f m. "
+            "Verify and move the outlet in QGIS before delineation."
+            % (moved, MAX_OUTLET_SNAP_M)
+        )
     if moved >= SNAP_EDGE_FRACTION * SNAP_RADIUS_M:
         print(
             "  WARNING: SELECTED OUTLET IS FAR FROM THE ROUTED STREAM. "

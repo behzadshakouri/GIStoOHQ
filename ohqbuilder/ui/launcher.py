@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -57,8 +57,8 @@ BASEMAP_PROVIDERS = {
 }
 
 SLIGO_DEMO_SITE = "SligoCreekDemo"
-SLIGO_DEMO_LON = -76.97391566325376
-SLIGO_DEMO_LAT = 38.95840888229726
+SLIGO_DEMO_LON = -76.9744266065
+SLIGO_DEMO_LAT = 38.9571888036
 SLIGO_DEMO_CRS = "EPSG:26918"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
@@ -258,6 +258,7 @@ WorkflowStep = Literal[
     "build-ohq",
     "run-to-ohq",
     "full-run",
+    "promote-pour-points",
     "build-hms",
     "validate-hms",
 ]
@@ -294,6 +295,12 @@ class LauncherState:
     flowline_path: Path | None = None
     tile_index: Path | None = None
     acquisition_area: Path | None = None
+    use_reviewed_pour_points: bool = False
+    nhdplus_snap_distance_m: float = 50.0
+    overwrite_promoted_pour_points: bool = False
+    use_existing_outlet: bool = False
+    reuse_downloads: bool = False
+    overwrite_config: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -365,6 +372,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.method:
             argv.extend(("--method", state.method))
+        if state.overwrite_config:
+            argv.append("--force")
         return WorkflowCommand("Initialize DEM Config", tuple(argv))
     if step == "prepare-dem":
         return WorkflowCommand(
@@ -428,6 +437,13 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
+        argv.extend(("--nhdplus-snap-distance-m", str(state.nhdplus_snap_distance_m)))
+        if state.use_reviewed_pour_points:
+            argv.append("--use-reviewed-pour-points")
+        if state.use_existing_outlet:
+            argv.append("--use-existing-outlet")
+        if state.reuse_downloads:
+            argv.append("--reuse-downloads")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -440,6 +456,19 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
                 (tuple(argv),),
             )
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
+    if step == "promote-pour-points":
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required to promote pour points.")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(state.root),
+            "--site", state.site,
+        ]
+        if state.overwrite_promoted_pour_points:
+            argv.append("--overwrite")
+        return WorkflowCommand(
+            "Promote Reviewed Pour Points",
+            tuple(argv),
+        )
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for HEC-HMS commands.")
@@ -583,6 +612,9 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
         acquisition_area=path_value(dem.get("acquisition_area")),
+        use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
+        nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
+        reuse_downloads=bool(config.get("reuse_downloads", False)),
     )
 
 
@@ -611,6 +643,9 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "dem_acquisition", "tile_index", path_text(state.tile_index))
     updated["root"] = path_text(state.root, ".")
     updated["download_dir"] = path_text(state.source_dir, "source_downloads")
+    updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
+    updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
+    updated["reuse_downloads"] = state.reuse_downloads
     return updated
 
 
@@ -641,6 +676,11 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
         tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
         acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
+        use_reviewed_pour_points=form_state.use_reviewed_pour_points,
+        nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
+        overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
+        use_existing_outlet=form_state.use_existing_outlet,
+        reuse_downloads=form_state.reuse_downloads,
     )
 
 
@@ -652,6 +692,13 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
         return (
             "No DEM manifest exists. Configure a tile index and run prepare-dem, or use FULL RUN."
         )
+    if step == "promote-pour-points" and state.root is not None and state.site:
+        candidates = state.root / state.site / "outputs" / "pour_point_candidates.gpkg"
+        if not candidates.is_file():
+            return (
+                "No pour-point candidate file exists. Generate candidates first, review "
+                "them in QGIS, then promote them."
+            )
     if step == "materialize-inputs" and state.manifest_path is None:
         source = state.source_dir
         if source is None or not source.is_dir() or not any(source.rglob("demlr")):
@@ -675,7 +722,7 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
             return "Materialized DEM is missing. Run materialize-inputs or FULL RUN first."
         if not (site / "outputs" / "NHDFlowline_clip.gpkg").is_file():
             return "Materialized flowlines are missing. Run materialize-inputs or FULL RUN first."
-    if step in {"prepare-inputs", "build-ohq", "build-hms"} and state.root and state.site:
+    if step in {"prepare-inputs", "check-inputs", "build-ohq", "build-hms"} and state.root and state.site:
         outputs = state.root / state.site / "outputs"
         if step == "prepare-inputs":
             required = ("flow_dir.tif", "flow_acc.tif")
@@ -852,8 +899,8 @@ class MapPicker:
         self.zoom = clamp_zoom(zoom)
         self.width = width
         self.height = height
-        self.center_lon = float(app.lon_var.get() or -76.97391566325376)
-        self.center_lat = float(app.lat_var.get() or 38.95840888229726)
+        self.center_lon = float(app.lon_var.get() or SLIGO_DEMO_LON)
+        self.center_lat = float(app.lat_var.get() or SLIGO_DEMO_LAT)
         self.images = []
         self.flowlines = self._load_flowlines()
         self.selection_points: list[tuple[float, float]] = []
@@ -1090,6 +1137,7 @@ class LauncherApp:
         self.command_running = False
         self.runner: CommandRunner | None = None
         self.workflow_buttons: list[Any] = []
+        self.step_buttons: dict[WorkflowStep, Any] = {}
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
@@ -1102,9 +1150,16 @@ class LauncherApp:
         self.method_var = tk.StringVar(value="upstream_network")
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
+        self.reviewed_points_var = tk.BooleanVar(value=False)
+        self.nhdplus_snap_var = tk.StringVar(value="50")
+        self.overwrite_promoted_var = tk.BooleanVar(value=False)
+        self.use_existing_outlet_var = tk.BooleanVar(value=False)
+        self.reuse_downloads_var = tk.BooleanVar(value=False)
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
+        else:
+            self._refresh_step_buttons()
         self._poll_messages()
 
     def _build(self) -> None:
@@ -1124,6 +1179,7 @@ class LauncherApp:
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
+            ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
@@ -1174,6 +1230,26 @@ class LauncherApp:
         )
         recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
+        tk.Checkbutton(
+            project_buttons,
+            text="Use reviewed pour points",
+            variable=self.reviewed_points_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Overwrite existing promoted pour points",
+            variable=self.overwrite_promoted_var,
+        ).grid(row=3, column=2, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Use edited existing outlet.shp",
+            variable=self.use_existing_outlet_var,
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Offline: reuse existing downloads",
+            variable=self.reuse_downloads_var,
+        ).grid(row=4, column=2, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1200,6 +1276,7 @@ class LauncherApp:
             )
             button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).grid(
             row=1, column=2, padx=2, pady=2, sticky="ew"
         )
@@ -1214,12 +1291,14 @@ class LauncherApp:
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
+            ("Promote reviewed pour points", "promote-pour-points"),
         )):
             button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
             button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         for column in range(3):
             ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
@@ -1233,6 +1312,7 @@ class LauncherApp:
             )
             button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
         self.log = tk.Text(frame, height=24, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
@@ -1379,6 +1459,11 @@ class LauncherApp:
             method=self.method_var.get().strip() or None,
             flowline_path=optional_path(self.flowline_var.get()),
             tile_index=optional_path(self.tile_index_var.get()),
+            use_reviewed_pour_points=self.reviewed_points_var.get(),
+            nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
+            overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
+            use_existing_outlet=self.use_existing_outlet_var.get(),
+            reuse_downloads=self.reuse_downloads_var.get(),
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1394,11 +1479,34 @@ class LauncherApp:
         self.method_var.set(state.method or "")
         self.flowline_var.set(str(state.flowline_path or ""))
         self.tile_index_var.set(str(state.tile_index or ""))
+        self.reviewed_points_var.set(state.use_reviewed_pour_points)
+        self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
+        self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
+        self.use_existing_outlet_var.set(state.use_existing_outlet)
+        self.reuse_downloads_var.set(state.reuse_downloads)
+
+    def _refresh_step_buttons(self) -> None:
+        """Disable commands whose on-disk prerequisites are not yet available."""
+
+        try:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            for step, button in self.step_buttons.items():
+                button.config(
+                    state="disabled" if workflow_prerequisite_error(step, state) else "normal"
+                )
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError):
+            # Keep configuration/init/full-run paths accessible while the user fixes fields.
+            for step, button in self.step_buttons.items():
+                button.config(state="normal" if step in {"init-dem-config", "full-run"} else "disabled")
 
     def load_config(self) -> None:
         try:
             config = load_project_config(self.config_var.get())
             self.apply_state(state_from_config(self.config_var.get(), config))
+            self._refresh_step_buttons()
             self.messages.put("Loaded config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
@@ -1446,6 +1554,18 @@ class LauncherApp:
             config_path = Path(self.config_var.get()).expanduser()
             if config_path.exists():
                 state = state_with_config_defaults(state, load_project_config(config_path))
+            if step == "init-dem-config" and config_path.exists():
+                from tkinter import messagebox
+
+                if not messagebox.askyesno(
+                    "Replace DEM workflow configuration?",
+                    "This will replace the existing DEM workflow configuration.\n\n"
+                    "Review the flowline and tile-index fields first. Demo inputs are not "
+                    "inserted unless explicitly requested from the CLI. Continue?",
+                ):
+                    self.messages.put("Initialize DEM Config cancelled; existing config preserved.\n")
+                    return
+                state = replace(state, overwrite_config=True)
             prerequisite = workflow_prerequisite_error(step, state)
             if prerequisite:
                 raise LauncherError(prerequisite)
@@ -1472,6 +1592,7 @@ class LauncherApp:
                 self.stop_button.config(state="disabled")
                 for button in self.workflow_buttons:
                     button.config(state="normal")
+                self._refresh_step_buttons()
                 continue
             self.log.insert("end", message)
             self.log.see("end")

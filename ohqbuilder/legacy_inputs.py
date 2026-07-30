@@ -21,6 +21,8 @@ _PHASE_SCRIPTS = {
     "phase1": "run_phase1.py",
     "phase2": "run_phase2.py",
 }
+REQUIRED_REACH_WRITER_REVISION = "stale-layer-release-v2"
+MIN_HYDROLOGY_DEM_CELLS = 100
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,28 @@ class LegacyInputWorkflowError(RuntimeError):
 
 def default_script_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "scripts" / "legacy_gis"
+
+
+def verify_reach_writer_revision(script_dir: str | Path | None = None) -> Path:
+    """Reject mixed installs where the Python runner sees stale legacy scripts."""
+
+    directory = (
+        Path(script_dir).expanduser().resolve()
+        if script_dir is not None
+        else default_script_dir().resolve()
+    )
+    script = directory / "extract_reaches.py"
+    if not script.is_file():
+        raise LegacyInputWorkflowError(f"Legacy reach script not found: {script}")
+    source = script.read_text(encoding="utf-8")
+    marker = f'REACH_WRITER_REVISION = "{REQUIRED_REACH_WRITER_REVISION}"'
+    if marker not in source:
+        raise LegacyInputWorkflowError(
+            "The installed full-run code and legacy GIS scripts are from different "
+            f"revisions. Expected {marker} in {script}. Update the repository and "
+            "reinstall/update the QGIS plugin before rerunning."
+        )
+    return script
 
 
 def _module_available(name: str) -> bool:
@@ -138,6 +162,27 @@ def _shapefile_components(path: Path) -> list[Path]:
 
 def _input_exists(path: Path) -> bool:
     return all(component.is_file() for component in _shapefile_components(path))
+
+
+def _raster_dimensions(path: Path) -> tuple[int, int]:
+    """Read raster dimensions using GDAL, with QGIS as an environment fallback."""
+
+    try:
+        from osgeo import gdal
+
+        dataset = gdal.Open(str(path))
+        if dataset is None:
+            raise LegacyInputWorkflowError(f"Could not open raster: {path}")
+        dimensions = (dataset.RasterXSize, dataset.RasterYSize)
+        dataset = None
+        return dimensions
+    except ImportError:
+        from qgis.core import QgsRasterLayer
+
+        layer = QgsRasterLayer(str(path), "raster_dimension_preflight")
+        if not layer.isValid():
+            raise LegacyInputWorkflowError(f"Could not open raster: {path}")
+        return layer.width(), layer.height()
 
 
 def required_inputs(
@@ -349,4 +394,11 @@ def run_hydrology_preprocessing(
     for key, description in (("dem_path", "DEM"), ("flowline_path", "flowlines")):
         if not _input_exists(paths[key]):
             raise LegacyInputWorkflowError(f"Hydrology preprocessing {description} not found: {paths[key]}")
+    width, height = _raster_dimensions(paths["dem_path"])
+    if width < MIN_HYDROLOGY_DEM_CELLS or height < MIN_HYDROLOGY_DEM_CELLS:
+        raise LegacyInputWorkflowError(
+            f"DEM is only {width} x {height} cells. Refusing hydrology preprocessing because "
+            "the DEM appears to be a demo, placeholder, or incorrectly materialized raster. "
+            "Re-run materialize-inputs with overlapping production DEM and flowline sources."
+        )
     _run_phase(scripts / "fillsink_etc.py", root_path, site, scripts, workflow_options)
