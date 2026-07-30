@@ -245,6 +245,12 @@ existing `atlas14/atlas14_pf.csv`. The mode skips TNM, USDA, NOAA Atlas 14, and
 WBD-service calls; it fails early with the missing local prerequisite instead of
 falling through to a remote request.
 
+Normal online runs also retry transient HTTP 429/500/502/503/504 and timeout
+failures using 5, 10, 20, 40, and 60 second delays. If the service remains
+unavailable, `full-run` validates cached DEM/hydro packages and the local
+soil/Atlas 14 products and continues automatically when that cache is complete.
+Unreadable DEM TIFFs and hydro archives without vector content are rejected.
+
 Need to create those GIS input files first? Run the full workflow with
 `ohqbuild run` from a QGIS Python environment, or run the steps individually with
 `ohqbuild prepare-inputs`, `ohqbuild check-inputs`, and `ohqbuild build`. The

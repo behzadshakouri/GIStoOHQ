@@ -5,6 +5,7 @@ from html import escape
 import json
 import math
 from pathlib import Path
+import zipfile
 from typing import Callable
 
 from .legacy_inputs import (
@@ -25,10 +26,147 @@ from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
 from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 from .phase1_fetcher import write_outlet_shapefile
+from .dem_downloader import is_transient_remote_error
 
 
 class FullRunError(RuntimeError):
     """Raised when the download-to-OHQ workflow cannot finish."""
+
+
+def _zip_has_vector(path: Path) -> bool:
+    if not zipfile.is_zipfile(path):
+        return False
+    with zipfile.ZipFile(path) as archive:
+        return any(
+            name.lower().endswith((".shp", ".gpkg", ".gdbtable"))
+            for name in archive.namelist()
+        )
+
+
+def _invalid_cached_dem_files(paths: list[Path]) -> list[str]:
+    """Return cached TIFF names that cannot be opened as georeferenced rasters."""
+
+    try:
+        import rasterio
+    except ImportError:
+        return []
+    invalid = []
+    for path in paths:
+        try:
+            with rasterio.open(path) as dataset:
+                if dataset.width <= 0 or dataset.height <= 0 or dataset.crs is None:
+                    invalid.append(path.name)
+        except Exception:
+            invalid.append(path.name)
+    return invalid
+
+
+def cached_reuse_counts(source_download_dir: Path) -> tuple[int, int]:
+    """Return display counts for validated cached DEM tiles and hydro packages."""
+
+    dem_count = sum(
+        1
+        for path in source_download_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".tif", ".tiff"}
+        and path.parent.name.lower() == "demlr"
+    )
+    hydro_count = sum(
+        1
+        for path in source_download_dir.rglob("*")
+        if path.is_file()
+        and path.parent.name.lower() == "hydro"
+        and path.suffix.lower() in {".zip", ".gpkg", ".shp"}
+    )
+    return dem_count, hydro_count
+
+
+def validated_reuse_inputs(
+    root: str | Path, site: str, download_dir: str | Path | None
+) -> Path:
+    """Validate the local products required to continue without remote services."""
+
+    root_path = Path(root).expanduser().resolve()
+    source_download_dir = (
+        Path(download_dir).expanduser().resolve()
+        if download_dir
+        else root_path / site / "source_downloads"
+    )
+    if not source_download_dir.is_dir() or not any(
+        path.is_file() for path in source_download_dir.rglob("*")
+    ):
+        raise FullRunError(
+            "Offline/reuse mode requires a populated source download directory: "
+            f"{source_download_dir}"
+        )
+    product_dirs = {
+        product: next(
+            (
+                path
+                for path in (source_download_dir, *source_download_dir.rglob("*"))
+                if path.is_dir() and path.name.lower() == product
+            ),
+            None,
+        )
+        for product in ("demlr", "hydro")
+    }
+    missing_product_dirs = [
+        product
+        for product, folder in product_dirs.items()
+        if folder is None
+        or not any(child.is_file() and child.stat().st_size > 0 for child in folder.rglob("*"))
+    ]
+    if missing_product_dirs:
+        raise FullRunError(
+            "Cached source downloads are incomplete; missing populated product folder(s): "
+            + ", ".join(missing_product_dirs)
+        )
+    dem_files = sorted(
+        path
+        for path in product_dirs["demlr"].rglob("*")
+        if path.suffix.lower() in {".tif", ".tiff"} and path.stat().st_size > 0
+    )
+    invalid_dem = _invalid_cached_dem_files(dem_files)
+    if not dem_files or invalid_dem:
+        raise FullRunError(
+            "Cached DEM validation failed; no readable georeferenced TIFF tiles were found"
+            + (f" (invalid: {', '.join(invalid_dem)})" if invalid_dem else "")
+        )
+    hydro_files = [path for path in product_dirs["hydro"].rglob("*") if path.is_file()]
+    valid_hydro = any(
+        (
+            path.suffix.lower() == ".zip"
+            and _zip_has_vector(path)
+        )
+        or (path.suffix.lower() in {".gpkg", ".shp"} and path.stat().st_size > 0)
+        for path in hydro_files
+    )
+    if not valid_hydro:
+        raise FullRunError(
+            "Cached hydro validation failed; no readable vector ZIP, GeoPackage, or "
+            f"shapefile was found under {product_dirs['hydro']}"
+        )
+    soils_dir = root_path / site / "soils"
+    missing_soils = [
+        path.name
+        for path in (
+            soils_dir / "hydrologic_soil_groups.gpkg",
+            soils_dir / "hsg.tif",
+            soils_dir / "soil_texture.gpkg",
+        )
+        if not path.is_file()
+    ]
+    if missing_soils:
+        raise FullRunError(
+            "Offline/reuse mode cannot query missing soil products. Expected under "
+            f"{soils_dir}: {', '.join(missing_soils)}"
+        )
+    atlas_table = root_path / site / "atlas14" / "atlas14_pf.csv"
+    if not atlas_table.is_file():
+        raise FullRunError(
+            "Offline/reuse mode requires the existing NOAA Atlas 14 table to prevent "
+            f"a later web request: {atlas_table}"
+        )
+    return source_download_dir
 
 
 def existing_outlet_lonlat(root: str | Path, site: str) -> tuple[float, float]:
@@ -437,44 +575,12 @@ def run_full_pipeline(
         # Step 1: download every supported source product, or deliberately reuse
         # a previously populated cache without making any remote requests.
         if reuse_downloads:
-            source_download_dir = (
-                Path(download_dir).expanduser().resolve()
-                if download_dir
-                else Path(root).expanduser().resolve() / site / "source_downloads"
-            )
-            if not source_download_dir.is_dir() or not any(
-                path.is_file() for path in source_download_dir.rglob("*")
-            ):
-                raise FullRunError(
-                    "Offline/reuse mode requires a populated source download directory: "
-                    f"{source_download_dir}"
-                )
-            soils_dir = Path(root).expanduser().resolve() / site / "soils"
-            missing_soils = [
-                path.name
-                for path in (
-                    soils_dir / "hydrologic_soil_groups.gpkg",
-                    soils_dir / "hsg.tif",
-                    soils_dir / "soil_texture.gpkg",
-                )
-                if not path.is_file()
-            ]
-            if missing_soils:
-                raise FullRunError(
-                    "Offline/reuse mode cannot query missing soil products. Expected under "
-                    f"{soils_dir}: {', '.join(missing_soils)}"
-                )
-            atlas_table = (
-                Path(root).expanduser().resolve() / site / "atlas14" / "atlas14_pf.csv"
-            )
-            if not atlas_table.is_file():
-                raise FullRunError(
-                    "Offline/reuse mode requires the existing NOAA Atlas 14 table to "
-                    f"prevent a later web request: {atlas_table}"
-                )
+            source_download_dir = validated_reuse_inputs(root, site, download_dir)
+            cached_dem_count, cached_hydro_count = cached_reuse_counts(source_download_dir)
             emit(
                 "[1/6] Offline/reuse mode: skipping all remote source and soil queries; "
-                f"using {source_download_dir}"
+                f"validated cached DEM tiles: {cached_dem_count}; hydro packages: "
+                f"{cached_hydro_count}; using {source_download_dir}"
             )
             if not use_existing_outlet:
                 write_outlet_shapefile(
@@ -483,22 +589,44 @@ def run_full_pipeline(
                     lat,
                 )
         else:
-            fetched = download_all_inputs(
-                root,
-                site,
-                lon=lon,
-                lat=lat,
-                site_id=site_id,
-                download_dir=download_dir,
-                buffer_m=buffer_m,
-                max_tiles=max_tiles,
-                max_file_size_mb=max_file_size_mb,
-                soil_pixel_size=soil_pixel_size,
-                soil_top_depth=soil_top_depth,
-                progress=emit,
-                use_existing_outlet=use_existing_outlet,
-            )
-            source_download_dir = fetched.download_dir
+            try:
+                fetched = download_all_inputs(
+                    root,
+                    site,
+                    lon=lon,
+                    lat=lat,
+                    site_id=site_id,
+                    download_dir=download_dir,
+                    buffer_m=buffer_m,
+                    max_tiles=max_tiles,
+                    max_file_size_mb=max_file_size_mb,
+                    soil_pixel_size=soil_pixel_size,
+                    soil_top_depth=soil_top_depth,
+                    progress=emit,
+                    use_existing_outlet=use_existing_outlet,
+                )
+                source_download_dir = fetched.download_dir
+            except Exception as exc:
+                if not is_transient_remote_error(exc):
+                    raise
+                emit(
+                    f"Remote catalog/service remained unavailable after retries: {exc}. "
+                    "No local processing error was detected; checking cached products."
+                )
+                try:
+                    source_download_dir = validated_reuse_inputs(root, site, download_dir)
+                except FullRunError as cache_exc:
+                    raise FullRunError(
+                        f"Remote service failed ({exc}) and validated cache fallback is "
+                        f"unavailable: {cache_exc}"
+                    ) from exc
+                cached_dem_count, cached_hydro_count = cached_reuse_counts(source_download_dir)
+                emit(
+                    f"Validated cached DEM tiles: {cached_dem_count}; hydro packages: "
+                    f"{cached_hydro_count}; local soil/Atlas 14 inputs are ready. "
+                    f"Continuing from local cache: {source_download_dir}"
+                )
+                reuse_downloads = True
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")
         materialized = materialize_source_inputs(

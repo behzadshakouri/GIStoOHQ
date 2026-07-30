@@ -7,8 +7,11 @@ import math
 import re
 import shutil
 import tempfile
+import time
 import urllib.parse
 import urllib.request
+import urllib.error
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Literal
@@ -26,6 +29,53 @@ DEFAULT_MAX_FILE_SIZE_MB = 512.0
 DEFAULT_DEM_RESOLUTION = "1/3"
 NLCD_PIXEL_M = 30.0
 NLCD_GRID_OFF = 15.0
+TRANSIENT_HTTP_STATUS = {429, 500, 502, 503, 504}
+REMOTE_RETRY_DELAYS = (5.0, 10.0, 20.0, 40.0, 60.0)
+
+
+def is_transient_remote_error(exc: BaseException) -> bool:
+    """Return whether a remote failure is safe to retry or satisfy from cache."""
+
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT_HTTP_STATUS
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, socket.timeout))
+
+
+def _query_tnm_with_retry(
+    lon: float,
+    lat: float,
+    tier: ProductTier,
+    buffer_m: float,
+    progress: Callable[[str], None] | None,
+) -> list[DownloadItem]:
+    """Query TNM with bounded exponential-style delays for transient failures."""
+
+    for attempt in range(len(REMOTE_RETRY_DELAYS) + 1):
+        try:
+            return query_tnm(lon, lat, tier, buffer_m)
+        except Exception as exc:
+            if not is_transient_remote_error(exc) or attempt == len(REMOTE_RETRY_DELAYS):
+                raise
+            delay = REMOTE_RETRY_DELAYS[attempt]
+            if progress:
+                progress(
+                    f"The USGS remote catalog is temporarily unavailable ({exc}). "
+                    f"No local processing error was detected; retrying in {delay:g} s "
+                    f"({attempt + 1}/{len(REMOTE_RETRY_DELAYS)})."
+                )
+            time.sleep(delay)
+
+
+def _urlopen_with_retry(url: str, *, timeout: float):
+    """Open a remote URL with the shared transient-error retry policy."""
+
+    for attempt in range(len(REMOTE_RETRY_DELAYS) + 1):
+        try:
+            return urllib.request.urlopen(url, timeout=timeout)  # noqa: S310
+        except Exception as exc:
+            if not is_transient_remote_error(exc) or attempt == len(REMOTE_RETRY_DELAYS):
+                raise
+            time.sleep(REMOTE_RETRY_DELAYS[attempt])
 
 
 @dataclass(frozen=True)
@@ -293,7 +343,7 @@ def download_file(url: str, destination: Path, timeout: float = 120.0, expected_
         if actual_size > 0 and (expected_size is None or actual_size == expected_size):
             return False
         destination.unlink()
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    with _urlopen_with_retry(url, timeout=timeout) as response:
         with tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".part", delete=False) as tmp:
             shutil.copyfileobj(response, tmp)
             tmp_path = Path(tmp.name)
@@ -307,7 +357,7 @@ def county_fips_for_point(lat: float, lon: float, timeout: float = 30.0) -> tupl
         "vintage": "Current_Current", "layers": "Counties", "format": "json",
     }
     url = f"{CENSUS_GEOCODER_URL}?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    with _urlopen_with_retry(url, timeout=timeout) as response:
         data = json.loads(response.read().decode("utf-8"))
     counties = data.get("result", {}).get("geographies", {}).get("Counties", [])
     if not counties:
@@ -402,7 +452,7 @@ def _parse_js_values(source: str, var_name: str) -> list[str]:
 def query_atlas14(lat: float, lon: float, timeout: float = 60.0) -> dict[str, dict[str, float]]:
     params = {"aoi": "point", "lat": f"{lat:.6f}", "lon": f"{lon:.6f}", "type": "pf", "data": "depth", "units": "english", "series": "pd"}
     url = f"{ATLAS14_URL}?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    with _urlopen_with_retry(url, timeout=timeout) as response:
         text = response.read().decode("utf-8", errors="replace")
     values = _parse_js_values(text, "quantiles")
     if not values:
@@ -487,7 +537,7 @@ def _tnm_product_result(
     for tier in tiers:
         if progress:
             progress(f"Querying {product} {tier.resolution_label} products for {site}...")
-        found = query_tnm(lon, lat, tier, buffer_m)
+        found = _query_tnm_with_retry(lon, lat, tier, buffer_m, progress)
         if product == "hydro":
             found = sorted(found, key=lambda item: item.size_bytes if item.size_bytes is not None else 10**18)
             deduped = _prefer_hydro_packages(found)

@@ -189,6 +189,29 @@ def test_download_file_skips_valid_existing_file(monkeypatch, tmp_path):
     assert destination.read_bytes() == b"12345"
 
 
+def test_tnm_query_retries_transient_gateway_errors(monkeypatch):
+    from urllib.error import HTTPError
+
+    attempts = []
+    delays = []
+    tier = dd.PRODUCT_TIERS["demlr"][0]
+
+    def flaky_query(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise HTTPError("https://example.test", 504, "Gateway Timeout", {}, None)
+        return []
+
+    monkeypatch.setattr(dd, "query_tnm", flaky_query)
+    monkeypatch.setattr(dd.time, "sleep", delays.append)
+    messages = []
+
+    assert dd._query_tnm_with_retry(-77.0, 39.0, tier, 5000, messages.append) == []
+    assert len(attempts) == 3
+    assert delays == [5.0, 10.0]
+    assert all("No local processing error" in message for message in messages)
+
+
 def test_download_file_redownloads_corrupt_existing_file(monkeypatch, tmp_path):
     destination = tmp_path / "tile.tif"
     destination.write_bytes(b"bad")

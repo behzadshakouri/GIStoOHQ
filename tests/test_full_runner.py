@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 
@@ -18,6 +19,16 @@ from ohqbuilder.full_runner import (
 from ohqbuilder.legacy_inputs import LegacyInputWorkflowError, verify_reach_writer_revision
 
 
+def _write_valid_cached_sources(downloads: Path, site_id: str = "source-id") -> None:
+    dem = downloads / site_id / "demlr" / "cached.tif"
+    dem.parent.mkdir(parents=True)
+    dem.write_bytes(b"cached-test-tiff")
+    hydro = downloads / site_id / "hydro" / "cached.zip"
+    hydro.parent.mkdir(parents=True)
+    with zipfile.ZipFile(hydro, "w") as archive:
+        archive.writestr("NHDFlowline.shp", b"cached")
+
+
 @pytest.fixture(autouse=True)
 def stub_watershed_builder(monkeypatch):
     monkeypatch.setattr(
@@ -26,6 +37,7 @@ def stub_watershed_builder(monkeypatch):
             build=lambda: SimpleNamespace(subbasins=[], reaches=[], junctions=[])
         ),
     )
+    monkeypatch.setattr("ohqbuilder.full_runner._invalid_cached_dem_files", lambda paths: [])
 
 
 def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
@@ -365,8 +377,7 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
 
 def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path):
     downloads = tmp_path / "downloads"
-    (downloads / "source-id" / "hydro").mkdir(parents=True)
-    (downloads / "source-id" / "hydro" / "cached.zip").write_bytes(b"cached")
+    _write_valid_cached_sources(downloads)
     soils = tmp_path / "SITE_A" / "soils"
     soils.mkdir(parents=True)
     for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
@@ -419,6 +430,61 @@ def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, t
 def test_full_pipeline_reuse_mode_reports_missing_cache(tmp_path):
     with pytest.raises(FullRunError, match="populated source download directory"):
         run_full_pipeline(tmp_path, "SITE_A", lon=-77.0, lat=39.0, reuse_downloads=True)
+
+
+def test_full_pipeline_falls_back_to_validated_cache_after_transient_remote_failure(
+    monkeypatch, tmp_path
+):
+    from urllib.error import HTTPError
+
+    download_root = tmp_path / "downloads"
+    _write_valid_cached_sources(download_root, "SITE_A")
+    soils = tmp_path / "SITE_A" / "soils"
+    soils.mkdir(parents=True)
+    for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
+        (soils / name).write_bytes(b"cached")
+    atlas = tmp_path / "SITE_A" / "atlas14" / "atlas14_pf.csv"
+    atlas.parent.mkdir()
+    atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
+    messages = []
+    captured = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: (_ for _ in ()).throw(
+            HTTPError("https://example.test", 504, "Gateway Timeout", {}, None)
+        ),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: captured.update(k),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=39.0,
+        download_dir=download_root,
+        progress=messages.append,
+    )
+
+    assert captured["allow_network_fallbacks"] is False
+    assert any("Continuing from local cache" in message for message in messages)
+    assert any("cached DEM tiles: 1; hydro packages: 1" in message for message in messages)
 
 
 def test_full_pipeline_reports_cli_outlet_recreation(monkeypatch, tmp_path):

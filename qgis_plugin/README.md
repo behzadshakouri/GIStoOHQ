@@ -24,6 +24,8 @@ downloads and soil products, check **Offline: reuse downloads**. Full-run then
 skips TNM, USDA, NOAA Atlas 14, and WBD-service requests and rematerializes from
 the configured download directory. Missing cache prerequisites are reported
 before GIS processing.
+Online full runs retry transient provider failures and automatically switch to
+the same validated cache when all reuse prerequisites are already present.
 
 ## Install from a source checkout
 
