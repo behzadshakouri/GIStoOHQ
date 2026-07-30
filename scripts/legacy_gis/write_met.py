@@ -151,7 +151,7 @@ def _site_coordinate():
 
     # The project runner resolves this same coordinate for Sligo Creek.
     if BASIN_NAME.lower().replace("_", "").replace("-", "") == "sligocreek":
-        return 38.95840888229726, -76.97391566325376, "Sligo Creek mouth candidate"
+        return 38.9571888036, -76.9744266065, "Sligo Creek routed outlet candidate"
 
     try:
         from qgis.core import (

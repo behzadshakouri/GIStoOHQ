@@ -67,7 +67,7 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
         "--lat", "34.1", "--lon", "-111.2",
         "--site-id", "source-id", "--download-dir", str(tmp_path / "raw"),
         "--max-tiles", "6", "--soil-pixel-size", "0.0002",
-        "--soil-top-depth", "20",
+        "--soil-top-depth", "20", "--use-reviewed-pour-points",
     ])
     assert status == 0
     assert calls[0][2]["lat"] == 34.1
@@ -77,6 +77,9 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
     assert calls[0][2]["max_tiles"] == 6
     assert calls[0][2]["soil_pixel_size"] == 0.0002
     assert calls[0][2]["soil_top_depth"] == 20
+    assert calls[0][2]["use_reviewed_pour_points"] is True
+    assert calls[0][2]["nhdplus_snap_distance_m"] == 50.0
+    assert calls[0][2]["use_existing_outlet"] is False
     assert "Full pipeline complete" in capsys.readouterr().out
 
 
@@ -89,6 +92,22 @@ def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
         "full-run", "--root", str(tmp_path), "--site", "SITE_A",
         "--lat", "34.1", "--lon", "-111.2",
     ]) == 2
+
+
+def test_full_run_cli_accepts_preserve_existing_outlet_alias(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        "ohqbuilder.cli.run_full_pipeline",
+        lambda *args, **kwargs: calls.append(kwargs) or FullRunResult(tmp_path / "final.ohq"),
+    )
+
+    status = main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "34.1", "--lon", "-111.2", "--preserve-existing-outlet",
+    ])
+
+    assert status == 0
+    assert calls[0]["use_existing_outlet"] is True
 
 
 def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):

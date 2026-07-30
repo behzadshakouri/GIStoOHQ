@@ -35,8 +35,20 @@ def test_qgis_plugin_dock_has_outlet_capture_hook():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
 
     assert "Pick Outlet on Map" in dock
+    assert "Set Outlet Coordinates" in dock
     assert "QgsMapToolEmitPoint" in dock
     assert "write_outlet" in dock
+
+
+def test_qgis_plugin_dock_has_pour_point_capture_and_coordinate_entry():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "Pick Pour Points on Map" in dock
+    assert "Add Pour Point Coordinates" in dock
+    assert "PourPointCaptureTool" in dock
+    assert "manual_subwatershed_outlet" in dock
+    assert 'feature["review_status"] = "pending"' in dock
+    assert "finish_pour_point_capture" in dock
 
 
 def test_qgis_plugin_dock_can_use_canvas_extent_as_area():
@@ -74,6 +86,8 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
   "site": {"name": "SligoCreek", "target_crs": "EPSG:26918"},
   "outlet": {"longitude": -76.97, "latitude": 38.99},
   "download_dir": "downloads",
+  "use_reviewed_pour_points": true,
+  "nhdplus_snap_distance_m": 50,
   "dem_acquisition": {
     "acquisition_area": "intermediate/area.geojson",
     "tile_manifest": "intermediate/dem_download_manifest.json",
@@ -120,9 +134,28 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
     assert full_run[full_run.index("--lat") + 1] == "38.99"
     assert "--target-crs" in full_run
     assert "--download-dir" in full_run
+    assert "--use-reviewed-pour-points" in full_run
+    assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50"
     assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate/area.geojson"
     )
+    assert _command_for_workflow("promote-pour-points", str(config)) == [
+        "ohqbuild", "promote-pour-points", "--root", str(tmp_path / "project-root"),
+        "--site", "SligoCreek",
+    ]
+    overridden = _command_for_workflow(
+        "full-run",
+        str(config),
+        use_reviewed_pour_points=False,
+        nhdplus_snap_distance_m=25.0,
+        use_existing_outlet=True,
+    )
+    assert "--use-reviewed-pour-points" not in overridden
+    assert overridden[overridden.index("--nhdplus-snap-distance-m") + 1] == "25.0"
+    assert "--use-existing-outlet" in overridden
+    assert _command_for_workflow(
+        "promote-pour-points", str(config), overwrite_promoted_pour_points=True
+    )[-1] == "--overwrite"
 
 
 def test_qgis_plugin_download_command_requires_manifest(tmp_path):

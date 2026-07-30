@@ -44,8 +44,11 @@ import processing
 import numpy as np
 from osgeo import gdal
 from qgis.core import (
-    QgsProject, QgsVectorLayer, QgsRasterLayer, QgsApplication
+    QgsProject, QgsVectorLayer, QgsRasterLayer, QgsApplication, QgsWkbTypes
 )
+from ws3io import release_and_delete
+
+REACH_WRITER_REVISION = "stale-layer-release-v2"
 
 
 def _module_spec_available(name):
@@ -121,6 +124,7 @@ REACHES_OUT    = os.path.join(OUT_DIR, "reaches.gpkg")
 print("Site     :", site_path)
 print("Flow acc :", FLOWACC_PATH)
 print("Outputs  :", OUT_DIR)
+print("Writer revision:", REACH_WRITER_REVISION)
 
 def _require_valid_projected_crs(layer, label):
     if not layer.isValid():
@@ -401,12 +405,41 @@ reaches_lyr.commitChanges()
 
 # --- write reaches.gpkg with CRS explicitly stamped ------------------------
 print("Writing", REACHES_OUT, "...")
-processing.run("native:assignprojection", {
+# A previous run commonly leaves reaches.gpkg loaded in QGIS. Remove that
+# provider handle and the complete stale file before asking GDAL to recreate it;
+# otherwise processing may appear to finish while the immediate reopen sees an
+# invalid or half-replaced GeoPackage.
+release_and_delete(REACHES_OUT)
+write_result = processing.run("native:assignprojection", {
     "INPUT": reaches_lyr, "CRS": crs, "OUTPUT": REACHES_OUT})
+written_output = write_result.get("OUTPUT", REACHES_OUT)
 
-chk = QgsVectorLayer(REACHES_OUT, "reaches_chk", "ogr")
+chk = QgsVectorLayer(str(written_output), "reaches_chk", "ogr") \
+    if isinstance(written_output, str) else written_output
 if not chk.isValid():
-    raise Exception("reaches.gpkg was written but is invalid")
+    # Some QGIS/GDAL combinations require an explicit GeoPackage layer name.
+    chk = QgsVectorLayer(REACHES_OUT + "|layername=reaches", "reaches_chk", "ogr")
+if not chk.isValid():
+    exists = os.path.isfile(REACHES_OUT)
+    size = os.path.getsize(REACHES_OUT) if exists else 0
+    probe = QgsVectorLayer(REACHES_OUT, "reaches_probe", "ogr")
+    try:
+        sublayers = probe.dataProvider().subLayers()
+    except Exception:
+        sublayers = []
+    raise Exception(
+        "Could not reopen reaches.gpkg after writing. path=%s exists=%s "
+        "size_bytes=%s output=%r provider_sublayers=%r. Close stale QGIS "
+        "layers and inspect GDAL/OGR messages above."
+        % (REACHES_OUT, exists, size, written_output, sublayers)
+    )
+if chk.featureCount() == 0:
+    raise Exception("reaches.gpkg contains zero features after writing")
+if QgsWkbTypes.geometryType(chk.wkbType()) != QgsWkbTypes.LineGeometry:
+    raise Exception(
+        "reaches.gpkg has non-line geometry: %s"
+        % QgsWkbTypes.displayString(chk.wkbType())
+    )
 if chk.crs() != crs:
     raise Exception(
         "reaches.gpkg CRS mismatch: expected %s, got %s"
