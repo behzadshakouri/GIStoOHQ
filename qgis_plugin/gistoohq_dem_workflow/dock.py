@@ -141,7 +141,16 @@ def _target_crs(config: dict) -> str | None:
     return None
 
 
-def _command_for_workflow(command: str, config_text: str) -> list[str]:
+def _command_for_workflow(
+    command: str,
+    config_text: str,
+    *,
+    use_reviewed_pour_points: bool | None = None,
+    nhdplus_snap_distance_m: float | None = None,
+    overwrite_promoted_pour_points: bool = False,
+    use_existing_outlet: bool = False,
+    reuse_downloads: bool = False,
+) -> list[str]:
     config_path = Path(config_text).expanduser()
     config = _read_config(config_path)
     if not isinstance(config, dict):
@@ -183,6 +192,16 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
     if command in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build"}:
         root = _relative_to_config(config_path, config.get("root") or ".")
         return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
+
+    if command == "promote-pour-points":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(root),
+            "--site", _site_name(config),
+        ]
+        if overwrite_promoted_pour_points:
+            argv.append("--overwrite")
+        return argv
 
     if command == "build-hms":
         root = _relative_to_config(config_path, config.get("root") or ".")
@@ -229,6 +248,23 @@ def _command_for_workflow(command: str, config_text: str) -> list[str]:
         source_dir = _relative_to_config(config_path, config.get("download_dir"))
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
+        snap_distance = (
+            nhdplus_snap_distance_m
+            if nhdplus_snap_distance_m is not None
+            else config.get("nhdplus_snap_distance_m", 50.0)
+        )
+        argv.extend(["--nhdplus-snap-distance-m", str(snap_distance)])
+        use_reviewed = (
+            use_reviewed_pour_points
+            if use_reviewed_pour_points is not None
+            else bool(config.get("use_reviewed_pour_points"))
+        )
+        if use_reviewed:
+            argv.append("--use-reviewed-pour-points")
+        if use_existing_outlet:
+            argv.append("--use-existing-outlet")
+        if reuse_downloads:
+            argv.append("--reuse-downloads")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
@@ -262,6 +298,32 @@ class OutletCaptureTool:
         lonlat = transform.transform(point)
         self.dock.write_outlet(lonlat.x(), lonlat.y())
         self.dock.log.append(f"Outlet set to lon={lonlat.x():.8f}, lat={lonlat.y():.8f}")
+
+
+class PourPointCaptureTool:
+    """Capture any number of reviewable interior pour points from the canvas."""
+
+    def __init__(self, dock):
+        from qgis.gui import QgsMapToolEmitPoint
+
+        self.dock = dock
+        self.tool = QgsMapToolEmitPoint(dock.iface.mapCanvas())
+        self.tool.canvasClicked.connect(self.capture)
+
+    def activate(self):
+        self.dock.iface.mapCanvas().setMapTool(self.tool)
+        self.dock.log.append(
+            "Left-click interior pour points; right-click to finish. "
+            "New points are pending until their attributes are reviewed."
+        )
+
+    def capture(self, point, button):
+        from qgis.PyQt.QtCore import Qt
+
+        if button == Qt.RightButton:
+            self.dock.finish_pour_point_capture()
+            return
+        self.dock.add_pour_point_from_canvas(point)
 
 
 class AcquisitionPolygonTool:
@@ -315,6 +377,8 @@ class DemWorkflowDock:
             QHBoxLayout,
             QLabel,
             QLineEdit,
+            QCheckBox,
+            QDoubleSpinBox,
             QPushButton,
             QTextEdit,
         )
@@ -328,9 +392,33 @@ class DemWorkflowDock:
         self.config = QLineEdit("config.example.json")
         row.addWidget(self.config)
         layout.addLayout(row)
+        controls = QHBoxLayout()
+        self.reviewed_points = QCheckBox("Use reviewed pour points")
+        controls.addWidget(self.reviewed_points)
+        controls.addWidget(QLabel("Outlet/NHDPlus snap max (m)"))
+        self.nhdplus_snap_distance = QDoubleSpinBox()
+        self.nhdplus_snap_distance.setRange(0.0, 100000.0)
+        self.nhdplus_snap_distance.setValue(50.0)
+        controls.addWidget(self.nhdplus_snap_distance)
+        self.overwrite_promoted = QCheckBox("Overwrite promoted points")
+        controls.addWidget(self.overwrite_promoted)
+        self.use_existing_outlet = QCheckBox("Use edited outlet.shp")
+        controls.addWidget(self.use_existing_outlet)
+        self.reuse_downloads = QCheckBox("Offline: reuse downloads")
+        controls.addWidget(self.reuse_downloads)
+        layout.addLayout(controls)
         outlet_button = QPushButton("Pick Outlet on Map")
         outlet_button.clicked.connect(self.pick_outlet)
         layout.addWidget(outlet_button)
+        outlet_coordinate_button = QPushButton("Set Outlet Coordinates")
+        outlet_coordinate_button.clicked.connect(self.set_outlet_coordinates)
+        layout.addWidget(outlet_coordinate_button)
+        pour_button = QPushButton("Pick Pour Points on Map")
+        pour_button.clicked.connect(self.pick_pour_points)
+        layout.addWidget(pour_button)
+        coordinate_button = QPushButton("Add Pour Point Coordinates")
+        coordinate_button.clicked.connect(self.add_pour_point_coordinates)
+        layout.addWidget(coordinate_button)
         extent_button = QPushButton("Use Canvas Extent as DEM Area")
         extent_button.clicked.connect(self.use_canvas_extent_as_area)
         layout.addWidget(extent_button)
@@ -350,6 +438,7 @@ class DemWorkflowDock:
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
             ("FULL RUN: Download All Data to OHQ", "full-run"),
+            ("Promote Reviewed Pour Points", "promote-pour-points"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
@@ -369,6 +458,188 @@ class DemWorkflowDock:
     def pick_outlet(self) -> None:
         self.outlet_tool = OutletCaptureTool(self)
         self.outlet_tool.activate()
+
+    def set_outlet_coordinates(self) -> None:
+        from qgis.PyQt.QtWidgets import QInputDialog
+
+        config_path = Path(self.config.text()).expanduser()
+        data = _read_config(config_path)
+        outlet = data.get("outlet", {}) if isinstance(data, dict) else {}
+        default_lon = float(outlet.get("longitude") or 0.0) if isinstance(outlet, dict) else 0.0
+        default_lat = float(outlet.get("latitude") or 0.0) if isinstance(outlet, dict) else 0.0
+        lon, accepted = QInputDialog.getDouble(
+            self.widget,
+            "Outlet Longitude",
+            "Longitude (EPSG:4326)",
+            default_lon,
+            -180.0,
+            180.0,
+            8,
+        )
+        if not accepted:
+            return
+        lat, accepted = QInputDialog.getDouble(
+            self.widget,
+            "Outlet Latitude",
+            "Latitude (EPSG:4326)",
+            default_lat,
+            -90.0,
+            90.0,
+            8,
+        )
+        if accepted:
+            self.write_outlet(lon, lat)
+            self.log.append(f"Outlet set to lon={lon:.8f}, lat={lat:.8f}")
+
+    def _pour_point_path(self) -> Path:
+        config_path = Path(self.config.text()).expanduser()
+        data = _read_config(config_path)
+        if not isinstance(data, dict):
+            raise QgisDockConfigError("Project config must contain a JSON/YAML object.")
+        root = _relative_to_config(config_path, data.get("root") or ".")
+        if root is None:
+            raise QgisDockConfigError("Project root could not be resolved.")
+        return root / _site_name(data) / "outputs" / "pour_point_candidates.gpkg"
+
+    def _pour_point_layer(self):
+        """Return the editable review layer, creating it when Phase 1 has not."""
+        from qgis.core import (
+            QgsProject,
+            QgsVectorFileWriter,
+            QgsVectorLayer,
+        )
+
+        path = self._pour_point_path()
+        source_prefix = str(path.resolve())
+        for layer in QgsProject.instance().mapLayers().values():
+            if (
+                layer.source().split("|")[0] == source_prefix
+                and layer.name() == "pour_point_candidates"
+            ):
+                return layer
+
+        uri = f"{path}|layername=pour_point_candidates"
+        layer = QgsVectorLayer(uri, "pour_point_candidates", "ogr")
+        if not layer.isValid():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            memory = QgsVectorLayer(
+                "Point?crs=EPSG:4326"
+                "&field=candidate_id:string(80)"
+                "&field=reason:string(80)"
+                "&field=review_status:string(20)",
+                "pour_point_candidates",
+                "memory",
+            )
+            options = QgsVectorFileWriter.SaveVectorOptions()
+            options.driverName = "GPKG"
+            options.layerName = "pour_point_candidates"
+            options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+            result = QgsVectorFileWriter.writeAsVectorFormatV3(
+                memory, str(path), QgsProject.instance().transformContext(), options
+            )
+            if result[0] != QgsVectorFileWriter.NoError:
+                raise QgisDockConfigError(
+                    f"Could not create pour-point review layer {path}: {result}"
+                )
+            layer = QgsVectorLayer(uri, "pour_point_candidates", "ogr")
+        if not layer.isValid():
+            raise QgisDockConfigError(f"Could not open pour-point review layer: {path}")
+        QgsProject.instance().addMapLayer(layer)
+        return layer
+
+    @staticmethod
+    def _next_manual_candidate_id(layer) -> str:
+        existing = {
+            str(feature["candidate_id"])
+            for feature in layer.getFeatures()
+            if feature["candidate_id"] not in (None, "")
+        }
+        number = 1
+        while f"manual-{number:03d}" in existing:
+            number += 1
+        return f"manual-{number:03d}"
+
+    def _append_pour_point(self, point, source_crs) -> str:
+        from qgis.core import (
+            QgsCoordinateTransform,
+            QgsFeature,
+            QgsGeometry,
+            QgsProject,
+        )
+
+        layer = self._pour_point_layer()
+        transform = QgsCoordinateTransform(source_crs, layer.crs(), QgsProject.instance())
+        layer_point = transform.transform(point)
+        candidate_id = self._next_manual_candidate_id(layer)
+        feature = QgsFeature(layer.fields())
+        feature.setGeometry(QgsGeometry.fromPointXY(layer_point))
+        feature["candidate_id"] = candidate_id
+        feature["reason"] = "manual_subwatershed_outlet"
+        feature["review_status"] = "pending"
+        if not layer.isEditable() and not layer.startEditing():
+            raise QgisDockConfigError("Could not start editing pour-point review layer.")
+        if not layer.addFeature(feature):
+            raise QgisDockConfigError(f"Could not add pour-point candidate {candidate_id}.")
+        layer.triggerRepaint()
+        return candidate_id
+
+    def pick_pour_points(self) -> None:
+        try:
+            self._pour_point_layer()
+        except (OSError, QgisDockConfigError) as exc:
+            self.log.append(f"ERROR: {exc}")
+            return
+        self.pour_point_tool = PourPointCaptureTool(self)
+        self.pour_point_tool.activate()
+
+    def add_pour_point_from_canvas(self, point) -> None:
+        try:
+            canvas = self.iface.mapCanvas()
+            candidate_id = self._append_pour_point(
+                point, canvas.mapSettings().destinationCrs()
+            )
+            self.log.append(f"Added pending pour point {candidate_id} from map canvas.")
+        except (OSError, QgisDockConfigError) as exc:
+            self.log.append(f"ERROR: {exc}")
+
+    def add_pour_point_coordinates(self) -> None:
+        from qgis.PyQt.QtWidgets import QInputDialog
+        from qgis.core import QgsCoordinateReferenceSystem, QgsPointXY
+
+        lon, accepted = QInputDialog.getDouble(
+            self.widget, "Pour Point Longitude", "Longitude (EPSG:4326)", decimals=8,
+            min=-180.0, max=180.0
+        )
+        if not accepted:
+            return
+        lat, accepted = QInputDialog.getDouble(
+            self.widget, "Pour Point Latitude", "Latitude (EPSG:4326)", decimals=8,
+            min=-90.0, max=90.0
+        )
+        if not accepted:
+            return
+        try:
+            candidate_id = self._append_pour_point(
+                QgsPointXY(lon, lat), QgsCoordinateReferenceSystem("EPSG:4326")
+            )
+            self.log.append(
+                f"Added pending pour point {candidate_id} at lon={lon:.8f}, lat={lat:.8f}."
+            )
+        except (OSError, QgisDockConfigError) as exc:
+            self.log.append(f"ERROR: {exc}")
+
+    def finish_pour_point_capture(self) -> None:
+        try:
+            layer = self._pour_point_layer()
+            if layer.isEditable() and not layer.commitChanges():
+                errors = "; ".join(layer.commitErrors())
+                raise QgisDockConfigError(f"Could not save pour points: {errors}")
+            self.log.append(
+                "Saved pour-point candidates. Review reason/status attributes, set selected "
+                "points to approved, then run Promote Reviewed Pour Points."
+            )
+        except (OSError, QgisDockConfigError) as exc:
+            self.log.append(f"ERROR: {exc}")
 
     def draw_acquisition_polygon(self) -> None:
         self.polygon_tool = AcquisitionPolygonTool(self)
@@ -446,7 +717,15 @@ class DemWorkflowDock:
                     self.log.append(
                         "Generating the configured default acquisition area before FULL RUN."
                     )
-            argv = _command_for_workflow(command, self.config.text())
+            argv = _command_for_workflow(
+                command,
+                self.config.text(),
+                use_reviewed_pour_points=self.reviewed_points.isChecked(),
+                nhdplus_snap_distance_m=self.nhdplus_snap_distance.value(),
+                overwrite_promoted_pour_points=self.overwrite_promoted.isChecked(),
+                use_existing_outlet=self.use_existing_outlet.isChecked(),
+                reuse_downloads=self.reuse_downloads.isChecked(),
+            )
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")
             return

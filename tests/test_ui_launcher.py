@@ -154,6 +154,14 @@ def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
     assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
 
 
+def test_bundled_sligo_config_uses_reviewed_routed_outlet():
+    path = Path("examples/SligoCreek/dem_workflow.example.yaml")
+    state = state_from_config(path, load_project_config(path))
+
+    assert state.lon == pytest.approx(-76.9744266065)
+    assert state.lat == pytest.approx(38.9571888036)
+
+
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     config = {
@@ -504,6 +512,10 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         lat=38.94,
         method="outlet_buffer",
         acquisition_area=acquisition,
+        use_reviewed_pour_points=True,
+        nhdplus_snap_distance_m=50.0,
+        use_existing_outlet=True,
+        reuse_downloads=True,
     )
 
     command = command_for_step("full-run", state)
@@ -519,6 +531,26 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
     assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate" / "area.geojson"
+    )
+    assert "--use-reviewed-pour-points" in full_run
+    assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50.0"
+    assert "--use-existing-outlet" in full_run
+    assert "--reuse-downloads" in full_run
+
+
+def test_launcher_promotes_reviewed_pour_points(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Demo",
+        overwrite_promoted_pour_points=True,
+    )
+
+    command = command_for_step("promote-pour-points", state)
+
+    assert command.argv == (
+        "ohqbuild", "promote-pour-points", "--root", str(tmp_path),
+        "--site", "Demo", "--overwrite",
     )
 
 
