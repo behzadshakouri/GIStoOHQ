@@ -6,8 +6,17 @@ application. Full-run honors the project-config keys `nhdplus_snap_distance_m`
 and `use_reviewed_pour_points`; dock controls can override them for the current
 run. Promotion only overwrites an existing point dataset when **Overwrite promoted
 points** is checked. QGIS 3.28 or newer is required.
-Use **Use edited outlet.shp** after manually correcting the outlet on the QGIS
-canvas; the full run will preserve it and derive its EPSG:4326 coordinate.
+Choose the outlet with **Pick Outlet on Map** or enter EPSG:4326 longitude and
+latitude with **Set Outlet Coordinates**. Use **Use edited outlet.shp** after
+manually correcting the outlet layer on the QGIS canvas; the full run will
+preserve it and derive its EPSG:4326 coordinate.
+Use **Pick Pour Points on Map** to add multiple interior review candidates from
+the active canvas (right-click finishes and saves), or **Add Pour Point
+Coordinates** to enter EPSG:4326 longitude/latitude directly. New manual points
+are intentionally saved with `review_status=pending`; inspect their placement and
+attributes, change accepted points to `approved`, retain exactly one required
+`watershed_outlet`, and then run **Promote Reviewed Pour Points**. Check **Use
+reviewed pour points** on the subsequent full run so they are not replaced.
 
 ## Install from a source checkout
 

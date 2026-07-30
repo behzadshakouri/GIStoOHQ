@@ -35,8 +35,20 @@ def test_qgis_plugin_dock_has_outlet_capture_hook():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
 
     assert "Pick Outlet on Map" in dock
+    assert "Set Outlet Coordinates" in dock
     assert "QgsMapToolEmitPoint" in dock
     assert "write_outlet" in dock
+
+
+def test_qgis_plugin_dock_has_pour_point_capture_and_coordinate_entry():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "Pick Pour Points on Map" in dock
+    assert "Add Pour Point Coordinates" in dock
+    assert "PourPointCaptureTool" in dock
+    assert "manual_subwatershed_outlet" in dock
+    assert 'feature["review_status"] = "pending"' in dock
+    assert "finish_pour_point_capture" in dock
 
 
 def test_qgis_plugin_dock_can_use_canvas_extent_as_area():
