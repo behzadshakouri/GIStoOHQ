@@ -133,6 +133,32 @@ def test_zonal_parameters_fail_early_when_cn_or_slope_has_no_coverage():
     assert 'slope_by_id[id_key(ft["id"])] = as_float' in slope
 
 
+def test_subwatersheds_use_a_strict_incremental_partition():
+    source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 's["parent"] = None' in source
+    assert 'parent["children"].append(child)' in source
+    assert 'to_subtract = [child["geom"] for child in s["children"]]' in source
+    assert 'QgsField("parent_id", QVariant.String)' in source
+    assert "Subwatershed partition contains empty unit(s)" in source
+    assert "Subwatershed partition validation failed" in source
+    assert 'gap = root_shed["geom"].difference(carved_union)' in source
+    assert 'outside = carved_union.difference(root_shed["geom"])' in source
+
+
+def test_subwatershed_hierarchy_rejects_duplicates_and_crossing_basins():
+    source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "effectively identical" in source
+    assert "cross by %.4f km2 but neither" in source
+    assert "Expected one downstream/root cumulative watershed" in source
+    assert "contains(point) is directionally" in source
+
+
 def test_phase_runners_suppress_only_qgsfield_deprecation_noise():
     for path in (
         Path("scripts/legacy_gis/run_phase1.py"),

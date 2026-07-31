@@ -27,6 +27,7 @@ from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 from .phase1_fetcher import write_outlet_shapefile
 from .dem_downloader import is_transient_remote_error
+from .documented_watershed import REFERENCE_FILENAME, REFERENCE_LAYER
 
 
 class FullRunError(RuntimeError):
@@ -287,6 +288,7 @@ def full_run_summary(
                 "",
                 f"Boundary Comparison ({payload.get('reference_layer', 'reference')})",
                 f"  Reference ID       : {best.get('reference_id', '—')}",
+                f"  Reference source   : {best.get('reference_organization') or '—'}",
                 f"  Reference scope    : {best.get('reference_scope', 'not classified')}",
                 f"  Contains outlet    : {best.get('contains_outlet', 'not evaluated')}",
                 f"  Generated area     : {generated_area:.4f} km²",
@@ -351,6 +353,7 @@ def write_watershed_report(
             "<tr>"
             f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
             f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
+            f"<td>{escape(str(best.get('reference_organization') or '—'))}</td>"
             f"<td>{escape(str(best.get('reference_scope', 'not classified')))}</td>"
             f"<td>{escape(str(best.get('contains_outlet', 'not evaluated')))}</td>"
             f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
@@ -366,7 +369,7 @@ def write_watershed_report(
             "<h2>Boundary comparisons</h2>"
             "<p>Reference matches are review evidence, not automatically accepted boundaries.</p>"
             "<table><thead><tr><th>Reference layer</th><th>Reference ID</th>"
-            "<th>Scope</th><th>Contains outlet</th><th>IoU</th>"
+            "<th>Publisher</th><th>Scope</th><th>Contains outlet</th><th>IoU</th>"
             "<th>Generated only (km²)</th><th>Reference only (km²)</th>"
             "<th>Hausdorff (m)</th><th>Disagreement map</th></tr></thead><tbody>"
             + "".join(comparison_rows)
@@ -714,6 +717,7 @@ def run_full_pipeline(
         wbd_reference = getattr(materialized, "wbd_reference", None)
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
         generated_reaches = generated_boundary.with_name("reaches.gpkg")
+        documented_reference = generated_boundary.with_name(REFERENCE_FILENAME)
         if (
             materialized_hydro is not None
             and generated_reaches.is_file()
@@ -743,6 +747,29 @@ def run_full_pipeline(
             )
             emit(f"Wrote WBD comparison metrics: {comparison_path}")
             comparison_paths.append(comparison_path)
+        if documented_reference.is_file() and generated_boundary.is_file():
+            documented_comparison = compare_watersheds(
+                generated_boundary,
+                documented_reference,
+                generated_boundary.with_name("watershed_documented_comparison.json"),
+                reference_layer=REFERENCE_LAYER,
+                reference_id_fields=("ref_title", "name", "watershed"),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_documented_disagreement.gpkg"
+                ),
+                outlet_lon=lon,
+                outlet_lat=lat,
+                reference_kind="documented_named_watershed",
+                interpretation=(
+                    "Cited named-watershed boundary imported by the operator; compare "
+                    "provenance and methods before deciding whether differences are errors."
+                ),
+            )
+            emit(
+                "Wrote documented named-watershed comparison metrics: "
+                f"{documented_comparison}"
+            )
+            comparison_paths.append(documented_comparison)
         if nhdplus_candidate is not None and generated_boundary.is_file():
             nhd_comparison = compare_watersheds(
                 generated_boundary,

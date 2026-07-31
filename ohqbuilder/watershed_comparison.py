@@ -18,8 +18,10 @@ def compare_watersheds(
     disagreement_path: str | Path | None = None,
     outlet_lon: float | None = None,
     outlet_lat: float | None = None,
+    reference_kind: str = "wbd_huc12",
+    interpretation: str | None = None,
 ) -> Path:
-    """Compare a generated basin with every intersecting WBD feature.
+    """Compare a generated basin with every feature in a reference layer.
 
     Areas and distances are calculated in a locally estimated UTM CRS. Reporting
     every reference feature avoids pretending that the first containing HUC12 is
@@ -73,6 +75,9 @@ def compare_watersheds(
         comparisons.append(
             {
                 "reference_id": reference_id,
+                "reference_title": str(row.get("ref_title", reference_id)),
+                "reference_organization": str(row.get("ref_org", "")),
+                "reference_url": str(row.get("ref_url", "")),
                 "generated_area_km2": basin_area / 1_000_000.0,
                 "reference_area_km2": reference_area / 1_000_000.0,
                 "intersection_area_km2": intersection_area / 1_000_000.0,
@@ -128,12 +133,20 @@ def compare_watersheds(
                 ).to_file(disagreement_target, layer=layer, driver="GPKG")
     payload = {
         "generated_watershed": str(Path(generated_path).expanduser().resolve()),
-        "wbd_reference": str(Path(reference_path).expanduser().resolve()),
+        "reference_path": str(Path(reference_path).expanduser().resolve()),
+        # Retain this key for consumers of comparison JSON written before the
+        # documented named-watershed reference workflow was added.
+        "wbd_reference": str(Path(reference_path).expanduser().resolve())
+        if reference_kind == "wbd_huc12"
+        else None,
+        "reference_kind": reference_kind,
         "measurement_crs": metric_crs.to_string(),
         "reference_layer": reference_layer,
         "disagreement_geopackage": str(disagreement_target) if disagreement_target else None,
-        "interpretation": (
+        "interpretation": interpretation or (
             "WBD HUC12 units are comparison references, not automatically the named-stream basin."
+            if reference_kind == "wbd_huc12"
+            else "The documented boundary is comparison evidence and is not automatically substituted."
         ),
         "selection_method": (
             "highest_iou_among_outlet_containing_references"

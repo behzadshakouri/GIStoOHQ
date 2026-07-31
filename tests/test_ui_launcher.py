@@ -67,6 +67,29 @@ def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
     )
 
 
+def test_launcher_builds_documented_watershed_import_command(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Sligo",
+        lon=-76.974,
+        lat=38.957,
+        reference_source="https://example.gov/FeatureServer/2",
+        reference_name_field="BASIN",
+        reference_name="Sligo Creek",
+        reference_title="County watershed inventory",
+        reference_organization="Example County",
+        reference_url="https://example.gov/watersheds",
+    )
+
+    command = command_for_step("import-watershed-reference", state)
+
+    assert command.label == "Import Documented Watershed"
+    assert command.argv[:2] == ("ohqbuild", "import-watershed-reference")
+    assert command.argv[command.argv.index("--name") + 1] == "Sligo Creek"
+    assert command.argv[command.argv.index("--source-organization") + 1] == "Example County"
+
+
 def test_command_runner_stop_terminates_active_process():
     messages = queue.Queue()
     runner = CommandRunner(
