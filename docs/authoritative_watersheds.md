@@ -24,6 +24,48 @@ per-HUC12 area, intersection, omission, commission, IoU, and boundary Hausdorff
 distance. Metrics use a locally estimated projected CRS and identify the highest-
 IoU feature as a review candidate—not an automatically accepted boundary.
 
+## Documented named-watershed boundaries
+
+A named creek can have a boundary published by a county, watershed organization,
+study, or regulatory program even when no HUC12 represents that creek exactly.
+GIStoOHQ now keeps that kind of evidence separate from WBD. Import a polygon from
+the publisher's GIS download or its ArcGIS FeatureServer/MapServer **layer URL**:
+
+```bash
+ohqbuild import-watershed-reference \
+  --root examples/SligoCreek --site SligoCreekDemo \
+  --source /path/to/county_watersheds.gpkg --layer watersheds \
+  --name-field BASIN_NAME --name "Sligo Creek" \
+  --lon -76.9744266065 --lat 38.9571888036 \
+  --source-title "County watershed inventory" \
+  --source-organization "Publishing agency" \
+  --source-url "https://agency.example/watersheds" \
+  --license "Public data terms"
+```
+
+For an ArcGIS service, pass a URL ending in a numeric layer id, such as
+`https://agency.example/arcgis/rest/services/Watersheds/FeatureServer/2`.
+Use `--where` for an agency attribute expression if needed. The importer queries
+the polygon at the modeled outlet, optionally applies an exact `--name-field` /
+`--name` match, rejects a selection that does not contain the outlet, and writes:
+
+- `outputs/DocumentedWatershed_reference.gpkg`;
+- `outputs/DocumentedWatershed_reference.json` with organization, title, URL,
+  selection, retrieval time, license, and outlet provenance.
+
+A subsequent `full-run` preserves this operator-supplied reference and adds
+`watershed_documented_comparison.json` plus
+`watershed_documented_disagreement.gpkg` to the report. The documented polygon is
+not silently substituted for the routed boundary: differences may reflect outlet
+definition, data vintage, storm sewers, culverts, digitizing scale, or method.
+
+The Friends of Sligo Creek map and the published figure are useful evidence that a
+documented Sligo Creek extent exists, but a web image is not a surveyable GIS
+polygon. GIStoOHQ deliberately rejects PNG/JPEG/PDF input. Obtain the underlying
+publisher layer when possible; if it must be digitized, save the digitized polygon
+as a separately identified derived reference and cite the map, scale, control
+points, and digitizing method rather than calling it an agency GIS boundary.
+
 ## What each national dataset can establish
 
 | Source | Best use | Important limitation |

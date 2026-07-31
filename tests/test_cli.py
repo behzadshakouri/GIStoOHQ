@@ -448,3 +448,36 @@ def test_init_inputs_cli_creates_manifest(tmp_path):
 
     assert status == 0
     assert (tmp_path / "SITE_A" / "INPUTS.md").is_file()
+
+
+def test_import_documented_watershed_cli_records_source(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_import(source, output, **kwargs):
+        calls.append((source, Path(output), kwargs))
+        return Path(output)
+
+    monkeypatch.setattr("ohqbuilder.cli.import_documented_watershed", fake_import)
+    status = main(
+        [
+            "import-watershed-reference",
+            "--root",
+            str(tmp_path),
+            "--site",
+            "Sligo",
+            "--source",
+            "https://example.gov/FeatureServer/2",
+            "--lon",
+            "-76.974",
+            "--lat",
+            "38.957",
+            "--source-title",
+            "Sligo Creek watershed",
+            "--source-organization",
+            "Example County",
+        ]
+    )
+
+    assert status == 0
+    assert calls[0][1].name == "DocumentedWatershed_reference.gpkg"
+    assert calls[0][2]["source_organization"] == "Example County"

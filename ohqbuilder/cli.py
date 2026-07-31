@@ -22,6 +22,11 @@ from .dem_workflow import (
     validate_dem_from_config,
     write_dem_config_template,
 )
+from .documented_watershed import (
+    DocumentedWatershedError,
+    REFERENCE_FILENAME,
+    import_documented_watershed,
+)
 from .doctor import run_doctor
 from .legacy_inputs import (
     LegacyInputWorkflowError,
@@ -212,6 +217,29 @@ def build_parser() -> argparse.ArgumentParser:
     promote.add_argument("--out", default=None)
     promote.add_argument("--minimum-spacing-m", type=float, default=100.0)
     promote.add_argument("--overwrite", action="store_true")
+
+    documented = sub.add_parser(
+        "import-watershed-reference",
+        help="Import a cited local/ArcGIS named-watershed polygon for boundary QA.",
+    )
+    documented.add_argument("--root", required=True)
+    documented.add_argument("--site", required=True)
+    documented.add_argument(
+        "--source",
+        required=True,
+        help="Local vector path or ArcGIS FeatureServer/MapServer numeric layer URL.",
+    )
+    documented.add_argument("--layer", default=None, help="Layer name for a local container.")
+    documented.add_argument("--name-field", default=None)
+    documented.add_argument("--name", default=None, help="Exact named-watershed value.")
+    documented.add_argument("--where", default="1=1", help="ArcGIS attribute filter.")
+    documented.add_argument("--lon", type=float, required=True)
+    documented.add_argument("--lat", type=float, required=True)
+    documented.add_argument("--source-title", required=True)
+    documented.add_argument("--source-organization", required=True)
+    documented.add_argument("--source-url", default=None)
+    documented.add_argument("--license", dest="license_text", default=None)
+    documented.add_argument("--out", default=None)
 
     dl = sub.add_parser(
         "download-data",
@@ -961,6 +989,36 @@ def main(argv: list[str] | None = None) -> int:
             print(f"promote-pour-points failed: {exc}")
             return 2
         print(f"Wrote approved Phase 2 pour points: {promoted}")
+        return 0
+    if args.command == "import-watershed-reference":
+        site_path = Path(args.site).expanduser()
+        if not site_path.is_absolute():
+            site_path = Path(args.root).expanduser().resolve() / site_path
+        target = (
+            Path(args.out).expanduser()
+            if args.out
+            else site_path.resolve() / "outputs" / REFERENCE_FILENAME
+        )
+        try:
+            imported = import_documented_watershed(
+                args.source,
+                target,
+                outlet_lon=args.lon,
+                outlet_lat=args.lat,
+                layer=args.layer,
+                name_field=args.name_field,
+                name=args.name,
+                where=args.where,
+                source_title=args.source_title,
+                source_organization=args.source_organization,
+                source_url=args.source_url,
+                license_text=args.license_text,
+            )
+        except DocumentedWatershedError as exc:
+            print(f"import-watershed-reference failed: {exc}")
+            return 2
+        print(f"Wrote documented watershed reference: {imported}")
+        print(f"Wrote provenance metadata: {imported.with_suffix('.json')}")
         return 0
     if args.command == "create-outlet":
         site_path = Path(args.site).expanduser()
