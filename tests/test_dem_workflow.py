@@ -370,6 +370,19 @@ def test_cli_init_dem_config_writes_next_step(tmp_path, capsys):
     assert data["dem_acquisition"]["method"] == "upstream_network"
 
 
+def test_cli_init_dem_config_requires_force_to_replace(tmp_path, capsys):
+    config = tmp_path / "config.yaml"
+    config.write_text("preserve: true\n", encoding="utf-8")
+    base = [
+        "init-dem-config", "--config", str(config), "--site", "Demo",
+        "--lon", "-77", "--lat", "39", "--method", "outlet_buffer",
+    ]
+
+    assert main(base) == 2
+    assert "Refusing to overwrite" in capsys.readouterr().out
+    assert main([*base, "--force"]) == 0
+
+
 def test_infer_utm_crs_defaults_to_nad83_for_sligo_creek():
     from ohqbuilder.dem_workflow import infer_utm_crs
 
@@ -377,7 +390,7 @@ def test_infer_utm_crs_defaults_to_nad83_for_sligo_creek():
     assert infer_utm_crs(-76.9765, 38.9921, datum="WGS84") == "EPSG:32618"
 
 
-def test_write_dem_config_template_defaults_sligo_demo_paths(tmp_path):
+def test_write_dem_config_template_uses_demo_paths_only_when_explicit(tmp_path):
     from ohqbuilder.dem_workflow import write_dem_config_template
 
     demo_dir = tmp_path / "examples" / "SligoCreek"
@@ -391,11 +404,29 @@ def test_write_dem_config_template_defaults_sligo_demo_paths(tmp_path):
         lat=38.96888097,
         target_crs="EPSG:26918",
         method="upstream_network",
+        use_demo_inputs=True,
     )
 
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert data["dem_acquisition"]["flowline_path"] == "hydro/NHDFlowline.demo.geojson"
     assert data["dem_acquisition"]["tile_index"] == "indexes/usgs_3dep_tiles.demo.geojson"
+
+
+def test_write_dem_config_template_refuses_to_replace_existing_config(tmp_path):
+    from ohqbuilder.dem_workflow import DemWorkflowError, write_dem_config_template
+
+    config = tmp_path / "config.yaml"
+    config.write_text("existing: true\n", encoding="utf-8")
+
+    with pytest.raises(DemWorkflowError, match="Refusing to overwrite"):
+        write_dem_config_template(
+            config,
+            site="Example",
+            lon=-77.0,
+            lat=39.0,
+            method="outlet_buffer",
+        )
+    assert config.read_text(encoding="utf-8") == "existing: true\n"
 
 
 def test_write_dem_config_template_infers_target_crs(tmp_path):

@@ -67,6 +67,38 @@ def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
     )
 
 
+def test_launcher_builds_documented_watershed_import_command(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Sligo",
+        lon=-76.974,
+        lat=38.957,
+        reference_source="https://example.gov/FeatureServer/2",
+        reference_name_field="BASIN",
+        reference_name="Sligo Creek",
+        reference_title="County watershed inventory",
+        reference_organization="Example County",
+        reference_url="https://example.gov/watersheds",
+    )
+
+    command = command_for_step("import-watershed-reference", state)
+
+    assert command.label == "Import Documented Watershed"
+    assert command.argv[:2] == ("ohqbuild", "import-watershed-reference")
+    assert command.argv[command.argv.index("--name") + 1] == "Sligo Creek"
+    assert command.argv[command.argv.index("--source-organization") + 1] == "Example County"
+
+
+def test_launcher_keeps_reference_fields_in_compact_dialog():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert 'text="Documented watershed…"' not in source  # tuple label, not main-form row
+    assert '("Documented watershed…", self.configure_documented_watershed)' in source
+    assert 'dialog.title("Documented Watershed Reference")' in source
+    assert 'self.log = tk.Text(frame, height=14' in source
+
+
 def test_command_runner_stop_terminates_active_process():
     messages = queue.Queue()
     runner = CommandRunner(
@@ -152,6 +184,14 @@ def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
     assert args["lat"] == 38.96888097
     assert str(args["flowline_path"]) == "hydro/NHDFlowline.demo.geojson"
     assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
+
+
+def test_bundled_sligo_config_uses_reviewed_routed_outlet():
+    path = Path("examples/SligoCreek/dem_workflow.example.yaml")
+    state = state_from_config(path, load_project_config(path))
+
+    assert state.lon == pytest.approx(-76.9744266065)
+    assert state.lat == pytest.approx(38.9571888036)
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
@@ -481,6 +521,19 @@ def test_ui_launcher_builds_final_ohq_commands(step, subcommand):
     assert command.argv == ("ohqbuild", subcommand, "--root", "project", "--site", "Demo")
 
 
+def test_init_dem_config_force_is_only_added_after_confirmation_state(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        site="Demo",
+        lon=-77.0,
+        lat=39.0,
+        method="outlet_buffer",
+        overwrite_config=True,
+    )
+
+    assert "--force" in command_for_step("init-dem-config", state).argv
+
+
 def test_continue_to_ohq_prepares_hydrology_before_combined_run():
     state = LauncherState(config_path=Path("config.yaml"), root=Path("project"), site="Demo")
 
@@ -504,6 +557,10 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
         lat=38.94,
         method="outlet_buffer",
         acquisition_area=acquisition,
+        use_reviewed_pour_points=True,
+        nhdplus_snap_distance_m=50.0,
+        use_existing_outlet=True,
+        reuse_downloads=True,
     )
 
     command = command_for_step("full-run", state)
@@ -519,6 +576,26 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
     assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate" / "area.geojson"
+    )
+    assert "--use-reviewed-pour-points" in full_run
+    assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50.0"
+    assert "--use-existing-outlet" in full_run
+    assert "--reuse-downloads" in full_run
+
+
+def test_launcher_promotes_reviewed_pour_points(tmp_path):
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Demo",
+        overwrite_promoted_pour_points=True,
+    )
+
+    command = command_for_step("promote-pour-points", state)
+
+    assert command.argv == (
+        "ohqbuild", "promote-pour-points", "--root", str(tmp_path),
+        "--site", "Demo", "--overwrite",
     )
 
 
@@ -571,6 +648,14 @@ def test_ui_prerequisites_direct_new_project_to_full_run(tmp_path):
     assert "Prepare hydrology" in workflow_prerequisite_error("prepare-inputs", state)
     assert "Prepare GIS inputs" in workflow_prerequisite_error("build-hms", state)
     assert recommended_workflow_step(state) == "full-run"
+
+
+def test_ui_prerequisites_block_promotion_without_candidates(tmp_path):
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="Demo")
+
+    message = workflow_prerequisite_error("promote-pour-points", state)
+
+    assert "No pour-point candidate file exists" in message
 
 
 def test_ui_launcher_builds_run_dem_prep_command(tmp_path):

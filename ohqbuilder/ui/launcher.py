@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -57,8 +57,8 @@ BASEMAP_PROVIDERS = {
 }
 
 SLIGO_DEMO_SITE = "SligoCreekDemo"
-SLIGO_DEMO_LON = -76.97391566325376
-SLIGO_DEMO_LAT = 38.95840888229726
+SLIGO_DEMO_LON = -76.9744266065
+SLIGO_DEMO_LAT = 38.9571888036
 SLIGO_DEMO_CRS = "EPSG:26918"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
@@ -258,6 +258,8 @@ WorkflowStep = Literal[
     "build-ohq",
     "run-to-ohq",
     "full-run",
+    "promote-pour-points",
+    "import-watershed-reference",
     "build-hms",
     "validate-hms",
 ]
@@ -294,6 +296,20 @@ class LauncherState:
     flowline_path: Path | None = None
     tile_index: Path | None = None
     acquisition_area: Path | None = None
+    use_reviewed_pour_points: bool = False
+    nhdplus_snap_distance_m: float = 50.0
+    overwrite_promoted_pour_points: bool = False
+    use_existing_outlet: bool = False
+    reuse_downloads: bool = False
+    overwrite_config: bool = False
+    reference_source: str | None = None
+    reference_layer: str | None = None
+    reference_name_field: str | None = None
+    reference_name: str | None = None
+    reference_title: str | None = None
+    reference_organization: str | None = None
+    reference_url: str | None = None
+    reference_license: str | None = None
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -365,6 +381,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.method:
             argv.extend(("--method", state.method))
+        if state.overwrite_config:
+            argv.append("--force")
         return WorkflowCommand("Initialize DEM Config", tuple(argv))
     if step == "prepare-dem":
         return WorkflowCommand(
@@ -428,6 +446,13 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
+        argv.extend(("--nhdplus-snap-distance-m", str(state.nhdplus_snap_distance_m)))
+        if state.use_reviewed_pour_points:
+            argv.append("--use-reviewed-pour-points")
+        if state.use_existing_outlet:
+            argv.append("--use-existing-outlet")
+        if state.reuse_downloads:
+            argv.append("--reuse-downloads")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -440,6 +465,52 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
                 (tuple(argv),),
             )
         return WorkflowCommand("Full Run: Download to OHQ", tuple(argv))
+    if step == "promote-pour-points":
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required to promote pour points.")
+        argv = [
+            "ohqbuild", "promote-pour-points", "--root", str(state.root),
+            "--site", state.site,
+        ]
+        if state.overwrite_promoted_pour_points:
+            argv.append("--overwrite")
+        return WorkflowCommand(
+            "Promote Reviewed Pour Points",
+            tuple(argv),
+        )
+    if step == "import-watershed-reference":
+        required = {
+            "root": state.root,
+            "site": state.site,
+            "outlet longitude": state.lon,
+            "outlet latitude": state.lat,
+            "reference source": state.reference_source,
+            "reference title": state.reference_title,
+            "reference organization": state.reference_organization,
+        }
+        missing = [name for name, value in required.items() if value in (None, "")]
+        if missing:
+            raise LauncherError(
+                "Documented watershed import requires: " + ", ".join(missing) + "."
+            )
+        argv = [
+            "ohqbuild", "import-watershed-reference",
+            "--root", str(state.root), "--site", str(state.site),
+            "--source", str(state.reference_source),
+            "--lon", str(state.lon), "--lat", str(state.lat),
+            "--source-title", str(state.reference_title),
+            "--source-organization", str(state.reference_organization),
+        ]
+        for flag, value in (
+            ("--layer", state.reference_layer),
+            ("--name-field", state.reference_name_field),
+            ("--name", state.reference_name),
+            ("--source-url", state.reference_url),
+            ("--license", state.reference_license),
+        ):
+            if value:
+                argv.extend((flag, value))
+        return WorkflowCommand("Import Documented Watershed", tuple(argv))
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for HEC-HMS commands.")
@@ -549,6 +620,11 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
     dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
     site_config = config.get("site") if isinstance(config.get("site"), dict) else {}
     paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
+    reference = (
+        config.get("documented_watershed")
+        if isinstance(config.get("documented_watershed"), dict)
+        else {}
+    )
 
     def path_value(value: Any) -> Path | None:
         if not isinstance(value, str) or not value:
@@ -583,6 +659,17 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
         acquisition_area=path_value(dem.get("acquisition_area")),
+        use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
+        nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
+        reuse_downloads=bool(config.get("reuse_downloads", False)),
+        reference_source=str(reference.get("source") or "") or None,
+        reference_layer=str(reference.get("layer") or "") or None,
+        reference_name_field=str(reference.get("name_field") or "") or None,
+        reference_name=str(reference.get("name") or "") or None,
+        reference_title=str(reference.get("title") or "") or None,
+        reference_organization=str(reference.get("organization") or "") or None,
+        reference_url=str(reference.get("url") or "") or None,
+        reference_license=str(reference.get("license") or "") or None,
     )
 
 
@@ -611,6 +698,21 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "dem_acquisition", "tile_index", path_text(state.tile_index))
     updated["root"] = path_text(state.root, ".")
     updated["download_dir"] = path_text(state.source_dir, "source_downloads")
+    updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
+    updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
+    updated["reuse_downloads"] = state.reuse_downloads
+    for key, value in (
+        ("source", state.reference_source),
+        ("layer", state.reference_layer),
+        ("name_field", state.reference_name_field),
+        ("name", state.reference_name),
+        ("title", state.reference_title),
+        ("organization", state.reference_organization),
+        ("url", state.reference_url),
+        ("license", state.reference_license),
+    ):
+        if value:
+            _set_nested(updated, "documented_watershed", key, value)
     return updated
 
 
@@ -641,6 +743,23 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         flowline_path=preferred_path(form_state.flowline_path, config_state.flowline_path),
         tile_index=preferred_path(form_state.tile_index, config_state.tile_index),
         acquisition_area=preferred_path(form_state.acquisition_area, config_state.acquisition_area),
+        use_reviewed_pour_points=form_state.use_reviewed_pour_points,
+        nhdplus_snap_distance_m=form_state.nhdplus_snap_distance_m,
+        overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
+        use_existing_outlet=form_state.use_existing_outlet,
+        reuse_downloads=form_state.reuse_downloads,
+        reference_source=form_state.reference_source or config_state.reference_source,
+        reference_layer=form_state.reference_layer or config_state.reference_layer,
+        reference_name_field=(
+            form_state.reference_name_field or config_state.reference_name_field
+        ),
+        reference_name=form_state.reference_name or config_state.reference_name,
+        reference_title=form_state.reference_title or config_state.reference_title,
+        reference_organization=(
+            form_state.reference_organization or config_state.reference_organization
+        ),
+        reference_url=form_state.reference_url or config_state.reference_url,
+        reference_license=form_state.reference_license or config_state.reference_license,
     )
 
 
@@ -652,6 +771,24 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
         return (
             "No DEM manifest exists. Configure a tile index and run prepare-dem, or use FULL RUN."
         )
+    if step == "promote-pour-points" and state.root is not None and state.site:
+        candidates = state.root / state.site / "outputs" / "pour_point_candidates.gpkg"
+        if not candidates.is_file():
+            return (
+                "No pour-point candidate file exists. Generate candidates first, review "
+                "them in QGIS, then promote them."
+            )
+    if step == "import-watershed-reference":
+        required = (
+            state.root, state.site, state.lon, state.lat,
+            state.reference_source, state.reference_title,
+            state.reference_organization,
+        )
+        if any(value in (None, "") for value in required):
+            return (
+                "Enter a reference source, title, publisher, and outlet coordinates "
+                "before importing the documented watershed."
+            )
     if step == "materialize-inputs" and state.manifest_path is None:
         source = state.source_dir
         if source is None or not source.is_dir() or not any(source.rglob("demlr")):
@@ -675,7 +812,7 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
             return "Materialized DEM is missing. Run materialize-inputs or FULL RUN first."
         if not (site / "outputs" / "NHDFlowline_clip.gpkg").is_file():
             return "Materialized flowlines are missing. Run materialize-inputs or FULL RUN first."
-    if step in {"prepare-inputs", "build-ohq", "build-hms"} and state.root and state.site:
+    if step in {"prepare-inputs", "check-inputs", "build-ohq", "build-hms"} and state.root and state.site:
         outputs = state.root / state.site / "outputs"
         if step == "prepare-inputs":
             required = ("flow_dir.tif", "flow_acc.tif")
@@ -852,8 +989,8 @@ class MapPicker:
         self.zoom = clamp_zoom(zoom)
         self.width = width
         self.height = height
-        self.center_lon = float(app.lon_var.get() or -76.97391566325376)
-        self.center_lat = float(app.lat_var.get() or 38.95840888229726)
+        self.center_lon = float(app.lon_var.get() or SLIGO_DEMO_LON)
+        self.center_lat = float(app.lat_var.get() or SLIGO_DEMO_LAT)
         self.images = []
         self.flowlines = self._load_flowlines()
         self.selection_points: list[tuple[float, float]] = []
@@ -1090,6 +1227,7 @@ class LauncherApp:
         self.command_running = False
         self.runner: CommandRunner | None = None
         self.workflow_buttons: list[Any] = []
+        self.step_buttons: dict[WorkflowStep, Any] = {}
         self.config_var = tk.StringVar(value=default_config_path())
         self.manifest_var = tk.StringVar(value="intermediate/dem_download_manifest.json")
         self.raw_dem_var = tk.StringVar(value="dem/raw")
@@ -1102,9 +1240,24 @@ class LauncherApp:
         self.method_var = tk.StringVar(value="upstream_network")
         self.flowline_var = tk.StringVar(value="")
         self.tile_index_var = tk.StringVar(value="")
+        self.reviewed_points_var = tk.BooleanVar(value=False)
+        self.nhdplus_snap_var = tk.StringVar(value="50")
+        self.overwrite_promoted_var = tk.BooleanVar(value=False)
+        self.use_existing_outlet_var = tk.BooleanVar(value=False)
+        self.reuse_downloads_var = tk.BooleanVar(value=False)
+        self.reference_source_var = tk.StringVar(value="")
+        self.reference_layer_var = tk.StringVar(value="")
+        self.reference_name_field_var = tk.StringVar(value="")
+        self.reference_name_var = tk.StringVar(value="")
+        self.reference_title_var = tk.StringVar(value="")
+        self.reference_org_var = tk.StringVar(value="")
+        self.reference_url_var = tk.StringVar(value="")
+        self.reference_license_var = tk.StringVar(value="")
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
+        else:
+            self._refresh_step_buttons()
         self._poll_messages()
 
     def _build(self) -> None:
@@ -1124,11 +1277,14 @@ class LauncherApp:
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
+            ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
-            if label in {"Config", "Manifest", "Flowlines", "Tile index"}:
+            if label in {
+                "Config", "Manifest", "Flowlines", "Tile index",
+            }:
                 tk.Button(
                     frame,
                     text="Browse…",
@@ -1152,6 +1308,7 @@ class LauncherApp:
             ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
             ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
+            ("Documented watershed…", self.configure_documented_watershed),
             (
                 "Open Sligo example",
                 lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
@@ -1174,6 +1331,26 @@ class LauncherApp:
         )
         recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
+        tk.Checkbutton(
+            project_buttons,
+            text="Use reviewed pour points",
+            variable=self.reviewed_points_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Overwrite existing promoted pour points",
+            variable=self.overwrite_promoted_var,
+        ).grid(row=3, column=2, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Use edited existing outlet.shp",
+            variable=self.use_existing_outlet_var,
+        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(
+            project_buttons,
+            text="Offline: reuse existing downloads",
+            variable=self.reuse_downloads_var,
+        ).grid(row=4, column=2, columnspan=2, sticky="w")
         tk.Button(
             project_buttons,
             text="Open generated layers in QGIS",
@@ -1200,6 +1377,7 @@ class LauncherApp:
             )
             button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         tk.Button(dem_buttons, text="Use expanded area", command=self.apply_expanded_area).grid(
             row=1, column=2, padx=2, pady=2, sticky="ew"
         )
@@ -1214,12 +1392,15 @@ class LauncherApp:
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
+            ("Promote reviewed pour points", "promote-pour-points"),
+            ("Import documented watershed", "import-watershed-reference"),
         )):
             button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
             button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
         for column in range(3):
             ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
@@ -1233,11 +1414,67 @@ class LauncherApp:
             )
             button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
+            self.step_buttons[step] = button
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
-        self.log = tk.Text(frame, height=24, width=100)
+        self.log = tk.Text(frame, height=14, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 4, weight=1)
+
+    def configure_documented_watershed(self) -> None:
+        """Edit reference provenance in a compact modal instead of the main form."""
+        tk = self.tk
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Documented Watershed Reference")
+        dialog.transient(self.root)
+        dialog.resizable(True, False)
+        fields = (
+            ("Local vector / ArcGIS layer URL", self.reference_source_var),
+            ("Local container layer", self.reference_layer_var),
+            ("Watershed name field", self.reference_name_field_var),
+            ("Exact watershed name", self.reference_name_var),
+            ("Dataset title *", self.reference_title_var),
+            ("Publishing organization *", self.reference_org_var),
+            ("Citation URL", self.reference_url_var),
+            ("License / data terms", self.reference_license_var),
+        )
+        tk.Label(
+            dialog,
+            text=(
+                "Use an agency polygon or ArcGIS numeric layer URL. "
+                "Images and PDFs are evidence, not polygon inputs."
+            ),
+            justify="left",
+            wraplength=620,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 6))
+        for row, (label, variable) in enumerate(fields, start=1):
+            tk.Label(dialog, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=2)
+            tk.Entry(dialog, textvariable=variable, width=68).grid(
+                row=row, column=1, sticky="ew", pady=2
+            )
+            if row == 1:
+                tk.Button(
+                    dialog,
+                    text="Browse…",
+                    command=lambda: self.browse_file(self.reference_source_var),
+                ).grid(row=row, column=2, padx=(4, 10), pady=2)
+
+        def done() -> None:
+            if not self.reference_source_var.get().strip():
+                self.messages.put("Reference source is required.\n")
+                return
+            if not self.reference_title_var.get().strip() or not self.reference_org_var.get().strip():
+                self.messages.put("Reference title and publishing organization are required.\n")
+                return
+            dialog.destroy()
+            self._refresh_step_buttons()
+
+        buttons = tk.Frame(dialog)
+        buttons.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="e", padx=10, pady=10)
+        tk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=3)
+        tk.Button(buttons, text="Save", command=done).pack(side="right", padx=3)
+        dialog.columnconfigure(1, weight=1)
+        dialog.grab_set()
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")
@@ -1379,6 +1616,19 @@ class LauncherApp:
             method=self.method_var.get().strip() or None,
             flowline_path=optional_path(self.flowline_var.get()),
             tile_index=optional_path(self.tile_index_var.get()),
+            use_reviewed_pour_points=self.reviewed_points_var.get(),
+            nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
+            overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
+            use_existing_outlet=self.use_existing_outlet_var.get(),
+            reuse_downloads=self.reuse_downloads_var.get(),
+            reference_source=self.reference_source_var.get().strip() or None,
+            reference_layer=self.reference_layer_var.get().strip() or None,
+            reference_name_field=self.reference_name_field_var.get().strip() or None,
+            reference_name=self.reference_name_var.get().strip() or None,
+            reference_title=self.reference_title_var.get().strip() or None,
+            reference_organization=self.reference_org_var.get().strip() or None,
+            reference_url=self.reference_url_var.get().strip() or None,
+            reference_license=self.reference_license_var.get().strip() or None,
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1394,11 +1644,42 @@ class LauncherApp:
         self.method_var.set(state.method or "")
         self.flowline_var.set(str(state.flowline_path or ""))
         self.tile_index_var.set(str(state.tile_index or ""))
+        self.reviewed_points_var.set(state.use_reviewed_pour_points)
+        self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
+        self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
+        self.use_existing_outlet_var.set(state.use_existing_outlet)
+        self.reuse_downloads_var.set(state.reuse_downloads)
+        self.reference_source_var.set(state.reference_source or "")
+        self.reference_layer_var.set(state.reference_layer or "")
+        self.reference_name_field_var.set(state.reference_name_field or "")
+        self.reference_name_var.set(state.reference_name or "")
+        self.reference_title_var.set(state.reference_title or "")
+        self.reference_org_var.set(state.reference_organization or "")
+        self.reference_url_var.set(state.reference_url or "")
+        self.reference_license_var.set(state.reference_license or "")
+
+    def _refresh_step_buttons(self) -> None:
+        """Disable commands whose on-disk prerequisites are not yet available."""
+
+        try:
+            state = self.state()
+            config_path = Path(self.config_var.get()).expanduser()
+            if config_path.exists():
+                state = state_with_config_defaults(state, load_project_config(config_path))
+            for step, button in self.step_buttons.items():
+                button.config(
+                    state="disabled" if workflow_prerequisite_error(step, state) else "normal"
+                )
+        except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError):
+            # Keep configuration/init/full-run paths accessible while the user fixes fields.
+            for step, button in self.step_buttons.items():
+                button.config(state="normal" if step in {"init-dem-config", "full-run"} else "disabled")
 
     def load_config(self) -> None:
         try:
             config = load_project_config(self.config_var.get())
             self.apply_state(state_from_config(self.config_var.get(), config))
+            self._refresh_step_buttons()
             self.messages.put("Loaded config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
@@ -1446,6 +1727,18 @@ class LauncherApp:
             config_path = Path(self.config_var.get()).expanduser()
             if config_path.exists():
                 state = state_with_config_defaults(state, load_project_config(config_path))
+            if step == "init-dem-config" and config_path.exists():
+                from tkinter import messagebox
+
+                if not messagebox.askyesno(
+                    "Replace DEM workflow configuration?",
+                    "This will replace the existing DEM workflow configuration.\n\n"
+                    "Review the flowline and tile-index fields first. Demo inputs are not "
+                    "inserted unless explicitly requested from the CLI. Continue?",
+                ):
+                    self.messages.put("Initialize DEM Config cancelled; existing config preserved.\n")
+                    return
+                state = replace(state, overwrite_config=True)
             prerequisite = workflow_prerequisite_error(step, state)
             if prerequisite:
                 raise LauncherError(prerequisite)
@@ -1472,6 +1765,7 @@ class LauncherApp:
                 self.stop_button.config(state="disabled")
                 for button in self.workflow_buttons:
                     button.config(state="normal")
+                self._refresh_step_buttons()
                 continue
             self.log.insert("end", message)
             self.log.see("end")

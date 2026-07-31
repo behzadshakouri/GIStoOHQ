@@ -5,12 +5,14 @@ from html import escape
 import json
 import math
 from pathlib import Path
+import zipfile
 from typing import Callable
 
 from .legacy_inputs import (
     LegacyWorkflowOptions,
     run_hydrology_preprocessing,
     run_legacy_input_workflow,
+    verify_reach_writer_revision,
 )
 from .builders.watershed_builder import WatershedBuilder
 from .input_downloader import download_all_inputs
@@ -19,10 +21,170 @@ from .pipeline import build_ohq_project
 from .settings import BuilderSettings
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
+from .watershed_comparison import compare_watersheds
+from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
+from .reach_comparison import ReachComparisonError, compare_reach_networks
+from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
+from .phase1_fetcher import write_outlet_shapefile
+from .dem_downloader import is_transient_remote_error
+from .documented_watershed import REFERENCE_FILENAME, REFERENCE_LAYER
 
 
 class FullRunError(RuntimeError):
     """Raised when the download-to-OHQ workflow cannot finish."""
+
+
+def _zip_has_vector(path: Path) -> bool:
+    if not zipfile.is_zipfile(path):
+        return False
+    with zipfile.ZipFile(path) as archive:
+        return any(
+            name.lower().endswith((".shp", ".gpkg", ".gdbtable"))
+            for name in archive.namelist()
+        )
+
+
+def _invalid_cached_dem_files(paths: list[Path]) -> list[str]:
+    """Return cached TIFF names that cannot be opened as georeferenced rasters."""
+
+    try:
+        import rasterio
+    except ImportError:
+        return []
+    invalid = []
+    for path in paths:
+        try:
+            with rasterio.open(path) as dataset:
+                if dataset.width <= 0 or dataset.height <= 0 or dataset.crs is None:
+                    invalid.append(path.name)
+        except Exception:
+            invalid.append(path.name)
+    return invalid
+
+
+def cached_reuse_counts(source_download_dir: Path) -> tuple[int, int]:
+    """Return display counts for validated cached DEM tiles and hydro packages."""
+
+    dem_count = sum(
+        1
+        for path in source_download_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".tif", ".tiff"}
+        and path.parent.name.lower() == "demlr"
+    )
+    hydro_count = sum(
+        1
+        for path in source_download_dir.rglob("*")
+        if path.is_file()
+        and path.parent.name.lower() == "hydro"
+        and path.suffix.lower() in {".zip", ".gpkg", ".shp"}
+    )
+    return dem_count, hydro_count
+
+
+def validated_reuse_inputs(
+    root: str | Path, site: str, download_dir: str | Path | None
+) -> Path:
+    """Validate the local products required to continue without remote services."""
+
+    root_path = Path(root).expanduser().resolve()
+    source_download_dir = (
+        Path(download_dir).expanduser().resolve()
+        if download_dir
+        else root_path / site / "source_downloads"
+    )
+    if not source_download_dir.is_dir() or not any(
+        path.is_file() for path in source_download_dir.rglob("*")
+    ):
+        raise FullRunError(
+            "Offline/reuse mode requires a populated source download directory: "
+            f"{source_download_dir}"
+        )
+    product_dirs = {
+        product: next(
+            (
+                path
+                for path in (source_download_dir, *source_download_dir.rglob("*"))
+                if path.is_dir() and path.name.lower() == product
+            ),
+            None,
+        )
+        for product in ("demlr", "hydro")
+    }
+    missing_product_dirs = [
+        product
+        for product, folder in product_dirs.items()
+        if folder is None
+        or not any(child.is_file() and child.stat().st_size > 0 for child in folder.rglob("*"))
+    ]
+    if missing_product_dirs:
+        raise FullRunError(
+            "Cached source downloads are incomplete; missing populated product folder(s): "
+            + ", ".join(missing_product_dirs)
+        )
+    dem_files = sorted(
+        path
+        for path in product_dirs["demlr"].rglob("*")
+        if path.suffix.lower() in {".tif", ".tiff"} and path.stat().st_size > 0
+    )
+    invalid_dem = _invalid_cached_dem_files(dem_files)
+    if not dem_files or invalid_dem:
+        raise FullRunError(
+            "Cached DEM validation failed; no readable georeferenced TIFF tiles were found"
+            + (f" (invalid: {', '.join(invalid_dem)})" if invalid_dem else "")
+        )
+    hydro_files = [path for path in product_dirs["hydro"].rglob("*") if path.is_file()]
+    valid_hydro = any(
+        (
+            path.suffix.lower() == ".zip"
+            and _zip_has_vector(path)
+        )
+        or (path.suffix.lower() in {".gpkg", ".shp"} and path.stat().st_size > 0)
+        for path in hydro_files
+    )
+    if not valid_hydro:
+        raise FullRunError(
+            "Cached hydro validation failed; no readable vector ZIP, GeoPackage, or "
+            f"shapefile was found under {product_dirs['hydro']}"
+        )
+    soils_dir = root_path / site / "soils"
+    missing_soils = [
+        path.name
+        for path in (
+            soils_dir / "hydrologic_soil_groups.gpkg",
+            soils_dir / "hsg.tif",
+            soils_dir / "soil_texture.gpkg",
+        )
+        if not path.is_file()
+    ]
+    if missing_soils:
+        raise FullRunError(
+            "Offline/reuse mode cannot query missing soil products. Expected under "
+            f"{soils_dir}: {', '.join(missing_soils)}"
+        )
+    atlas_table = root_path / site / "atlas14" / "atlas14_pf.csv"
+    if not atlas_table.is_file():
+        raise FullRunError(
+            "Offline/reuse mode requires the existing NOAA Atlas 14 table to prevent "
+            f"a later web request: {atlas_table}"
+        )
+    return source_download_dir
+
+
+def existing_outlet_lonlat(root: str | Path, site: str) -> tuple[float, float]:
+    """Read the single reviewed outlet and return its EPSG:4326 coordinate."""
+
+    import geopandas as gpd
+
+    path = Path(root).expanduser().resolve() / site / "outputs" / "outlet.shp"
+    if not path.is_file():
+        raise FullRunError(f"Reviewed outlet not found: {path}")
+    frame = gpd.read_file(path)
+    if len(frame) != 1 or frame.crs is None or frame.geometry.isna().any():
+        raise FullRunError("Reviewed outlet must contain one point with a valid CRS")
+    if not frame.geometry.geom_type.eq("Point").all():
+        raise FullRunError("Reviewed outlet geometry must be a point")
+    point = frame.to_crs("EPSG:4326").geometry.iloc[0]
+    return float(point.x), float(point.y)
 
 
 @dataclass(frozen=True)
@@ -30,6 +192,7 @@ class FullRunResult:
     output_path: Path
     hms_project_path: Path | None = None
     report_path: Path | None = None
+    comparison_path: Path | None = None
 
 
 def network_element_counts(watershed) -> dict[str, tuple[int, int]]:
@@ -76,6 +239,8 @@ def full_run_summary(
     ohq_path: str | Path,
     hms_path: str | Path,
     report_path: str | Path | None = None,
+    comparison_paths: list[str | Path] | None = None,
+    reach_comparison_paths: list[str | Path] | None = None,
 ) -> str:
     """Return a concise final artifact and watershed-metrics summary."""
     subbasins = list(getattr(watershed, "subbasins", []) or [])
@@ -106,6 +271,54 @@ def full_run_summary(
         lines.append(
             f"  ✓ Watershed report: {Path(report_path).expanduser().resolve()}"
         )
+    for comparison_path in comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        best = payload.get("best_match") or {}
+        generated_area = float(best.get("generated_area_km2", 0.0))
+        reference_area = float(best.get("reference_area_km2", 0.0))
+        area_difference_pct = (
+            100.0 * (generated_area - reference_area) / reference_area
+            if reference_area
+            else 0.0
+        )
+        lines.extend(
+            [
+                "",
+                f"Boundary Comparison ({payload.get('reference_layer', 'reference')})",
+                f"  Reference ID       : {best.get('reference_id', '—')}",
+                f"  Reference source   : {best.get('reference_organization') or '—'}",
+                f"  Reference scope    : {best.get('reference_scope', 'not classified')}",
+                f"  Contains outlet    : {best.get('contains_outlet', 'not evaluated')}",
+                f"  Generated area     : {generated_area:.4f} km²",
+                f"  Reference area     : {reference_area:.4f} km²",
+                f"  Area difference    : {area_difference_pct:+.2f}%",
+                f"  Intersection/Union : {float(best.get('iou', 0.0)):.3f}",
+                f"  Generated only     : {float(best.get('commission_area_km2', 0.0)):.4f} km²",
+                f"  Reference only     : {float(best.get('omission_area_km2', 0.0)):.4f} km²",
+                f"  Boundary Hausdorff : {float(best.get('boundary_hausdorff_m', 0.0)):.1f} m",
+            ]
+        )
+    for comparison_path in reach_comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        lines.extend(
+            [
+                "",
+                "Reach Network Comparison (NHD)",
+                f"  Alignment tolerance : {float(payload['tolerance_m']):.1f} m",
+                f"  Generated length    : {float(payload['generated_length_km']):.3f} km",
+                f"  NHD length          : {float(payload['reference_length_km']):.3f} km",
+                "  Generated near NHD  : "
+                f"{float(payload['generated_within_tolerance_pct']):.1f}%",
+                "  NHD near generated  : "
+                f"{float(payload['reference_within_tolerance_pct']):.1f}%",
+                f"  Mean lateral offset : {float(payload['mean_lateral_offset_m']):.1f} m",
+                f"  Network Hausdorff   : {float(payload['hausdorff_distance_m']):.1f} m",
+            ]
+        )
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -115,6 +328,8 @@ def write_watershed_report(
     ohq_path: str | Path,
     hms_path: str | Path,
     output_path: str | Path | None = None,
+    comparison_paths: list[str | Path] | None = None,
+    reach_comparison_paths: list[str | Path] | None = None,
 ) -> Path:
     """Write a portable HTML summary for model review and regression baselines."""
 
@@ -128,6 +343,66 @@ def write_watershed_report(
     subbasins = list(getattr(watershed, "subbasins", []) or [])
     counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+
+    comparison_rows = []
+    for comparison_path in comparison_paths or []:
+        path = Path(comparison_path).expanduser().resolve()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        best = payload.get("best_match") or {}
+        comparison_rows.append(
+            "<tr>"
+            f"<td>{escape(str(payload.get('reference_layer', path.stem)))}</td>"
+            f"<td>{escape(str(best.get('reference_id', '—')))}</td>"
+            f"<td>{escape(str(best.get('reference_organization') or '—'))}</td>"
+            f"<td>{escape(str(best.get('reference_scope', 'not classified')))}</td>"
+            f"<td>{escape(str(best.get('contains_outlet', 'not evaluated')))}</td>"
+            f"<td>{float(best.get('iou', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('commission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('omission_area_km2', 0.0)):.3f}</td>"
+            f"<td>{float(best.get('boundary_hausdorff_m', 0.0)):.1f}</td>"
+            f"<td><code>{escape(str(payload.get('disagreement_geopackage') or '—'))}</code></td>"
+            "</tr>"
+        )
+    comparison_section = ""
+    if comparison_rows:
+        comparison_section = (
+            "<h2>Boundary comparisons</h2>"
+            "<p>Reference matches are review evidence, not automatically accepted boundaries.</p>"
+            "<table><thead><tr><th>Reference layer</th><th>Reference ID</th>"
+            "<th>Publisher</th><th>Scope</th><th>Contains outlet</th><th>IoU</th>"
+            "<th>Generated only (km²)</th><th>Reference only (km²)</th>"
+            "<th>Hausdorff (m)</th><th>Disagreement map</th></tr></thead><tbody>"
+            + "".join(comparison_rows)
+            + "</tbody></table>"
+        )
+
+    reach_rows = []
+    for comparison_path in reach_comparison_paths or []:
+        payload = json.loads(
+            Path(comparison_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        reach_rows.append(
+            "<tr>"
+            f"<td>{float(payload['tolerance_m']):.1f}</td>"
+            f"<td>{float(payload['generated_length_km']):.3f}</td>"
+            f"<td>{float(payload['reference_length_km']):.3f}</td>"
+            f"<td>{float(payload['generated_within_tolerance_pct']):.1f}%</td>"
+            f"<td>{float(payload['reference_within_tolerance_pct']):.1f}%</td>"
+            f"<td>{float(payload['mean_lateral_offset_m']):.1f}</td>"
+            f"<td>{float(payload['hausdorff_distance_m']):.1f}</td>"
+            "</tr>"
+        )
+    reach_comparison_section = ""
+    if reach_rows:
+        reach_comparison_section = (
+            "<h2>Reach-network comparison</h2>"
+            "<p>Generated reaches are compared with NHD flowlines clipped to the watershed.</p>"
+            "<table><thead><tr><th>Tolerance (m)</th><th>Generated length (km)</th>"
+            "<th>NHD length (km)</th><th>Generated near NHD</th><th>NHD near generated</th>"
+            "<th>Mean offset (m)</th><th>Hausdorff (m)</th></tr></thead><tbody>"
+            + "".join(reach_rows)
+            + "</tbody></table>"
+        )
 
     def value(item, attribute: str, digits: int = 2) -> str:
         raw = getattr(item, attribute, None)
@@ -158,6 +433,8 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
 <h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
 <li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
+{comparison_section}
+{reach_comparison_section}
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>
@@ -253,6 +530,10 @@ def run_full_pipeline(
     soil_pixel_size: float = 0.0003,
     soil_top_depth: float = 30.0,
     acquisition_area: str | Path | None = None,
+    use_reviewed_pour_points: bool = False,
+    nhdplus_snap_distance_m: float = 50.0,
+    use_existing_outlet: bool = False,
+    reuse_downloads: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -265,6 +546,12 @@ def run_full_pipeline(
 
     try:
         emit("Starting full-run pipeline.")
+        if use_existing_outlet:
+            lon, lat = existing_outlet_lonlat(root, site)
+            emit("Outlet source: existing outputs/outlet.shp")
+            emit(f"Reviewed outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
+        else:
+            emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         buffer_was_supplied = buffer_m is not None
         if buffer_m is None:
@@ -288,39 +575,214 @@ def run_full_pipeline(
                 f"Using acquisition area {Path(acquisition_area).expanduser().resolve()} "
                 f"for downloads and clipping (query buffer {buffer_m:.0f} m)."
             )
-        # Step 1: download every supported source product before any merge/clip.
-        fetched = download_all_inputs(
-            root,
-            site,
-            lon=lon,
-            lat=lat,
-            site_id=site_id,
-            download_dir=download_dir,
-            buffer_m=buffer_m,
-            max_tiles=max_tiles,
-            max_file_size_mb=max_file_size_mb,
-            soil_pixel_size=soil_pixel_size,
-            soil_top_depth=soil_top_depth,
-            progress=emit,
-        )
+        # Step 1: download every supported source product, or deliberately reuse
+        # a previously populated cache without making any remote requests.
+        if reuse_downloads:
+            source_download_dir = validated_reuse_inputs(root, site, download_dir)
+            cached_dem_count, cached_hydro_count = cached_reuse_counts(source_download_dir)
+            emit(
+                "[1/6] Offline/reuse mode: skipping all remote source and soil queries; "
+                f"validated cached DEM tiles: {cached_dem_count}; hydro packages: "
+                f"{cached_hydro_count}; using {source_download_dir}"
+            )
+            if not use_existing_outlet:
+                write_outlet_shapefile(
+                    Path(root).expanduser().resolve() / site / "outputs" / "outlet.shp",
+                    lon,
+                    lat,
+                )
+        else:
+            try:
+                fetched = download_all_inputs(
+                    root,
+                    site,
+                    lon=lon,
+                    lat=lat,
+                    site_id=site_id,
+                    download_dir=download_dir,
+                    buffer_m=buffer_m,
+                    max_tiles=max_tiles,
+                    max_file_size_mb=max_file_size_mb,
+                    soil_pixel_size=soil_pixel_size,
+                    soil_top_depth=soil_top_depth,
+                    progress=emit,
+                    use_existing_outlet=use_existing_outlet,
+                )
+                source_download_dir = fetched.download_dir
+            except Exception as exc:
+                if not is_transient_remote_error(exc):
+                    raise
+                emit(
+                    f"Remote catalog/service remained unavailable after retries: {exc}. "
+                    "No local processing error was detected; checking cached products."
+                )
+                try:
+                    source_download_dir = validated_reuse_inputs(root, site, download_dir)
+                except FullRunError as cache_exc:
+                    raise FullRunError(
+                        f"Remote service failed ({exc}) and validated cache fallback is "
+                        f"unavailable: {cache_exc}"
+                    ) from exc
+                cached_dem_count, cached_hydro_count = cached_reuse_counts(source_download_dir)
+                emit(
+                    f"Validated cached DEM tiles: {cached_dem_count}; hydro packages: "
+                    f"{cached_hydro_count}; local soil/Atlas 14 inputs are ready. "
+                    f"Continuing from local cache: {source_download_dir}"
+                )
+                reuse_downloads = True
         # Step 2: merge, project, and clip the downloaded DEM and hydrography.
         emit("[4/6] Mosaicking DEM and clipping hydrography...")
-        materialize_source_inputs(
+        materialized = materialize_source_inputs(
             root,
             site,
-            source_dir=fetched.download_dir,
+            source_dir=source_download_dir,
             target_crs=target_crs,
             clip_bounds=selected_bounds,
+            clip_center_lon=lon,
+            clip_center_lat=lat,
+            clip_buffer_m=buffer_m,
+            allow_network_fallbacks=not reuse_downloads,
         )
+        materialized_hydro = getattr(materialized, "hydro", None)
+        materialized_wbd = getattr(materialized, "wbd_reference", None)
+        if materialized_wbd is not None:
+            emit(
+                "WBD HUC12 reference ready (downloaded package or official service): "
+                f"{materialized_wbd}"
+            )
+        else:
+            emit(
+                "WBD HUC12 reference unavailable; continuing without authoritative "
+                "boundary comparison."
+            )
+        catchment_path = getattr(materialized_hydro, "catchment_path", None)
+        nhdplus_candidate = None
+        if catchment_path is not None:
+            try:
+                nhdplus_candidate = trace_upstream_catchments(
+                    materialized_hydro.output_path,
+                    catchment_path,
+                    Path(root).expanduser().resolve()
+                    / site
+                    / "outputs"
+                    / "NHDPlus_upstream_candidate.gpkg",
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                    maximum_snap_distance_m=nhdplus_snap_distance_m,
+                )
+                emit(f"Wrote NHDPlus upstream watershed candidate: {nhdplus_candidate}")
+                try:
+                    candidates = generate_pour_point_candidates(
+                        nhdplus_candidate,
+                        Path(root).expanduser().resolve()
+                        / site
+                        / "outputs"
+                        / "pour_point_candidates.gpkg",
+                        outlet_lon=lon,
+                        outlet_lat=lat,
+                    )
+                    emit(f"Wrote pour-point review candidates: {candidates}")
+                except PourPointCandidateError as exc:
+                    emit(f"Pour-point candidate generation requires review: {exc}")
+            except NhdplusTraceError as exc:
+                emit(f"NHDPlus upstream trace requires review: {exc}")
         # Step 3: generate the GIS-derived model inputs.
+        if use_reviewed_pour_points:
+            reviewed_points = (
+                Path(root).expanduser().resolve() / site / "outputs" / "pour_points.shp"
+            )
+            if not reviewed_points.is_file():
+                raise FullRunError(
+                    "--use-reviewed-pour-points requires outputs/pour_points.shp; "
+                    "run promote-pour-points after reviewing candidates first."
+                )
+            emit(f"Using reviewed pour points without automatic replacement: {reviewed_points}")
         options = LegacyWorkflowOptions(
             auto_outlet=True,
-            auto_pour_points=True,
-            refresh_auto_pour_points=True,
+            auto_pour_points=not use_reviewed_pour_points,
+            refresh_auto_pour_points=not use_reviewed_pour_points,
+            child_options={"MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m},
+        )
+        reach_script = verify_reach_writer_revision(script_dir)
+        emit(
+            "Legacy reach writer revision: stale-layer-release-v2 "
+            f"({reach_script})"
         )
         emit("[5/6] Running hydrology preprocessing and GIS phases...")
         run_hydrology_preprocessing(root, site, script_dir, options)
         run_legacy_input_workflow(root, site, script_dir, "all", options)
+        comparison_path = None
+        comparison_paths = []
+        reach_comparison_paths = []
+        wbd_reference = getattr(materialized, "wbd_reference", None)
+        generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
+        generated_reaches = generated_boundary.with_name("reaches.gpkg")
+        documented_reference = generated_boundary.with_name(REFERENCE_FILENAME)
+        if (
+            materialized_hydro is not None
+            and generated_reaches.is_file()
+            and generated_boundary.is_file()
+        ):
+            try:
+                reach_comparison = compare_reach_networks(
+                    generated_reaches,
+                    materialized_hydro.output_path,
+                    generated_boundary.with_name("reaches_nhd_comparison.json"),
+                    watershed_path=generated_boundary,
+                )
+                reach_comparison_paths.append(reach_comparison)
+                emit(f"Wrote NHD reach-network comparison metrics: {reach_comparison}")
+            except ReachComparisonError as exc:
+                emit(f"NHD reach-network comparison requires review: {exc}")
+        if wbd_reference is not None and generated_boundary.is_file():
+            comparison_path = compare_watersheds(
+                generated_boundary,
+                wbd_reference,
+                generated_boundary.with_name("watershed_wbd_comparison.json"),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_wbd_disagreement.gpkg"
+                ),
+                outlet_lon=lon,
+                outlet_lat=lat,
+            )
+            emit(f"Wrote WBD comparison metrics: {comparison_path}")
+            comparison_paths.append(comparison_path)
+        if documented_reference.is_file() and generated_boundary.is_file():
+            documented_comparison = compare_watersheds(
+                generated_boundary,
+                documented_reference,
+                generated_boundary.with_name("watershed_documented_comparison.json"),
+                reference_layer=REFERENCE_LAYER,
+                reference_id_fields=("ref_title", "name", "watershed"),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_documented_disagreement.gpkg"
+                ),
+                outlet_lon=lon,
+                outlet_lat=lat,
+                reference_kind="documented_named_watershed",
+                interpretation=(
+                    "Cited named-watershed boundary imported by the operator; compare "
+                    "provenance and methods before deciding whether differences are errors."
+                ),
+            )
+            emit(
+                "Wrote documented named-watershed comparison metrics: "
+                f"{documented_comparison}"
+            )
+            comparison_paths.append(documented_comparison)
+        if nhdplus_candidate is not None and generated_boundary.is_file():
+            nhd_comparison = compare_watersheds(
+                generated_boundary,
+                nhdplus_candidate,
+                generated_boundary.with_name("watershed_nhdplus_comparison.json"),
+                reference_layer="upstream_boundary",
+                reference_id_fields=("outlet_reach_id",),
+                disagreement_path=generated_boundary.with_name(
+                    "watershed_nhdplus_disagreement.gpkg"
+                ),
+            )
+            emit(f"Wrote NHDPlus comparison metrics: {nhd_comparison}")
+            comparison_paths.append(nhd_comparison)
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
@@ -337,9 +799,24 @@ def run_full_pipeline(
         if hms_path is None:
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
-        report_path = write_watershed_report(watershed, built, hms_path)
-        emit(full_run_summary(watershed, built, hms_path, report_path))
-        return FullRunResult(Path(built), hms_path, report_path)
+        report_path = write_watershed_report(
+            watershed,
+            built,
+            hms_path,
+            comparison_paths=comparison_paths,
+            reach_comparison_paths=reach_comparison_paths,
+        )
+        emit(
+            full_run_summary(
+                watershed,
+                built,
+                hms_path,
+                report_path,
+                comparison_paths=comparison_paths,
+                reach_comparison_paths=reach_comparison_paths,
+            )
+        )
+        return FullRunResult(Path(built), hms_path, report_path, comparison_path)
     except FullRunError:
         raise
     except Exception as exc:

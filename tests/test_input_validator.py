@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from ohqbuilder.settings import BuilderSettings
 from ohqbuilder.validation.input_validator import InputValidator
 
@@ -84,3 +86,52 @@ def test_input_validation_result_to_dict():
     assert data["ok"] is False
     assert data["errors"]
     assert data["warnings"] == []
+
+
+def test_input_validator_rejects_tiny_hydrology_grid(tmp_path):
+    rasterio = pytest.importorskip("rasterio")
+    import numpy as np
+    from rasterio.transform import from_origin
+
+    settings = _settings(tmp_path)
+    _touch_required_files(settings)
+    raster_paths = (
+        settings.paths.site_path / "demlr" / "cliped_utm.tif",
+        settings.paths.outputs_path / "flow_dir.tif",
+        settings.paths.outputs_path / "flow_acc.tif",
+    )
+    for path in raster_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=10,
+            height=10,
+            count=1,
+            dtype="float32",
+            crs="EPSG:26918",
+            transform=from_origin(300000, 4400000, 10, 10),
+        ) as dataset:
+            dataset.write(np.ones((1, 10, 10), dtype="float32"))
+
+    required = {
+        "topology": ["element_id", "element_type", "name", "ds_type", "ds_id", "ds_name"],
+        "subwatershed_params": [
+            "id", "area_km2", "CN", "slope_pct", "flow_len_ft", "tc_min", "lag_min"
+        ],
+        "junctions": ["junction_id", "x", "y"],
+    }
+
+    def reader(path, layer=None):
+        return SimpleNamespace(
+            columns=required.get(
+                layer,
+                ["reach_id", "length_m", "slope_mm", "base_w_m", "side_z", "manning_n"],
+            )
+        )
+
+    result = InputValidator(reader=reader).validate(settings)
+
+    assert not result.ok
+    assert any("DEM is only 10 x 10 cells" in error for error in result.errors)
