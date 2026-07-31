@@ -259,6 +259,7 @@ WorkflowStep = Literal[
     "run-to-ohq",
     "full-run",
     "promote-pour-points",
+    "import-watershed-reference",
     "build-hms",
     "validate-hms",
 ]
@@ -301,6 +302,14 @@ class LauncherState:
     use_existing_outlet: bool = False
     reuse_downloads: bool = False
     overwrite_config: bool = False
+    reference_source: str | None = None
+    reference_layer: str | None = None
+    reference_name_field: str | None = None
+    reference_name: str | None = None
+    reference_title: str | None = None
+    reference_organization: str | None = None
+    reference_url: str | None = None
+    reference_license: str | None = None
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -469,6 +478,39 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             "Promote Reviewed Pour Points",
             tuple(argv),
         )
+    if step == "import-watershed-reference":
+        required = {
+            "root": state.root,
+            "site": state.site,
+            "outlet longitude": state.lon,
+            "outlet latitude": state.lat,
+            "reference source": state.reference_source,
+            "reference title": state.reference_title,
+            "reference organization": state.reference_organization,
+        }
+        missing = [name for name, value in required.items() if value in (None, "")]
+        if missing:
+            raise LauncherError(
+                "Documented watershed import requires: " + ", ".join(missing) + "."
+            )
+        argv = [
+            "ohqbuild", "import-watershed-reference",
+            "--root", str(state.root), "--site", str(state.site),
+            "--source", str(state.reference_source),
+            "--lon", str(state.lon), "--lat", str(state.lat),
+            "--source-title", str(state.reference_title),
+            "--source-organization", str(state.reference_organization),
+        ]
+        for flag, value in (
+            ("--layer", state.reference_layer),
+            ("--name-field", state.reference_name_field),
+            ("--name", state.reference_name),
+            ("--source-url", state.reference_url),
+            ("--license", state.reference_license),
+        ):
+            if value:
+                argv.extend((flag, value))
+        return WorkflowCommand("Import Documented Watershed", tuple(argv))
     if step in {"build-hms", "validate-hms"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for HEC-HMS commands.")
@@ -578,6 +620,11 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
     dem = config.get("dem_acquisition") if isinstance(config.get("dem_acquisition"), dict) else {}
     site_config = config.get("site") if isinstance(config.get("site"), dict) else {}
     paths = config.get("paths") if isinstance(config.get("paths"), dict) else {}
+    reference = (
+        config.get("documented_watershed")
+        if isinstance(config.get("documented_watershed"), dict)
+        else {}
+    )
 
     def path_value(value: Any) -> Path | None:
         if not isinstance(value, str) or not value:
@@ -615,6 +662,14 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
         nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
         reuse_downloads=bool(config.get("reuse_downloads", False)),
+        reference_source=str(reference.get("source") or "") or None,
+        reference_layer=str(reference.get("layer") or "") or None,
+        reference_name_field=str(reference.get("name_field") or "") or None,
+        reference_name=str(reference.get("name") or "") or None,
+        reference_title=str(reference.get("title") or "") or None,
+        reference_organization=str(reference.get("organization") or "") or None,
+        reference_url=str(reference.get("url") or "") or None,
+        reference_license=str(reference.get("license") or "") or None,
     )
 
 
@@ -646,6 +701,18 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
     updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
     updated["reuse_downloads"] = state.reuse_downloads
+    for key, value in (
+        ("source", state.reference_source),
+        ("layer", state.reference_layer),
+        ("name_field", state.reference_name_field),
+        ("name", state.reference_name),
+        ("title", state.reference_title),
+        ("organization", state.reference_organization),
+        ("url", state.reference_url),
+        ("license", state.reference_license),
+    ):
+        if value:
+            _set_nested(updated, "documented_watershed", key, value)
     return updated
 
 
@@ -681,6 +748,18 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
         use_existing_outlet=form_state.use_existing_outlet,
         reuse_downloads=form_state.reuse_downloads,
+        reference_source=form_state.reference_source or config_state.reference_source,
+        reference_layer=form_state.reference_layer or config_state.reference_layer,
+        reference_name_field=(
+            form_state.reference_name_field or config_state.reference_name_field
+        ),
+        reference_name=form_state.reference_name or config_state.reference_name,
+        reference_title=form_state.reference_title or config_state.reference_title,
+        reference_organization=(
+            form_state.reference_organization or config_state.reference_organization
+        ),
+        reference_url=form_state.reference_url or config_state.reference_url,
+        reference_license=form_state.reference_license or config_state.reference_license,
     )
 
 
@@ -698,6 +777,17 @@ def workflow_prerequisite_error(step: WorkflowStep, state: LauncherState) -> str
             return (
                 "No pour-point candidate file exists. Generate candidates first, review "
                 "them in QGIS, then promote them."
+            )
+    if step == "import-watershed-reference":
+        required = (
+            state.root, state.site, state.lon, state.lat,
+            state.reference_source, state.reference_title,
+            state.reference_organization,
+        )
+        if any(value in (None, "") for value in required):
+            return (
+                "Enter a reference source, title, publisher, and outlet coordinates "
+                "before importing the documented watershed."
             )
     if step == "materialize-inputs" and state.manifest_path is None:
         source = state.source_dir
@@ -1155,6 +1245,14 @@ class LauncherApp:
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self.reuse_downloads_var = tk.BooleanVar(value=False)
+        self.reference_source_var = tk.StringVar(value="")
+        self.reference_layer_var = tk.StringVar(value="")
+        self.reference_name_field_var = tk.StringVar(value="")
+        self.reference_name_var = tk.StringVar(value="")
+        self.reference_title_var = tk.StringVar(value="")
+        self.reference_org_var = tk.StringVar(value="")
+        self.reference_url_var = tk.StringVar(value="")
+        self.reference_license_var = tk.StringVar(value="")
         self._build()
         if Path(self.config_var.get()).exists():
             self.load_config()
@@ -1180,11 +1278,22 @@ class LauncherApp:
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
             ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
+            ("Reference file / ArcGIS layer URL", self.reference_source_var),
+            ("Reference layer", self.reference_layer_var),
+            ("Reference name field", self.reference_name_field_var),
+            ("Reference watershed name", self.reference_name_var),
+            ("Reference title", self.reference_title_var),
+            ("Reference publisher", self.reference_org_var),
+            ("Reference citation URL", self.reference_url_var),
+            ("Reference license", self.reference_license_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
-            if label in {"Config", "Manifest", "Flowlines", "Tile index"}:
+            if label in {
+                "Config", "Manifest", "Flowlines", "Tile index",
+                "Reference file / ArcGIS layer URL",
+            }:
                 tk.Button(
                     frame,
                     text="Browse…",
@@ -1292,6 +1401,7 @@ class LauncherApp:
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
             ("Promote reviewed pour points", "promote-pour-points"),
+            ("Import documented watershed", "import-watershed-reference"),
         )):
             button = tk.Button(
                 ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
@@ -1464,6 +1574,14 @@ class LauncherApp:
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
             use_existing_outlet=self.use_existing_outlet_var.get(),
             reuse_downloads=self.reuse_downloads_var.get(),
+            reference_source=self.reference_source_var.get().strip() or None,
+            reference_layer=self.reference_layer_var.get().strip() or None,
+            reference_name_field=self.reference_name_field_var.get().strip() or None,
+            reference_name=self.reference_name_var.get().strip() or None,
+            reference_title=self.reference_title_var.get().strip() or None,
+            reference_organization=self.reference_org_var.get().strip() or None,
+            reference_url=self.reference_url_var.get().strip() or None,
+            reference_license=self.reference_license_var.get().strip() or None,
         )
 
     def apply_state(self, state: LauncherState) -> None:
@@ -1484,6 +1602,14 @@ class LauncherApp:
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
         self.use_existing_outlet_var.set(state.use_existing_outlet)
         self.reuse_downloads_var.set(state.reuse_downloads)
+        self.reference_source_var.set(state.reference_source or "")
+        self.reference_layer_var.set(state.reference_layer or "")
+        self.reference_name_field_var.set(state.reference_name_field or "")
+        self.reference_name_var.set(state.reference_name or "")
+        self.reference_title_var.set(state.reference_title or "")
+        self.reference_org_var.set(state.reference_organization or "")
+        self.reference_url_var.set(state.reference_url or "")
+        self.reference_license_var.set(state.reference_license or "")
 
     def _refresh_step_buttons(self) -> None:
         """Disable commands whose on-disk prerequisites are not yet available."""

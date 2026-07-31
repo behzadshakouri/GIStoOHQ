@@ -27,6 +27,13 @@ before GIS processing.
 Online full runs retry transient provider failures and automatically switch to
 the same validated cache when all reuse prerequisites are already present.
 
+Use **Configure Documented Watershed** to record a local polygon/ArcGIS numeric
+layer URL, exact watershed name, publisher, citation URL, and license in the
+project configuration. Then run **Import Documented Watershed**. A successful
+import loads `outputs/DocumentedWatershed_reference.gpkg`; subsequent full runs
+compare it independently with the DEM boundary, WBD, and NHDPlus references.
+Map images and PDFs are documentary evidence, not polygon inputs.
+
 ## Install from a source checkout
 
 Create a virtual environment that can see the system QGIS packages, install

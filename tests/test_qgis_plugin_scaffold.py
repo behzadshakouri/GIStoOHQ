@@ -69,6 +69,15 @@ def test_qgis_plugin_dock_has_draw_polygon_tool():
     assert "qgis_drawn_polygon" in dock
 
 
+def test_qgis_plugin_dock_exposes_documented_watershed_import():
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+
+    assert "Configure Documented Watershed" in dock
+    assert "Import Documented Watershed" in dock
+    assert "documented_watershed" in dock
+    assert "DocumentedWatershed_reference.gpkg" in dock
+
+
 def test_qgis_plugin_dock_loads_tile_preview_layers():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
 
@@ -88,6 +97,13 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
   "site": {"name": "SligoCreek", "target_crs": "EPSG:26918"},
   "outlet": {"longitude": -76.97, "latitude": 38.99},
   "download_dir": "downloads",
+  "documented_watershed": {
+    "source": "https://example.gov/FeatureServer/2",
+    "name_field": "BASIN",
+    "name": "Sligo Creek",
+    "title": "County watershed inventory",
+    "organization": "Example County"
+  },
   "use_reviewed_pour_points": true,
   "nhdplus_snap_distance_m": 50,
   "dem_acquisition": {
@@ -108,6 +124,12 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
         "--config",
         str(config),
     ]
+    reference_command = _command_for_workflow("import-watershed-reference", str(config))
+    assert reference_command[:2] == ["ohqbuild", "import-watershed-reference"]
+    assert reference_command[reference_command.index("--name") + 1] == "Sligo Creek"
+    assert reference_command[reference_command.index("--source-organization") + 1] == (
+        "Example County"
+    )
     assert _command_for_workflow("download-dem-manifest", str(config)) == [
         "ohqbuild",
         "download-dem-manifest",

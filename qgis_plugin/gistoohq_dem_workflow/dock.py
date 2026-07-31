@@ -203,6 +203,45 @@ def _command_for_workflow(
             argv.append("--overwrite")
         return argv
 
+    if command == "import-watershed-reference":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        outlet = _as_mapping(config.get("outlet"), "outlet")
+        reference = _as_mapping(
+            config.get("documented_watershed"), "documented_watershed"
+        )
+        required = {
+            "outlet.longitude": outlet.get("longitude"),
+            "outlet.latitude": outlet.get("latitude"),
+            "documented_watershed.source": reference.get("source"),
+            "documented_watershed.title": reference.get("title"),
+            "documented_watershed.organization": reference.get("organization"),
+        }
+        missing = [name for name, value in required.items() if value in (None, "")]
+        if missing:
+            raise QgisDockConfigError(
+                "Documented watershed import requires config values: "
+                + ", ".join(missing)
+            )
+        source = str(reference["source"])
+        if not source.lower().startswith(("http://", "https://")):
+            source = str(_relative_to_config(config_path, source))
+        argv = [
+            "ohqbuild", "import-watershed-reference",
+            "--root", str(root), "--site", _site_name(config),
+            "--source", source,
+            "--lon", str(outlet["longitude"]), "--lat", str(outlet["latitude"]),
+            "--source-title", str(reference["title"]),
+            "--source-organization", str(reference["organization"]),
+        ]
+        for flag, key in (
+            ("--layer", "layer"), ("--name-field", "name_field"),
+            ("--name", "name"), ("--source-url", "url"),
+            ("--license", "license"),
+        ):
+            if reference.get(key):
+                argv.extend([flag, str(reference[key])])
+        return argv
+
     if command == "build-hms":
         root = _relative_to_config(config_path, config.get("root") or ".")
         return [
@@ -425,6 +464,9 @@ class DemWorkflowDock:
         draw_button = QPushButton("Draw DEM Area Polygon")
         draw_button.clicked.connect(self.draw_acquisition_polygon)
         layout.addWidget(draw_button)
+        reference_button = QPushButton("Configure Documented Watershed")
+        reference_button.clicked.connect(self.configure_documented_watershed)
+        layout.addWidget(reference_button)
         self.action_buttons = {}
         for label, command in (
             ("Prepare DEM", "prepare-dem"),
@@ -440,6 +482,7 @@ class DemWorkflowDock:
             ("Validate HEC-HMS", "validate-hms"),
             ("FULL RUN: Download All Data to OHQ", "full-run"),
             ("Promote Reviewed Pour Points", "promote-pour-points"),
+            ("Import Documented Watershed", "import-watershed-reference"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
@@ -461,6 +504,53 @@ class DemWorkflowDock:
     def pick_outlet(self) -> None:
         self.outlet_tool = OutletCaptureTool(self)
         self.outlet_tool.activate()
+
+    def configure_documented_watershed(self) -> None:
+        """Collect cited boundary settings without requiring manual YAML editing."""
+        from qgis.PyQt.QtWidgets import QInputDialog
+
+        config_path = Path(self.config.text()).expanduser()
+        try:
+            data = _read_config(config_path)
+            if not isinstance(data, dict):
+                raise QgisDockConfigError("Project config must contain an object.")
+            current = _as_mapping(
+                data.get("documented_watershed"), "documented_watershed"
+            )
+            prompts = (
+                ("source", "Local vector path or ArcGIS numeric layer URL"),
+                ("layer", "Local container layer (optional)"),
+                ("name_field", "Watershed name field (optional)"),
+                ("name", "Exact watershed name (optional)"),
+                ("title", "Reference dataset title"),
+                ("organization", "Publishing organization"),
+                ("url", "Citation URL (optional)"),
+                ("license", "License/data terms (optional)"),
+            )
+            updated = dict(current)
+            for key, label in prompts:
+                value, accepted = QInputDialog.getText(
+                    self.widget,
+                    "Documented Watershed Reference",
+                    label,
+                    text=str(updated.get(key, "")),
+                )
+                if not accepted:
+                    self.log.append("Documented watershed configuration cancelled.")
+                    return
+                updated[key] = value.strip()
+            missing = [key for key in ("source", "title", "organization") if not updated[key]]
+            if missing:
+                raise QgisDockConfigError(
+                    "Reference source, title, and organization are required."
+                )
+            data["documented_watershed"] = updated
+            _write_config(config_path, data)
+            self.log.append(
+                "Saved documented watershed settings. Click Import Documented Watershed."
+            )
+        except (OSError, ValueError, QgisDockConfigError) as exc:
+            self.log.append(f"Cannot configure documented watershed: {exc}")
 
     def set_outlet_coordinates(self) -> None:
         from qgis.PyQt.QtWidgets import QInputDialog
@@ -776,6 +866,8 @@ class DemWorkflowDock:
         if pending and code == 0:
             self.skip_full_prepare_once = True
             self.run_command(pending)
+        if command == "import-watershed-reference" and code == 0:
+            self.load_configured_layers()
 
     def _refresh_action_buttons(self) -> None:
         button = getattr(self, "action_buttons", {}).get("promote-pour-points")
@@ -802,6 +894,16 @@ class DemWorkflowDock:
                 "tile_index",
             )
         }
+        try:
+            project_root = _relative_to_config(config_path, data.get("root") or ".")
+            documented = (
+                project_root / _site_name(data) / "outputs"
+                / "DocumentedWatershed_reference.gpkg"
+            )
+            if documented.is_file():
+                layer_values["documented_watershed_reference"] = str(documented)
+        except (TypeError, ValueError):
+            pass
         if isinstance(outlet, dict):
             layer_values.update(
                 {
