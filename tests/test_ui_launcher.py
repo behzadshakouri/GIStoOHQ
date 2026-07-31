@@ -90,6 +90,15 @@ def test_launcher_builds_documented_watershed_import_command(tmp_path):
     assert command.argv[command.argv.index("--source-organization") + 1] == "Example County"
 
 
+def test_launcher_keeps_reference_fields_in_compact_dialog():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert 'text="Documented watershed…"' not in source  # tuple label, not main-form row
+    assert '("Documented watershed…", self.configure_documented_watershed)' in source
+    assert 'dialog.title("Documented Watershed Reference")' in source
+    assert 'self.log = tk.Text(frame, height=14' in source
+
+
 def test_command_runner_stop_terminates_active_process():
     messages = queue.Queue()
     runner = CommandRunner(

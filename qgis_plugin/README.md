@@ -33,6 +33,10 @@ project configuration. Then run **Import Documented Watershed**. A successful
 import loads `outputs/DocumentedWatershed_reference.gpkg`; subsequent full runs
 compare it independently with the DEM boundary, WBD, and NHDPlus references.
 Map images and PDFs are documentary evidence, not polygon inputs.
+The dock groups map tools, processing stages, review actions, and model writers
+into **Map**, **Workflow**, **Review**, and **Model** tabs so the panel remains
+usable on laptop-sized screens. Reference metadata opens in one compact dialog
+instead of expanding the permanent dock or launcher form.
 
 ## Install from a source checkout
 

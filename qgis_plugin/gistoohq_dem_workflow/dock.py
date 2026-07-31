@@ -420,6 +420,9 @@ class DemWorkflowDock:
             QDoubleSpinBox,
             QPushButton,
             QTextEdit,
+            QTabWidget,
+            QGridLayout,
+            QGroupBox,
         )
 
         self.iface = iface
@@ -431,68 +434,82 @@ class DemWorkflowDock:
         self.config = QLineEdit("config.example.json")
         row.addWidget(self.config)
         layout.addLayout(row)
-        controls = QHBoxLayout()
+        options_box = QGroupBox("Run options")
+        controls = QGridLayout(options_box)
         self.reviewed_points = QCheckBox("Use reviewed pour points")
-        controls.addWidget(self.reviewed_points)
-        controls.addWidget(QLabel("Outlet/NHDPlus snap max (m)"))
+        controls.addWidget(self.reviewed_points, 0, 0)
+        controls.addWidget(QLabel("Snap max (m)"), 0, 1)
         self.nhdplus_snap_distance = QDoubleSpinBox()
         self.nhdplus_snap_distance.setRange(0.0, 100000.0)
         self.nhdplus_snap_distance.setValue(50.0)
-        controls.addWidget(self.nhdplus_snap_distance)
+        controls.addWidget(self.nhdplus_snap_distance, 0, 2)
         self.overwrite_promoted = QCheckBox("Overwrite promoted points")
-        controls.addWidget(self.overwrite_promoted)
+        controls.addWidget(self.overwrite_promoted, 1, 0)
         self.use_existing_outlet = QCheckBox("Use edited outlet.shp")
-        controls.addWidget(self.use_existing_outlet)
+        controls.addWidget(self.use_existing_outlet, 1, 1)
         self.reuse_downloads = QCheckBox("Offline: reuse downloads")
-        controls.addWidget(self.reuse_downloads)
-        layout.addLayout(controls)
-        outlet_button = QPushButton("Pick Outlet on Map")
-        outlet_button.clicked.connect(self.pick_outlet)
-        layout.addWidget(outlet_button)
-        outlet_coordinate_button = QPushButton("Set Outlet Coordinates")
-        outlet_coordinate_button.clicked.connect(self.set_outlet_coordinates)
-        layout.addWidget(outlet_coordinate_button)
-        pour_button = QPushButton("Pick Pour Points on Map")
-        pour_button.clicked.connect(self.pick_pour_points)
-        layout.addWidget(pour_button)
-        coordinate_button = QPushButton("Add Pour Point Coordinates")
-        coordinate_button.clicked.connect(self.add_pour_point_coordinates)
-        layout.addWidget(coordinate_button)
-        extent_button = QPushButton("Use Canvas Extent as DEM Area")
-        extent_button.clicked.connect(self.use_canvas_extent_as_area)
-        layout.addWidget(extent_button)
-        draw_button = QPushButton("Draw DEM Area Polygon")
-        draw_button.clicked.connect(self.draw_acquisition_polygon)
-        layout.addWidget(draw_button)
-        reference_button = QPushButton("Configure Documented Watershed")
-        reference_button.clicked.connect(self.configure_documented_watershed)
-        layout.addWidget(reference_button)
-        self.action_buttons = {}
-        for label, command in (
-            ("Prepare DEM", "prepare-dem"),
-            ("Run Direct DEM Prep", "run-dem-prep"),
-            ("Download DEM Tiles", "download-dem-manifest"),
-            ("Materialize Inputs", "materialize-inputs"),
-            ("Validate DEM", "validate-dem"),
-            ("Prepare Hydrology", "prepare-hydrology"),
-            ("Prepare GIS Inputs", "prepare-inputs"),
-            ("Check Inputs", "check-inputs"),
-            ("Build OHQ", "build"),
-            ("Build HEC-HMS", "build-hms"),
-            ("Validate HEC-HMS", "validate-hms"),
-            ("FULL RUN: Download All Data to OHQ", "full-run"),
-            ("Promote Reviewed Pour Points", "promote-pour-points"),
-            ("Import Documented Watershed", "import-watershed-reference"),
-        ):
+        controls.addWidget(self.reuse_downloads, 1, 2)
+        layout.addWidget(options_box)
+
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+        map_tab = QWidget()
+        map_grid = QGridLayout(map_tab)
+        for index, (label, callback) in enumerate((
+            ("Pick Outlet on Map", self.pick_outlet),
+            ("Set Outlet Coordinates", self.set_outlet_coordinates),
+            ("Pick Pour Points on Map", self.pick_pour_points),
+            ("Add Pour Point Coordinates", self.add_pour_point_coordinates),
+            ("Use Canvas Extent as DEM Area", self.use_canvas_extent_as_area),
+            ("Draw DEM Area Polygon", self.draw_acquisition_polygon),
+            ("Load Configured Layers", self.load_configured_layers),
+        )):
             button = QPushButton(label)
-            button.clicked.connect(lambda checked=False, value=command: self.run_command(value))
-            layout.addWidget(button)
-            self.action_buttons[command] = button
-        load_button = QPushButton("Load Configured Layers")
-        load_button.clicked.connect(self.load_configured_layers)
-        layout.addWidget(load_button)
+            button.clicked.connect(callback)
+            map_grid.addWidget(button, index // 2, index % 2)
+        tabs.addTab(map_tab, "Map")
+
+        self.action_buttons = {}
+        groups = (
+            ("Workflow", (
+                ("Prepare DEM", "prepare-dem"),
+                ("Run Direct DEM Prep", "run-dem-prep"),
+                ("Download DEM tiles", "download-dem-manifest"),
+                ("Materialize inputs", "materialize-inputs"),
+                ("Validate DEM", "validate-dem"),
+                ("Prepare hydrology", "prepare-hydrology"),
+                ("Prepare GIS inputs", "prepare-inputs"),
+                ("Check inputs", "check-inputs"),
+                ("FULL RUN: Download All Data to OHQ", "full-run"),
+            )),
+            ("Review", (
+                ("Promote Reviewed Pour Points", "promote-pour-points"),
+                ("Import Documented Watershed", "import-watershed-reference"),
+            )),
+            ("Model", (
+                ("Build OHQ", "build"),
+                ("Build HEC-HMS", "build-hms"),
+                ("Validate HEC-HMS", "validate-hms"),
+            )),
+        )
+        for tab_name, actions in groups:
+            tab = QWidget()
+            grid = QGridLayout(tab)
+            for index, (label, command) in enumerate(actions):
+                button = QPushButton(label)
+                button.clicked.connect(
+                    lambda checked=False, value=command: self.run_command(value)
+                )
+                grid.addWidget(button, index // 2, index % 2)
+                self.action_buttons[command] = button
+            if tab_name == "Review":
+                reference_button = QPushButton("Configure Documented Watershed…")
+                reference_button.clicked.connect(self.configure_documented_watershed)
+                grid.addWidget(reference_button, 1, 0, 1, 2)
+            tabs.addTab(tab, tab_name)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
+        self.log.setMinimumHeight(120)
         layout.addWidget(self.log)
         self.process = None
         self.widget.setWidget(self.panel)
@@ -507,7 +524,10 @@ class DemWorkflowDock:
 
     def configure_documented_watershed(self) -> None:
         """Collect cited boundary settings without requiring manual YAML editing."""
-        from qgis.PyQt.QtWidgets import QInputDialog
+        from qgis.PyQt.QtWidgets import (
+            QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+            QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+        )
 
         config_path = Path(self.config.text()).expanduser()
         try:
@@ -517,7 +537,7 @@ class DemWorkflowDock:
             current = _as_mapping(
                 data.get("documented_watershed"), "documented_watershed"
             )
-            prompts = (
+            fields = (
                 ("source", "Local vector path or ArcGIS numeric layer URL"),
                 ("layer", "Local container layer (optional)"),
                 ("name_field", "Watershed name field (optional)"),
@@ -527,18 +547,49 @@ class DemWorkflowDock:
                 ("url", "Citation URL (optional)"),
                 ("license", "License/data terms (optional)"),
             )
-            updated = dict(current)
-            for key, label in prompts:
-                value, accepted = QInputDialog.getText(
-                    self.widget,
-                    "Documented Watershed Reference",
-                    label,
-                    text=str(updated.get(key, "")),
-                )
-                if not accepted:
-                    self.log.append("Documented watershed configuration cancelled.")
-                    return
-                updated[key] = value.strip()
+            dialog = QDialog(self.widget)
+            dialog.setWindowTitle("Documented Watershed Reference")
+            dialog.setMinimumWidth(620)
+            outer = QVBoxLayout(dialog)
+            note = QLabel(
+                "Use an agency polygon or ArcGIS numeric layer URL. "
+                "Images and PDFs are evidence, not polygon inputs."
+            )
+            note.setWordWrap(True)
+            outer.addWidget(note)
+            form = QFormLayout()
+            edits = {}
+            for key, label in fields:
+                edit = QLineEdit(str(current.get(key, "")))
+                edits[key] = edit
+                if key == "source":
+                    source_row = QHBoxLayout()
+                    source_row.addWidget(edit)
+                    browse = QPushButton("Browse…")
+
+                    def choose_source(source_edit=edit):
+                        selected, _ = QFileDialog.getOpenFileName(
+                            dialog, "Select documented watershed vector"
+                        )
+                        if selected:
+                            source_edit.setText(selected)
+
+                    browse.clicked.connect(choose_source)
+                    source_row.addWidget(browse)
+                    form.addRow(label, source_row)
+                else:
+                    form.addRow(label, edit)
+            outer.addLayout(form)
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.Save | QDialogButtonBox.Cancel
+            )
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            outer.addWidget(buttons)
+            if dialog.exec_() != QDialog.Accepted:
+                self.log.append("Documented watershed configuration cancelled.")
+                return
+            updated = {key: edit.text().strip() for key, edit in edits.items()}
             missing = [key for key in ("source", "title", "organization") if not updated[key]]
             if missing:
                 raise QgisDockConfigError(

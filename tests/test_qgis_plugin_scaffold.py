@@ -76,6 +76,9 @@ def test_qgis_plugin_dock_exposes_documented_watershed_import():
     assert "Import Documented Watershed" in dock
     assert "documented_watershed" in dock
     assert "DocumentedWatershed_reference.gpkg" in dock
+    assert "QTabWidget" in dock
+    assert 'tabs.addTab(map_tab, "Map")' in dock
+    assert 'dialog.setMinimumWidth(620)' in dock
 
 
 def test_qgis_plugin_dock_loads_tile_preview_layers():

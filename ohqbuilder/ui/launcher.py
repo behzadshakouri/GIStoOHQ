@@ -1278,21 +1278,12 @@ class LauncherApp:
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
             ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
-            ("Reference file / ArcGIS layer URL", self.reference_source_var),
-            ("Reference layer", self.reference_layer_var),
-            ("Reference name field", self.reference_name_field_var),
-            ("Reference watershed name", self.reference_name_var),
-            ("Reference title", self.reference_title_var),
-            ("Reference publisher", self.reference_org_var),
-            ("Reference citation URL", self.reference_url_var),
-            ("Reference license", self.reference_license_var),
         ]
         for row, (label, variable) in enumerate(rows):
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
             if label in {
                 "Config", "Manifest", "Flowlines", "Tile index",
-                "Reference file / ArcGIS layer URL",
             }:
                 tk.Button(
                     frame,
@@ -1317,6 +1308,7 @@ class LauncherApp:
             ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
             ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
+            ("Documented watershed…", self.configure_documented_watershed),
             (
                 "Open Sligo example",
                 lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
@@ -1424,10 +1416,65 @@ class LauncherApp:
             self.workflow_buttons.append(button)
             self.step_buttons[step] = button
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
-        self.log = tk.Text(frame, height=24, width=100)
+        self.log = tk.Text(frame, height=14, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 4, weight=1)
+
+    def configure_documented_watershed(self) -> None:
+        """Edit reference provenance in a compact modal instead of the main form."""
+        tk = self.tk
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Documented Watershed Reference")
+        dialog.transient(self.root)
+        dialog.resizable(True, False)
+        fields = (
+            ("Local vector / ArcGIS layer URL", self.reference_source_var),
+            ("Local container layer", self.reference_layer_var),
+            ("Watershed name field", self.reference_name_field_var),
+            ("Exact watershed name", self.reference_name_var),
+            ("Dataset title *", self.reference_title_var),
+            ("Publishing organization *", self.reference_org_var),
+            ("Citation URL", self.reference_url_var),
+            ("License / data terms", self.reference_license_var),
+        )
+        tk.Label(
+            dialog,
+            text=(
+                "Use an agency polygon or ArcGIS numeric layer URL. "
+                "Images and PDFs are evidence, not polygon inputs."
+            ),
+            justify="left",
+            wraplength=620,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 6))
+        for row, (label, variable) in enumerate(fields, start=1):
+            tk.Label(dialog, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=2)
+            tk.Entry(dialog, textvariable=variable, width=68).grid(
+                row=row, column=1, sticky="ew", pady=2
+            )
+            if row == 1:
+                tk.Button(
+                    dialog,
+                    text="Browse…",
+                    command=lambda: self.browse_file(self.reference_source_var),
+                ).grid(row=row, column=2, padx=(4, 10), pady=2)
+
+        def done() -> None:
+            if not self.reference_source_var.get().strip():
+                self.messages.put("Reference source is required.\n")
+                return
+            if not self.reference_title_var.get().strip() or not self.reference_org_var.get().strip():
+                self.messages.put("Reference title and publishing organization are required.\n")
+                return
+            dialog.destroy()
+            self._refresh_step_buttons()
+
+        buttons = tk.Frame(dialog)
+        buttons.grid(row=len(fields) + 1, column=0, columnspan=3, sticky="e", padx=10, pady=10)
+        tk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=3)
+        tk.Button(buttons, text="Save", command=done).pack(side="right", padx=3)
+        dialog.columnconfigure(1, weight=1)
+        dialog.grab_set()
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")
