@@ -1,4 +1,8 @@
-from ohqbuilder.hydro_materializer import _flowline_vector_candidates, _preferred_hydro_archives
+from ohqbuilder.hydro_materializer import (
+    _catchment_vector_candidates,
+    _flowline_vector_candidates,
+    _preferred_hydro_archives,
+)
 
 
 def test_preferred_hydro_archives_keeps_latest_vector_hu4(tmp_path):
@@ -35,3 +39,13 @@ def test_flowline_vector_patterns_include_demo_geojson(tmp_path):
     notes.write_text("ignore", encoding="utf-8")
 
     assert _flowline_vector_candidates(tmp_path, tmp_path / "workspace") == [geojson]
+
+
+def test_catchment_candidates_exclude_wbd_layers(tmp_path):
+    catchment = tmp_path / "NHDPlusCatchment.shp"
+    wbd = tmp_path / "WBDCatchment.shp"
+    flowline = tmp_path / "NHDFlowline.shp"
+    for path in (catchment, wbd, flowline):
+        path.write_text("fixture", encoding="utf-8")
+
+    assert _catchment_vector_candidates(tmp_path, tmp_path / "workspace") == [catchment]

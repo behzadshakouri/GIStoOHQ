@@ -26,10 +26,39 @@ def test_sligo_inline_dem_is_georeferenced_over_demo_outlet():
 
 
 def test_parse_products_all_and_subset():
-    assert dd.parse_products("all") == ["dem", "demlr", "hydro", "roads", "landcover", "atlas14"]
+    assert dd.parse_products("all") == [
+        "dem", "demlr", "hydro", "wbd", "roads", "landcover", "atlas14"
+    ]
     assert dd.parse_products("dem,hydro") == ["dem", "hydro"]
     assert dd.parse_products("demhr,demlr") == ["dem", "demlr"]
     assert dd.parse_products("nlcd,atlas14,roads") == ["landcover", "atlas14", "roads"]
+    assert dd.parse_products("wbd") == ["wbd"]
+
+
+def test_wbd_uses_authoritative_tnm_dataset():
+    tier = dd.PRODUCT_TIERS["wbd"][0]
+
+    assert tier.dataset == "Watershed Boundary Dataset (WBD)"
+    assert tier.formats == ("Shapefile", "FileGDB")
+
+
+def test_wbd_product_selection_rejects_nhdplus_rasters():
+    raster = dd.DownloadItem(
+        "NHDPLUS_H_0206_HU4_20220324_RASTER.zip",
+        "https://example.test/NHDPLUS_H_0206_HU4_RASTER.zip",
+        "NHDPlus HR",
+        "raster",
+    )
+    vector = dd.DownloadItem(
+        "WBD_02_20250101_GDB.zip",
+        "https://example.test/WBD_02_20250101_GDB.zip",
+        "Watershed Boundary Dataset (WBD)",
+        "WBD vector",
+    )
+
+    assert dd.classify_hydro_product(raster) == "nhdplus_raster"
+    assert dd.classify_hydro_product(vector) == "wbd_vector"
+    assert dd._prefer_wbd_packages([raster, vector]) == [vector]
 
 
 def test_query_tnm_reads_current_nested_download_url(monkeypatch):
@@ -158,6 +187,29 @@ def test_download_file_skips_valid_existing_file(monkeypatch, tmp_path):
 
     assert not dd.download_file("https://example.test/tile.tif", destination, expected_size=5)
     assert destination.read_bytes() == b"12345"
+
+
+def test_tnm_query_retries_transient_gateway_errors(monkeypatch):
+    from urllib.error import HTTPError
+
+    attempts = []
+    delays = []
+    tier = dd.PRODUCT_TIERS["demlr"][0]
+
+    def flaky_query(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise HTTPError("https://example.test", 504, "Gateway Timeout", {}, None)
+        return []
+
+    monkeypatch.setattr(dd, "query_tnm", flaky_query)
+    monkeypatch.setattr(dd.time, "sleep", delays.append)
+    messages = []
+
+    assert dd._query_tnm_with_retry(-77.0, 39.0, tier, 5000, messages.append) == []
+    assert len(attempts) == 3
+    assert delays == [5.0, 10.0]
+    assert all("No local processing error" in message for message in messages)
 
 
 def test_download_file_redownloads_corrupt_existing_file(monkeypatch, tmp_path):

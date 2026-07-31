@@ -1,5 +1,12 @@
 from pathlib import Path
 
+import pytest
+
+from ohqbuilder.legacy_inputs import (
+    LegacyInputWorkflowError,
+    run_hydrology_preprocessing,
+)
+
 
 LEGACY_SCRIPTS = [
     Path("scripts/legacy_gis/fillsink_etc.py"),
@@ -70,6 +77,17 @@ def test_reach_extraction_adapts_threshold_to_tiny_demo_accumulation():
     assert "No raster-extracted reaches; clipping mapped flowlines as fallback" in source
 
 
+def test_reach_output_releases_stale_qgis_handle_before_rewrite():
+    source = Path("scripts/legacy_gis/extract_reaches.py").read_text(encoding="utf-8")
+
+    assert "from ws3io import release_and_delete" in source
+    assert "release_and_delete(REACHES_OUT)" in source
+    assert 'REACHES_OUT + "|layername=reaches"' in source
+    assert "size_bytes=%s" in source
+    assert "reaches.gpkg contains zero features" in source
+    assert 'REACH_WRITER_REVISION = "stale-layer-release-v2"' in source
+
+
 def test_phase2_accepts_single_reach_watershed_without_interior_junctions():
     source = Path("scripts/legacy_gis/run_phase2.py").read_text(encoding="utf-8")
 
@@ -115,6 +133,32 @@ def test_zonal_parameters_fail_early_when_cn_or_slope_has_no_coverage():
     assert 'slope_by_id[id_key(ft["id"])] = as_float' in slope
 
 
+def test_subwatersheds_use_a_strict_incremental_partition():
+    source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 's["parent"] = None' in source
+    assert 'parent["children"].append(child)' in source
+    assert 'to_subtract = [child["geom"] for child in s["children"]]' in source
+    assert 'QgsField("parent_id", QVariant.String)' in source
+    assert "Subwatershed partition contains empty unit(s)" in source
+    assert "Subwatershed partition validation failed" in source
+    assert 'gap = root_shed["geom"].difference(carved_union)' in source
+    assert 'outside = carved_union.difference(root_shed["geom"])' in source
+
+
+def test_subwatershed_hierarchy_rejects_duplicates_and_crossing_basins():
+    source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "effectively identical" in source
+    assert "cross by %.4f km2 but neither" in source
+    assert "Expected one downstream/root cumulative watershed" in source
+    assert "contains(point) is directionally" in source
+
+
 def test_phase_runners_suppress_only_qgsfield_deprecation_noise():
     for path in (
         Path("scripts/legacy_gis/run_phase1.py"),
@@ -138,6 +182,17 @@ def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
     assert 'QgsField("quality", QVariant.String)' in source
 
 
+def test_outlet_snap_prioritizes_cells_inside_maximum_accepted_move():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "accepted = valid & (distance <= MAX_OUTLET_SNAP_M)" in source
+    assert "accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)" in source
+    assert "selection_mask = accepted_channel" in source
+    assert "score[~selection_mask] = -np.inf" in source
+
+
 def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():
     source = Path("scripts/legacy_gis/longestflowpath.py").read_text(encoding="utf-8")
 
@@ -145,3 +200,18 @@ def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals()
     assert "np.abs(flow_acc[rows + row0, cols + col0])" in source
     assert "score = (reached, distance_m, -shift2)" in source
     assert "Refusing to write an implausibly short path" in source
+
+
+def test_hydrology_preflight_rejects_tiny_placeholder_dem(monkeypatch, tmp_path):
+    site = tmp_path / "Demo"
+    dem = site / "demlr" / "cliped_utm.tif"
+    flowlines = site / "outputs" / "NHDFlowline_clip.gpkg"
+    dem.parent.mkdir(parents=True)
+    flowlines.parent.mkdir(parents=True)
+    dem.write_bytes(b"placeholder")
+    flowlines.write_bytes(b"placeholder")
+    monkeypatch.setattr("ohqbuilder.legacy_inputs._require_qgis", lambda: None)
+    monkeypatch.setattr("ohqbuilder.legacy_inputs._raster_dimensions", lambda path: (10, 10))
+
+    with pytest.raises(LegacyInputWorkflowError, match="DEM is only 10 x 10 cells"):
+        run_hydrology_preprocessing(tmp_path, "Demo")

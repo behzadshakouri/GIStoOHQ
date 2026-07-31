@@ -1,9 +1,12 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 
 from ohqbuilder.full_runner import (
+    FullRunError,
     acquisition_bounds,
     bounds_covering_outlet,
     buffer_covering_bounds,
@@ -13,6 +16,17 @@ from ohqbuilder.full_runner import (
     run_full_pipeline,
     write_watershed_report,
 )
+from ohqbuilder.legacy_inputs import LegacyInputWorkflowError, verify_reach_writer_revision
+
+
+def _write_valid_cached_sources(downloads: Path, site_id: str = "source-id") -> None:
+    dem = downloads / site_id / "demlr" / "cached.tif"
+    dem.parent.mkdir(parents=True)
+    dem.write_bytes(b"cached-test-tiff")
+    hydro = downloads / site_id / "hydro" / "cached.zip"
+    hydro.parent.mkdir(parents=True)
+    with zipfile.ZipFile(hydro, "w") as archive:
+        archive.writestr("NHDFlowline.shp", b"cached")
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +37,7 @@ def stub_watershed_builder(monkeypatch):
             build=lambda: SimpleNamespace(subbasins=[], reaches=[], junctions=[])
         ),
     )
+    monkeypatch.setattr("ohqbuilder.full_runner._invalid_cached_dem_files", lambda paths: [])
 
 
 def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
@@ -47,6 +62,90 @@ def test_full_run_summary_reports_metrics_and_artifacts(tmp_path):
     assert "✓ OHQ model" in summary
     assert "✓ HEC-HMS project" in summary
     assert str((tmp_path / "site.ohq").resolve()) in summary
+
+
+def test_reach_writer_revision_detects_stale_legacy_script(tmp_path):
+    script = tmp_path / "extract_reaches.py"
+    script.write_text('raise Exception("reaches.gpkg was written but is invalid")\n')
+
+    with pytest.raises(LegacyInputWorkflowError, match="different revisions"):
+        verify_reach_writer_revision(tmp_path)
+
+
+def test_reach_writer_revision_accepts_current_legacy_script():
+    script = verify_reach_writer_revision()
+
+    assert script.name == "extract_reaches.py"
+
+
+def test_full_run_summary_reports_authoritative_boundary_metrics(tmp_path):
+    comparison = tmp_path / "watershed_wbd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "reference_layer": "WBDHU12_reference",
+                "best_match": {
+                    "reference_id": "020700100101",
+                    "reference_scope": "comparable_scale",
+                    "contains_outlet": True,
+                    "generated_area_km2": 38.3443,
+                    "reference_area_km2": 40.0,
+                    "iou": 0.8123,
+                    "omission_area_km2": 3.2,
+                    "commission_area_km2": 1.5,
+                    "boundary_hausdorff_m": 87.5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    watershed = SimpleNamespace(subbasins=[], reaches=[], junctions=[])
+
+    summary = full_run_summary(
+        watershed,
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        comparison_paths=[comparison],
+    )
+
+    assert "Boundary Comparison (WBDHU12_reference)" in summary
+    assert "Reference ID       : 020700100101" in summary
+    assert "Reference scope    : comparable_scale" in summary
+    assert "Contains outlet    : True" in summary
+    assert "Area difference    : -4.14%" in summary
+    assert "Intersection/Union : 0.812" in summary
+    assert "Boundary Hausdorff : 87.5 m" in summary
+
+
+def test_full_run_summary_reports_nhd_reach_alignment(tmp_path):
+    comparison = tmp_path / "reaches_nhd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "tolerance_m": 30.0,
+                "generated_length_km": 42.1,
+                "reference_length_km": 45.2,
+                "generated_within_tolerance_pct": 91.2,
+                "reference_within_tolerance_pct": 84.3,
+                "mean_lateral_offset_m": 12.6,
+                "hausdorff_distance_m": 125.4,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = full_run_summary(
+        SimpleNamespace(subbasins=[], reaches=[], junctions=[]),
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        reach_comparison_paths=[comparison],
+    )
+
+    assert "Reach Network Comparison (NHD)" in summary
+    assert "Generated near NHD  : 91.2%" in summary
+    assert "NHD near generated  : 84.3%" in summary
+    assert "Mean lateral offset : 12.6 m" in summary
+    assert "Network Hausdorff   : 125.4 m" in summary
 
 
 def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
@@ -87,6 +186,72 @@ def test_watershed_report_contains_parameters_and_artifacts(tmp_path):
     assert "<li>Reaches: 2</li><li>Junctions: 1</li>" in content
     assert "<h2>Final Model Network</h2>" in content
     assert "<li>Reaches: 1</li><li>Junctions: 0</li>" in content
+
+
+def test_watershed_report_includes_reference_comparisons(tmp_path):
+    comparison = tmp_path / "watershed_nhdplus_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "reference_layer": "upstream_boundary",
+                "disagreement_geopackage": str(tmp_path / "disagreement.gpkg"),
+                "best_match": {
+                    "reference_id": "reach-42",
+                    "iou": 0.8123,
+                    "omission_area_km2": 1.2,
+                    "commission_area_km2": 0.4,
+                    "boundary_hausdorff_m": 87.5,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    watershed = SimpleNamespace(subbasins=[], reaches=[], junctions=[])
+
+    report = write_watershed_report(
+        watershed,
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        comparison_paths=[comparison],
+    )
+
+    content = report.read_text(encoding="utf-8")
+    assert "Boundary comparisons" in content
+    assert "upstream_boundary" in content
+    assert "reach-42" in content
+    assert ">0.812<" in content
+    assert "disagreement.gpkg" in content
+
+
+def test_watershed_report_includes_reach_network_comparison(tmp_path):
+    comparison = tmp_path / "reaches_nhd_comparison.json"
+    comparison.write_text(
+        json.dumps(
+            {
+                "tolerance_m": 30.0,
+                "generated_length_km": 42.1,
+                "reference_length_km": 45.2,
+                "generated_within_tolerance_pct": 91.2,
+                "reference_within_tolerance_pct": 84.3,
+                "mean_lateral_offset_m": 12.6,
+                "hausdorff_distance_m": 125.4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = write_watershed_report(
+        SimpleNamespace(subbasins=[], reaches=[], junctions=[]),
+        tmp_path / "site.ohq",
+        tmp_path / "site.hms",
+        reach_comparison_paths=[comparison],
+    )
+
+    content = report.read_text(encoding="utf-8")
+    assert "Reach-network comparison" in content
+    assert ">91.2%<" in content
+    assert ">84.3%<" in content
+    assert ">12.6<" in content
+    assert ">125.4<" in content
 
 
 def test_network_counts_fall_back_to_extracted_when_topology_is_unavailable():
@@ -201,11 +366,189 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
         "max_file_size_mb": None,
         "soil_pixel_size": 0.0002,
         "soil_top_depth": 15,
+        "use_existing_outlet": False,
     }
     assert result.output_path == Path(tmp_path / "SITE_A.ohq")
     assert result.hms_project_path == tmp_path / "SITE_A.hms"
     assert result.report_path == tmp_path / "watershed_report.html"
     assert phase_options["options"].refresh_auto_pour_points is True
+    assert phase_options["options"].child_options == {"MAX_OUTLET_SNAP_M": 50.0}
+
+
+def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path):
+    downloads = tmp_path / "downloads"
+    _write_valid_cached_sources(downloads)
+    soils = tmp_path / "SITE_A" / "soils"
+    soils.mkdir(parents=True)
+    for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
+        (soils / name).write_bytes(b"cached")
+    atlas = tmp_path / "SITE_A" / "atlas14" / "atlas14_pf.csv"
+    atlas.parent.mkdir()
+    atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
+    calls = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("remote download called")),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.write_outlet_shapefile",
+        lambda *a, **k: calls.setdefault("outlet", a),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: calls.setdefault("materialize", k),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=39.0,
+        download_dir=downloads,
+        reuse_downloads=True,
+    )
+
+    assert calls["materialize"]["source_dir"] == downloads.resolve()
+    assert calls["materialize"]["allow_network_fallbacks"] is False
+    assert calls["outlet"][1:] == (-77.0, 39.0)
+
+
+def test_full_pipeline_reuse_mode_reports_missing_cache(tmp_path):
+    with pytest.raises(FullRunError, match="populated source download directory"):
+        run_full_pipeline(tmp_path, "SITE_A", lon=-77.0, lat=39.0, reuse_downloads=True)
+
+
+def test_full_pipeline_falls_back_to_validated_cache_after_transient_remote_failure(
+    monkeypatch, tmp_path
+):
+    from urllib.error import HTTPError
+
+    download_root = tmp_path / "downloads"
+    _write_valid_cached_sources(download_root, "SITE_A")
+    soils = tmp_path / "SITE_A" / "soils"
+    soils.mkdir(parents=True)
+    for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
+        (soils / name).write_bytes(b"cached")
+    atlas = tmp_path / "SITE_A" / "atlas14" / "atlas14_pf.csv"
+    atlas.parent.mkdir()
+    atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
+    messages = []
+    captured = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: (_ for _ in ()).throw(
+            HTTPError("https://example.test", 504, "Gateway Timeout", {}, None)
+        ),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: captured.update(k),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=39.0,
+        download_dir=download_root,
+        progress=messages.append,
+    )
+
+    assert captured["allow_network_fallbacks"] is False
+    assert any("Continuing from local cache" in message for message in messages)
+    assert any("cached DEM tiles: 1; hydro packages: 1" in message for message in messages)
+
+
+def test_full_pipeline_reports_cli_outlet_recreation(monkeypatch, tmp_path):
+    messages = []
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.materialize_source_inputs", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "result.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+    )
+
+    run_full_pipeline(tmp_path, "SITE", lon=-77.0, lat=39.0, progress=messages.append)
+
+    assert "Outlet source: CLI longitude/latitude (outlet.shp will be recreated)" in messages
+
+
+def test_full_pipeline_requires_and_preserves_reviewed_pour_points(monkeypatch, tmp_path):
+    outputs = tmp_path / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    reviewed = outputs / "pour_points.shp"
+    reviewed.write_text("reviewed", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.materialize_source_inputs", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_legacy_input_workflow",
+        lambda *args, **kwargs: captured.setdefault("options", args[4]),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "SITE_A.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "SITE_A.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path, "SITE_A", lon=-77.0, lat=39.0, use_reviewed_pour_points=True
+    )
+
+    assert captured["options"].auto_pour_points is False
+    assert captured["options"].refresh_auto_pour_points is False
+    assert reviewed.read_text(encoding="utf-8") == "reviewed"
 
 
 def test_full_pipeline_uses_drawn_area_for_download_coverage_and_clipping(monkeypatch, tmp_path):

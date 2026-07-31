@@ -3,9 +3,12 @@
 # polygons (wshed_*_clean.gpkg from delineatewatershed.py).
 #
 # Logic (area-based, geometry-driven -- no manual ordering needed):
-#   - Sort watersheds smallest -> largest.
-#   - For each, subtract the union of every STRICTLY SMALLER watershed that it
-#     actually contains/overlaps (>= CONTAIN_FRAC).
+#   - Treat wshed_*_clean.gpkg as cumulative upstream drainage areas.  It is
+#     normal for these inputs to overlap and for a downstream one to equal the
+#     sum of several upstream ones plus its local drainage area.
+#   - Build an explicit containment tree from polygon coverage.
+#   - Subtract only each watershed's immediate children.  The resulting
+#     subwatersheds.gpkg is an incremental, non-overlapping partition.
 #   - Clean: snap to the raster grid + drop stray sliver fragments left by
 #     pixel-edge subtraction.
 #
@@ -35,9 +38,7 @@ except NameError:
     SITE_DIR = "WS3_GIS/AZ12-100"
 
 WSHED_GLOB   = "wshed_*_clean.gpkg"      # in <SITE>/outputs/
-CONTAIN_FRAC = 0.90          # FALLBACK only: used when a shed's pour point is
-                             # unavailable. Nesting is decided by pour-point-
-                             # inside-polygon (binary, robust), not this frac.
+CONTAIN_FRAC = 0.90          # minimum fraction of a child covered by a parent
 POURPTS_NAME = "pour_points_snapped.gpkg"   # id-keyed, from delineatewatershed
 
 # DEM is the CRS source of truth for the site. Used to guarantee the output
@@ -48,6 +49,8 @@ DEM_REL      = "demlr/cliped_utm.tif"
 MIN_AREA_M2  = 500.0         # drop stray fragments smaller than this (~6 cells)
 SNAP_GRID    = 9.336         # snap vertices to this grid (= DEM cell size);
                              # set to 0 to disable
+OVERLAP_TOL_M2 = 250.0       # fail above roughly three 9.34 m raster cells
+CROSSING_TOL_M2 = 1000.0     # fail if cumulative basins cross without nesting
 # ---------------------------------------------------------------------------
 
 # --- derived paths ---------------------------------------------------------
@@ -101,10 +104,10 @@ for f in files:
 if not sheds:
     raise Exception("No valid watershed polygons loaded.")
 
-# --- load pour points (id -> point geom) for the nesting test --------------
-# Nesting is "B is upstream of / nested in A iff B's pour point lies inside A".
-# This is binary and robust, unlike an area-fraction threshold that fails for
-# children that sit only ~85-92% inside their parent at a confluence.
+# --- load pour points (id -> point geom) for diagnostics --------------------
+# Pour points are not used to infer nesting.  A child's outlet can lie exactly
+# on a parent's rasterized boundary, so contains(point) is directionally and
+# numerically unreliable.  Polygon coverage defines the hierarchy instead.
 pourpts_p = os.path.join(OUT_DIR, POURPTS_NAME)
 pp_geom = {}    # id (str) -> QgsGeometry (point)
 _pp = QgsVectorLayer(pourpts_p, "pp", "ogr")
@@ -117,10 +120,10 @@ if _pp.isValid():
             continue
         tag = str(ft[id_field]) if id_field else str(ft.id())
         pp_geom[tag] = QgsGeometry(g)
-    print("Pour points loaded for nesting test:", len(pp_geom))
+    print("Pour points loaded for hierarchy diagnostics:", len(pp_geom))
 else:
-    print("  WARNING: %s not found -- falling back to area-fraction nesting "
-          "test (CONTAIN_FRAC=%.2f)" % (pourpts_p, CONTAIN_FRAC))
+    print("  NOTE: %s not found; polygon coverage will still define hierarchy."
+          % pourpts_p)
 
 # choose the output CRS: prefer the DEM's, fall back to the first input's
 out_crs = dem_crs if (dem_crs is not None and dem_crs.isValid()) else crs
@@ -129,6 +132,55 @@ if out_crs is None or not out_crs.isValid():
 print("Output CRS:", out_crs.authid())
 
 sheds.sort(key=lambda s: s["area"])
+
+# --- construct the cumulative-watershed containment tree -------------------
+# The immediate parent is the smallest larger polygon covering at least
+# CONTAIN_FRAC of the child.  This avoids subtracting every descendant more
+# than once and makes the relationship available for QA and inspection.
+for s in sheds:
+    s["parent"] = None
+    s["children"] = []
+
+for i, child in enumerate(sheds):
+    candidates = []
+    for parent in sheds[i + 1:]:
+        inter = child["geom"].intersection(parent["geom"])
+        inter_area = 0.0 if inter.isEmpty() else inter.area()
+        child_frac = inter_area / child["area"] if child["area"] > 0 else 0.0
+        parent_frac = inter_area / parent["area"] if parent["area"] > 0 else 0.0
+
+        # Near-identical cumulative basins mean duplicate/mis-snapped outlets.
+        if child_frac >= 0.995 and parent_frac >= 0.995:
+            raise Exception(
+                "Cumulative watersheds %s and %s are effectively identical. "
+                "Their pour points are probably on the same routed cell; remove "
+                "or move one point." % (child["id"], parent["id"])
+            )
+        if child_frac >= CONTAIN_FRAC:
+            candidates.append((parent["area"], parent, child_frac))
+        elif inter_area > CROSSING_TOL_M2:
+            raise Exception(
+                "Cumulative watersheds %s and %s cross by %.4f km2 but neither "
+                "contains the other. Check pour-point snapping and flow direction."
+                % (child["id"], parent["id"], inter_area / 1e6)
+            )
+
+    if candidates:
+        _, parent, coverage = min(candidates, key=lambda item: item[0])
+        child["parent"] = parent
+        parent["children"].append(child)
+        print("  hierarchy: %s -> parent %s (coverage %.1f%%)"
+              % (child["id"], parent["id"], coverage * 100.0))
+
+roots = [s for s in sheds if s["parent"] is None]
+if len(roots) != 1:
+    raise Exception(
+        "Expected one downstream/root cumulative watershed, found %d (%s). "
+        "The pour points form disconnected or inconsistent drainage trees."
+        % (len(roots), ", ".join(s["id"] for s in roots))
+    )
+root_shed = roots[0]
+print("Cumulative watershed root:", root_shed["id"])
 
 def drop_slivers(geom, min_area):
     if geom.isEmpty():
@@ -151,25 +203,7 @@ def drop_slivers(geom, min_area):
 print("\nCarving non-overlapping subwatersheds...")
 for i, s in enumerate(sheds):
     larger_geom = s["geom"]
-    to_subtract = []
-    for j in range(i):
-        small = sheds[j]
-        # primary test: is the SMALLER shed's pour point inside the larger shed?
-        # (binary, robust -- defines true upstream nesting)
-        pp = pp_geom.get(small["id"])
-        nested = None
-        if pp is not None:
-            nested = larger_geom.contains(pp)
-        if nested is None:
-            # fallback: area-fraction containment when no pour point available
-            inter = larger_geom.intersection(small["geom"])
-            if inter.isEmpty():
-                nested = False
-            else:
-                frac = inter.area() / small["area"] if small["area"] > 0 else 0.0
-                nested = frac >= CONTAIN_FRAC
-        if nested:
-            to_subtract.append(small["geom"])
+    to_subtract = [child["geom"] for child in s["children"]]
     if to_subtract:
         cut = QgsGeometry.unaryUnion(to_subtract)
         sub = larger_geom.difference(cut)
@@ -184,13 +218,24 @@ for i, s in enumerate(sheds):
         print("  id='%s': EMPTY after subtraction+cleanup -- points likely too "
               "close; consider removing this point" % s["id"])
     else:
-        print("  id='%s': subtracted %d nested, area now %.4f km2"
+        print("  id='%s': subtracted %d immediate child(ren), area now %.4f km2"
               % (s["id"], n, sub.area() / 1e6))
+
+empty_ids = [s["id"] for s in sheds if s["sub"].isEmpty()]
+if empty_ids:
+    raise Exception(
+        "Subwatershed partition contains empty unit(s): %s. The associated "
+        "pour points are duplicate, too close, or snapped to inconsistent cells."
+        % ", ".join(empty_ids)
+    )
 
 # --- write combined output -------------------------------------------------
 fields = QgsFields()
 fields.append(QgsField("id", QVariant.String))
 fields.append(QgsField("area_km2", QVariant.Double))
+fields.append(QgsField("raw_km2", QVariant.Double))
+fields.append(QgsField("parent_id", QVariant.String))
+fields.append(QgsField("child_cnt", QVariant.Int))
 
 if os.path.exists(OUT_PATH):
     try:
@@ -224,6 +269,9 @@ for s in sheds:
     feat.setGeometry(geom)
     feat["id"] = s["id"]
     feat["area_km2"] = round(geom.area() / 1e6, 4)
+    feat["raw_km2"] = round(s["area"] / 1e6, 4)
+    feat["parent_id"] = s["parent"]["id"] if s["parent"] is not None else ""
+    feat["child_cnt"] = len(s["children"])
     writer.addFeature(feat)
     written += 1
 
@@ -243,8 +291,7 @@ print("Output CRS on file:", _chk.crs().authid() or "NONE")
 total = sum(s["sub"].area() for s in sheds if not s["sub"].isEmpty())
 print("Total subwatershed area: %.4f km2" % (total / 1e6))
 
-# --- self-check: no two carved subwatersheds should overlap > tolerance ----
-OVERLAP_TOL_M2 = 1000.0
+# --- strict partition QA ---------------------------------------------------
 carved = [(s["id"], s["sub"]) for s in sheds if not s["sub"].isEmpty()]
 overlaps = []
 for a in range(len(carved)):
@@ -258,11 +305,33 @@ if overlaps:
     print("\n  *** RESIDUAL OVERLAPS (subtraction incomplete) ***")
     for ida, idb, ar in overlaps:
         print("      id %s overlaps id %s by %.4f km2" % (ida, idb, ar / 1e6))
-    print("  Check that both sheds have a pour point in pour_points_snapped.gpkg")
-    print("  and that the nested one's pour point falls inside the parent.")
+    raise Exception(
+        "Subwatershed partition validation failed: residual overlap exceeds "
+        "%.0f m2. Check pour-point snapping and cumulative watershed hierarchy."
+        % OVERLAP_TOL_M2
+    )
 else:
     print("Self-check: no residual overlaps > %.0f m2. Subwatersheds are clean."
           % OVERLAP_TOL_M2)
+
+# The union of incremental pieces must reproduce the downstream/root basin.
+# Allow dropped slivers, but never silently accept a material gap or area
+# outside the root cumulative watershed.
+carved_union = QgsGeometry.unaryUnion([g for _, g in carved])
+gap = root_shed["geom"].difference(carved_union)
+outside = carved_union.difference(root_shed["geom"])
+gap_area = 0.0 if gap.isEmpty() else gap.area()
+outside_area = 0.0 if outside.isEmpty() else outside.area()
+coverage_tol = max(5000.0, MIN_AREA_M2 * len(sheds))
+print("Partition coverage: gap=%.0f m2, outside=%.0f m2 (tolerance %.0f m2)"
+      % (gap_area, outside_area, coverage_tol))
+if gap_area > coverage_tol or outside_area > coverage_tol:
+    raise Exception(
+        "Subwatershed partition does not reproduce root watershed %s: "
+        "gap=%.0f m2, outside=%.0f m2. Check duplicate/crossing pour points "
+        "and rerun delineation." %
+        (root_shed["id"], gap_area, outside_area)
+    )
 
 # --- load into project (remove any stale layer pointing at this file first) -
 proj = QgsProject.instance()
