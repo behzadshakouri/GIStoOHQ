@@ -137,14 +137,16 @@ enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
 [`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and
 basemap setup.
 Use **Browse…** beside config and path fields to switch projects or folders. The
-launcher also includes **Open Sligo example** and **Open John McCormack example**;
+launcher groups **Sligo Creek** and **John McCormack (JM)** under the **Examples ▾**
+button. The
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the
 selected Root shown in the form.
 **Open generated layers in QGIS** starts the installed `qgis` executable and loads
 all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products beneath the
 selected site's `demlr` and `outputs` directories, including the source DEM,
 routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
-become available.
+become available. The QGIS layer panel places the latest-modified layer at the top
+and the oldest-modified layer at the bottom.
 **RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
 hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
 exist, avoiding manual execution of downstream stages before their prerequisites.
