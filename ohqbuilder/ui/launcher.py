@@ -965,14 +965,19 @@ def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
 
 
 def qgis_command(state: LauncherState, executable: str | None = None) -> tuple[str, ...]:
-    """Build a QGIS command that opens all currently generated workflow layers."""
+    """Build a QGIS command whose layer panel is newest-to-oldest.
+
+    QGIS inserts each command-line layer at the top of the layer tree.  Supplying
+    the oldest file first therefore leaves the newest file at the top after all
+    arguments have been processed.
+    """
     qgis = executable or shutil.which("qgis")
     if not qgis:
         raise LauncherError("QGIS executable was not found on PATH.")
     layers = qgis_layer_paths(state)
     if not layers:
         raise LauncherError("No generated DEM, hydrology, or delineation layers exist yet.")
-    return (qgis, "--nologo", *(str(path) for path in layers))
+    return (qgis, "--nologo", *(str(path) for path in reversed(layers)))
 
 
 class MapPicker:

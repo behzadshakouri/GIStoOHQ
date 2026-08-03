@@ -146,7 +146,8 @@ all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products from
 latest-modified to oldest-modified beneath the
 selected site's `demlr` and `outputs` directories, including the source DEM,
 routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
-become available.
+become available. The QGIS layer panel places the latest-modified layer at the top
+and the oldest-modified layer at the bottom.
 **RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
 hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
 exist, avoiding manual execution of downstream stages before their prerequisites.

@@ -85,6 +85,25 @@ def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
     )
 
 
+def test_qgis_command_supplies_oldest_first_so_newest_is_topmost(tmp_path):
+    site = tmp_path / "SITE_A"
+    oldest = site / "outputs" / "oldest.gpkg"
+    newest = site / "outputs" / "newest.gpkg"
+    for path in (oldest, newest):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    os.utime(oldest, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newest, ns=(2_000_000_000, 2_000_000_000))
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
+
+    assert qgis_command(state, executable="/usr/bin/qgis") == (
+        "/usr/bin/qgis",
+        "--nologo",
+        str(oldest.resolve()),
+        str(newest.resolve()),
+    )
+
+
 def test_launcher_builds_documented_watershed_import_command(tmp_path):
     state = LauncherState(
         config_path=tmp_path / "config.yaml",
