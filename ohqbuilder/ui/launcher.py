@@ -943,7 +943,7 @@ class CommandRunner(threading.Thread):
 
 
 def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
-    """Return generated watershed rasters and vectors suitable for QGIS."""
+    """Return generated watershed layers, newest modification first."""
     if state.root is None or not state.site:
         return ()
     site_path = (state.root / state.site).resolve()
@@ -956,7 +956,12 @@ def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
         for path in root.rglob("*")
         if path.is_file() and path.suffix.lower() in supported
     }
-    return tuple(sorted(paths, key=lambda path: str(path)))
+    return tuple(
+        sorted(
+            paths,
+            key=lambda path: (-path.stat().st_mtime_ns, str(path)),
+        )
+    )
 
 
 def qgis_command(state: LauncherState, executable: str | None = None) -> tuple[str, ...]:
@@ -1309,21 +1314,31 @@ class LauncherApp:
             ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
             ("Documented watershed…", self.configure_documented_watershed),
-            (
-                "Open Sligo example",
-                lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
-            ),
-            (
-                "Open John McCormack example",
-                lambda: self.open_example(
-                    "examples/JohnMcCormack3600/dem_workflow.example.yaml"
-                ),
-            ),
         )
         for index, (label, command) in enumerate(project_specs):
             tk.Button(project_buttons, text=label, command=command).grid(
                 row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew"
             )
+        examples_button = tk.Menubutton(
+            project_buttons,
+            text="Examples ▾",
+            relief="raised",
+        )
+        examples_menu = tk.Menu(examples_button, tearoff=False)
+        examples_menu.add_command(
+            label="Sligo Creek",
+            command=lambda: self.open_example(
+                "examples/SligoCreek/dem_workflow.example.yaml"
+            ),
+        )
+        examples_menu.add_command(
+            label="John McCormack (JM)",
+            command=lambda: self.open_example(
+                "examples/JohnMcCormack3600/dem_workflow.example.yaml"
+            ),
+        )
+        examples_button.config(menu=examples_menu)
+        examples_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
         recommended_button = tk.Button(
             project_buttons,
             text="▶ RUN RECOMMENDED NEXT STEP",
