@@ -59,6 +59,29 @@ A subsequent `full-run` preserves this operator-supplied reference and adds
 not silently substituted for the routed boundary: differences may reflect outlet
 definition, data vintage, storm sewers, culverts, digitizing scale, or method.
 
+Export coordinates from either the imported reference or the DEM-derived boundary
+without assuming that the dataset contains one feature, one polygon part, and no
+holes:
+
+```bash
+ohqbuild export-watershed-coordinates \
+  --source examples/SligoCreek/outputs/watershed_boundary.gpkg \
+  --out examples/SligoCreek/outputs/watershed_boundary_26918.csv \
+  --target-crs EPSG:26918
+
+ohqbuild export-watershed-coordinates \
+  --source examples/SligoCreek/outputs/DocumentedWatershed_reference.gpkg \
+  --layer documented_watershed_reference \
+  --out examples/SligoCreek/outputs/documented_boundary_4326.csv \
+  --target-crs EPSG:4326
+```
+
+The CSV records feature, polygon-part, ring, and vertex identifiers alongside X
+and Y. The repeated closing coordinate is retained so each ring remains explicitly
+closed. Do not label coordinates “exact” without naming the source, CRS, vintage,
+and derivation: they are exact representations of a particular dataset, not an
+error-free physical watershed divide.
+
 The Friends of Sligo Creek map and the published figure are useful evidence that a
 documented Sligo Creek extent exists, but a web image is not a surveyable GIS
 polygon. GIStoOHQ deliberately rejects PNG/JPEG/PDF input. Obtain the underlying

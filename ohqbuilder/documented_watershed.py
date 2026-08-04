@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -14,6 +15,50 @@ class DocumentedWatershedError(RuntimeError):
 
 REFERENCE_FILENAME = "DocumentedWatershed_reference.gpkg"
 REFERENCE_LAYER = "documented_watershed_reference"
+
+
+def export_boundary_vertices(
+    source: str | Path,
+    output_csv: str | Path,
+    *,
+    layer: str | None = None,
+    target_crs: str | None = None,
+) -> Path:
+    """Write every polygon ring vertex to a lossless, structured CSV.
+
+    Unlike examples that select the first feature and exterior ring, this exporter
+    preserves feature, polygon-part, and ring identity, including interior rings.
+    """
+
+    _require_gis()
+    import geopandas as gpd
+
+    source_path = Path(source).expanduser().resolve()
+    if not source_path.exists():
+        raise DocumentedWatershedError(f"Watershed dataset does not exist: {source_path}")
+    frame = gpd.read_file(source_path, layer=layer) if layer else gpd.read_file(source_path)
+    if frame.empty or frame.crs is None:
+        raise DocumentedWatershedError("The watershed dataset must be non-empty and define a CRS.")
+    if target_crs:
+        frame = frame.to_crs(target_crs)
+    if not frame.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
+        raise DocumentedWatershedError("Every watershed feature must be a Polygon or MultiPolygon.")
+
+    target = Path(output_csv).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["feature_id", "part_id", "ring_id", "ring_type", "vertex_id", "x", "y"])
+        for feature_id, geometry in enumerate(frame.geometry):
+            polygons = list(geometry.geoms) if geometry.geom_type == "MultiPolygon" else [geometry]
+            for part_id, polygon in enumerate(polygons):
+                rings = [("exterior", polygon.exterior), *[("interior", ring) for ring in polygon.interiors]]
+                for ring_id, (ring_type, ring) in enumerate(rings):
+                    for vertex_id, coordinate in enumerate(ring.coords):
+                        writer.writerow(
+                            [feature_id, part_id, ring_id, ring_type, vertex_id, coordinate[0], coordinate[1]]
+                        )
+    return target
 
 
 def _require_gis() -> None:
