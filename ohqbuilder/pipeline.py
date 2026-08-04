@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .builders.watershed_builder import WatershedBuilder
+from .builders.topology_builder import retain_topology_elements
 from .logger import get_logger
 from .settings import BuilderSettings
 from .validation.topology_validator import TopologyValidator
@@ -14,6 +15,7 @@ log = get_logger(__name__)
 
 def build_ohq_project(settings: BuilderSettings, output_path: Path | None = None, dry_run: bool = False) -> str | None:
     watershed = WatershedBuilder(settings).build()
+    retain_topology_elements(watershed)
     TopologyValidator().validate(watershed)
     ParameterValidator().validate(watershed)
     log.info("Watershed summary: %s", watershed.summary())

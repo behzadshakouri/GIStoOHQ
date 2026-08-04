@@ -308,12 +308,15 @@ pour = QgsVectorLayer(pourpts_p, "pour", "ogr")
 if not pour.isValid():
     raise Exception("invalid pour-points layer")
 PP = {}    # pour-point/subbasin id -> QgsPointXY
+PP_ROLE = {}  # pour-point/subbasin id -> junction or watershed_outlet
+pour_fields = [fl.name() for fl in pour.fields()]
 for f in pour.getFeatures():
-    pid = iid(f["id"]) if "id" in [fl.name() for fl in pour.fields()] else int(f.id())
+    pid = iid(f["id"]) if "id" in pour_fields else int(f.id())
     g = f.geometry()
     if g is None or g.isEmpty():
         continue
     PP[pid] = QgsPointXY(g.asPoint())
+    PP_ROLE[pid] = str(f["role"] or "junction") if "role" in pour_fields else "junction"
 print("Pour points loaded:", len(PP))
 
 subs = QgsVectorLayer(params_p + "|layername=" + PARAMS_LAYER, "subs", "ogr")
@@ -371,7 +374,7 @@ print("\nSubbasin -> nearest junction assigned.")
 # subbasins draining to each junction (for anchor test + junction validation)
 subs_into_junc = {jid: [] for jid in J}
 for sid, jid in sub_ds_junc.items():
-    if jid is not None:
+    if jid is not None and PP_ROLE.get(sid) != "watershed_outlet":
         subs_into_junc[jid].append(sid)
 
 # ---------------------------------------------------------------------------
@@ -637,6 +640,19 @@ for jid in sorted(keep_junc):
 # subbasin downstream: its assigned junction if kept, else resolve through
 sub_ds = {}       # sid -> (kind, id, note)
 for sid in sorted(SUB):
+    if PP_ROLE.get(sid) == "watershed_outlet":
+        if len(outlet_reaches) != 1:
+            sub_ds[sid] = (
+                "sink", None,
+                "watershed outlet catchment; expected one outlet reach, found %d"
+                % len(outlet_reaches)
+            )
+        else:
+            sub_ds[sid] = (
+                "reach", outlet_reaches[0],
+                "local drainage between final junction and watershed outlet"
+            )
+        continue
     jid = sub_ds_junc.get(sid)
     note = ""
     d = sub_ds_dist.get(sid)
