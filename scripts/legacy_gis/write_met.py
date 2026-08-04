@@ -781,7 +781,7 @@ def write_met_file(met_path, model_name, gage_name, subbasin_names):
     """
     lines = [
         "Meteorology: " + model_name,
-        "     Description: NOAA Atlas 14 Vol.1 Semiarid SW, %d-yr, type: %s"
+        "     Description: NOAA Atlas 14 point-frequency estimate, %d-yr, type: %s"
             % (RETURN_PERIOD, STORM_TYPE),
         "     Last Modified Date: " + DATE,
         "     Last Modified Time: " + TIME,
@@ -955,5 +955,5 @@ print("Storms written: %d" % len(written))
 print("DSS file: %s" % DSS_PATH)
 print("Storm type: %s | Return period: %d-yr" % (STORM_TYPE, RETURN_PERIOD))
 print("Subbasins assigned: %d" % len(subbasin_names))
-print("\nPROVENANCE: depths from NOAA Atlas 14 Vol.1 Semiarid SW, partial-duration series")
+print("\nPROVENANCE: depths from the downloaded NOAA Atlas 14 point-frequency table")
 print("PRE-SEAL: confirm storm type against RFP #660.")

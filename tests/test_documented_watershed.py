@@ -1,14 +1,44 @@
 import importlib.util
 import json
-from pathlib import Path
-
 import pytest
 
 from ohqbuilder.documented_watershed import (
     DocumentedWatershedError,
     REFERENCE_LAYER,
+    export_boundary_vertices,
     import_documented_watershed,
 )
+
+
+def test_export_boundary_vertices_preserves_parts_holes_and_crs(tmp_path):
+    if not GIS_AVAILABLE:
+        pytest.skip("GIS dependencies are not installed")
+    import csv
+    import geopandas as gpd
+    from shapely.geometry import MultiPolygon, Polygon, box
+
+    polygon_with_hole = Polygon(
+        [(0, 0), (4, 0), (4, 4), (0, 4), (0, 0)],
+        holes=[[(1, 1), (2, 1), (2, 2), (1, 2), (1, 1)]],
+    )
+    source = tmp_path / "boundary.gpkg"
+    gpd.GeoDataFrame(
+        geometry=[MultiPolygon([polygon_with_hole, box(5, 5, 6, 6)])], crs="EPSG:4326"
+    ).to_file(source, layer="boundary", driver="GPKG")
+
+    result = export_boundary_vertices(
+        source, tmp_path / "vertices.csv", layer="boundary", target_crs="EPSG:26918"
+    )
+
+    with result.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 15
+    assert {(row["part_id"], row["ring_type"]) for row in rows} == {
+        ("0", "exterior"),
+        ("0", "interior"),
+        ("1", "exterior"),
+    }
+    assert float(rows[0]["x"]) > 100_000
 
 
 GIS_AVAILABLE = all(

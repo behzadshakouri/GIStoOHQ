@@ -2,7 +2,7 @@
 # Clip raster and vector layers to final subwatersheds boundary.
 #
 # Updated for GIStoOHQ headless/test runs:
-# - Writes watershed_boundary.gpkg with CRS.
+# - Writes a derived subwatershed mask without replacing the Phase 1 boundary.
 # - Skips invalid vector layers instead of crashing.
 # - For dummy/test CN rasters, copies them directly to expected *_wsclip.tif
 #   outputs instead of sending them through QGIS/GDAL clip, which caused
@@ -226,13 +226,13 @@ print(
 
 
 # --- write watershed boundary ----------------------------------------------
-mask_path = os.path.join(OUT_DIR, "watershed_boundary.gpkg")
+mask_path = os.path.join(OUT_DIR, "subwatershed_boundary.gpkg")
 
 project = QgsProject.instance()
 
 for lyr in list(project.mapLayers().values()):
     try:
-        if "watershed_boundary" in lyr.source().lower():
+        if "subwatershed_boundary" in lyr.source().lower():
             project.removeMapLayer(lyr.id())
     except Exception:
         pass
@@ -245,7 +245,7 @@ fields.append(QgsField("id", QVariant.Int))
 
 opts = QgsVectorFileWriter.SaveVectorOptions()
 opts.driverName = "GPKG"
-opts.layerName = "watershed_boundary"
+opts.layerName = "subwatershed_boundary"
 
 ctx = QgsCoordinateTransformContext()
 
@@ -274,8 +274,8 @@ del writer
 gc.collect()
 
 check = QgsVectorLayer(
-    mask_path + "|layername=watershed_boundary",
-    "watershed_boundary_check",
+    mask_path + "|layername=subwatershed_boundary",
+    "subwatershed_boundary_check",
     "ogr",
 )
 

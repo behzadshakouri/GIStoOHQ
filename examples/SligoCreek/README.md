@@ -4,7 +4,7 @@ This folder is a small no-network smoke test for the outlet-first DEM acquisitio
 
 ## Outlet and study extent
 
-`SC.kmz` originally placed the outlet candidate at **38.95840888229726, -76.97391566325376**. Routing-grid review found that this point required a 142.50 m move. The workflow and downloader CSV now use the reviewed routed-cell candidate **38.9571888036, -76.9744266065** (EPSG:26918 approximately **328920.79, 4313879.55**). Verify that it is on Sligo Creek rather than Northwest Branch before design use.
+`SC.kmz` contains the original Google Earth point marker at **38.95840888229726, -76.97391566325376**; routing-grid review found that this marker required a 142.50 m move. The separate review file named `Estimated Sligo Creek.kmz` is not bundled in this repository, so the workflow and downloader CSV continue to use the reviewed routed-cell candidate **38.9571888036, -76.9744266065** (EPSG:26918 approximately **328920.79, 4313879.55**) until that estimated KMZ is added and independently snapped/confirmed against authoritative hydrography. Verify that the selected outlet is on Sligo Creek rather than Northwest Branch before design use.
 
 The acquisition envelope follows the Sligo centerline and uses **1,000 m** upstream, downstream, and lateral margins. This is acquisition padding, not a request to model the downstream Northwest Branch or the whole Anacostia basin. After DEM delineation, inspect the boundary and retain only the drainage area upstream of the Sligo-side pour point. See `outlet_and_extent.geojson` for the machine-readable point and review notes.
 
