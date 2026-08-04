@@ -123,12 +123,31 @@ same snap-limit and reviewed-point controls plus an explicit overwrite checkbox;
 the plugin never overwrites promoted points merely because its promotion button
 was clicked. Project keys `nhdplus_snap_distance_m` and
 `use_reviewed_pour_points` remain supported as command defaults.
+By default, Phase 2 creates one pour point at every confluence in the Phase 1
+generated reach network (`junctions.gpkg`); a single-reach basin falls back to the
+watershed outlet. It writes `outputs/pour_points_generation_report.json` with the
+method, source, CRS, IDs, and coordinates. The reviewed workflow is separate: its
+candidates come from NHDPlus tributary confluences and only `approved` or `required`
+features are promoted.
 The per-point `wshed_*_clean.gpkg` files are cumulative upstream drainage areas,
 so overlap among those intermediate layers is expected. Phase 2 builds an explicit
 containment tree and writes incremental model units to `outputs/subwatersheds.gpkg`.
 It now stops instead of continuing when cumulative basins are duplicate, cross
 without nesting, produce more than one drainage root, leave a material coverage
 gap, extend outside the root basin, or leave residual overlaps in the final layer.
+It also removes raster/grid-snap strips from later units so final polygons are
+disjoint by construction and writes `outputs/subwatershed_partition_report.json`
+with hierarchy, cumulative and incremental areas, every pairwise overlap, and
+root-basin gap/outside measurements.
+The legacy GIS orchestrators also write `outputs/phase1_execution_report.json`
+and `outputs/phase2_execution_report.json`. Each report is updated atomically
+after every child script and records timestamps, duration, success/failure,
+errors, and files created or changed by that step. These phase reports complement
+the detailed domain reports instead of replacing them. The latest report remains
+at the stable path, while every run is also retained under
+`outputs/workflow_reports/` with a timestamp and run ID. The launcher prints the
+same run ID around each command and provides **Clear log**, making repeated runs
+distinguishable without discarding their JSON history.
 After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
 pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
 for acquisition and tracing instead of recreating it from stale longitude/latitude.
@@ -137,14 +156,16 @@ enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
 [`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and
 basemap setup.
 Use **Browse…** beside config and path fields to switch projects or folders. The
-launcher also includes **Open Sligo example** and **Open John McCormack example**;
+launcher groups **Sligo Creek** and **John McCormack (JM)** under the **Examples ▾**
+button. The
 generated inputs, downloads, site outputs, and the final OHQ are written beneath the
 selected Root shown in the form.
 **Open generated layers in QGIS** starts the installed `qgis` executable and loads
 all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products beneath the
 selected site's `demlr` and `outputs` directories, including the source DEM,
 routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
-become available.
+become available. The QGIS layer panel places the latest-modified layer at the top
+and the oldest-modified layer at the bottom.
 **RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
 hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
 exist, avoiding manual execution of downstream stages before their prerequisites.

@@ -971,6 +971,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"create-pour-points failed: {exc}")
             return 2
         print(f"Generated {result.count} pour point(s): {result.output_path}")
+        print(f"Pour-point generation report: {result.report_path}")
         return 0
     if args.command == "promote-pour-points":
         site_path = Path(args.site).expanduser()

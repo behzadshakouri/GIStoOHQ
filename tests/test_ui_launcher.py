@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import sys
 import time
@@ -54,6 +55,23 @@ def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path)
     assert paths == (dem.resolve(), reaches.resolve())
 
 
+def test_qgis_layer_paths_sorts_latest_to_oldest(tmp_path):
+    site = tmp_path / "SITE_A"
+    oldest = site / "outputs" / "oldest.gpkg"
+    newest = site / "outputs" / "newest.gpkg"
+    for path in (oldest, newest):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    os.utime(oldest, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newest, ns=(2_000_000_000, 2_000_000_000))
+
+    paths = qgis_layer_paths(
+        LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
+    )
+
+    assert paths == (newest.resolve(), oldest.resolve())
+
+
 def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
     layer = tmp_path / "SITE_A" / "outputs" / "watershed_boundary.gpkg"
     layer.parent.mkdir(parents=True)
@@ -64,6 +82,25 @@ def test_qgis_command_passes_every_generated_layer_to_qgis(tmp_path):
         "/usr/bin/qgis",
         "--nologo",
         str(layer.resolve()),
+    )
+
+
+def test_qgis_command_supplies_oldest_first_so_newest_is_topmost(tmp_path):
+    site = tmp_path / "SITE_A"
+    oldest = site / "outputs" / "oldest.gpkg"
+    newest = site / "outputs" / "newest.gpkg"
+    for path in (oldest, newest):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    os.utime(oldest, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newest, ns=(2_000_000_000, 2_000_000_000))
+    state = LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
+
+    assert qgis_command(state, executable="/usr/bin/qgis") == (
+        "/usr/bin/qgis",
+        "--nologo",
+        str(oldest.resolve()),
+        str(newest.resolve()),
     )
 
 
@@ -99,6 +136,15 @@ def test_launcher_keeps_reference_fields_in_compact_dialog():
     assert 'self.log = tk.Text(frame, height=14' in source
 
 
+def test_launcher_groups_example_configs_under_menu_button():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert 'text="Examples ▾"' in source
+    assert 'label="Sligo Creek"' in source
+    assert 'label="John McCormack (JM)"' in source
+    assert '"Open John McCormack example"' not in source
+
+
 def test_command_runner_stop_terminates_active_process():
     messages = queue.Queue()
     runner = CommandRunner(
@@ -117,7 +163,20 @@ def test_command_runner_stop_terminates_active_process():
     queued = list(messages.queue)
     finished = [item for item in queued if isinstance(item, RunnerFinished)]
     assert finished[-1].status == 130
-    assert any("[Slow command cancelled by user]" in item for item in queued if isinstance(item, str))
+    assert any("Slow command cancelled by user" in item for item in queued if isinstance(item, str))
+    assert any(
+        f"RUN {runner.run_id}: Slow command STARTED" in item
+        for item in queued
+        if isinstance(item, str)
+    )
+
+
+def test_launcher_exposes_clear_log_control():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert 'text="Clear log"' in source
+    assert 'def clear_log(self)' in source
+    assert 'self.log.delete("1.0", "end")' in source
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
