@@ -151,6 +151,22 @@ def test_subwatersheds_use_a_strict_incremental_partition():
     assert 'subwatershed_partition_report.json' in source
 
 
+def test_phase2_clipping_preserves_phase1_watershed_boundary():
+    source = Path("scripts/legacy_gis/cliptowatershed.py").read_text(encoding="utf-8")
+
+    assert 'mask_path = os.path.join(OUT_DIR, "subwatershed_boundary.gpkg")' in source
+    assert 'opts.layerName = "subwatershed_boundary"' in source
+    assert 'mask_path = os.path.join(OUT_DIR, "watershed_boundary.gpkg")' not in source
+
+
+def test_model_topology_routes_outlet_incremental_basin_to_outlet_reach():
+    source = Path("scripts/legacy_gis/build_topology.py").read_text(encoding="utf-8")
+
+    assert 'PP_ROLE.get(sid) == "watershed_outlet"' in source
+    assert '"reach", outlet_reaches[0]' in source
+    assert "local drainage between final junction and watershed outlet" in source
+
+
 def test_subwatershed_hierarchy_rejects_duplicates_and_crossing_basins():
     source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
         encoding="utf-8"
