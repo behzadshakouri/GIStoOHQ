@@ -148,6 +148,21 @@ at the stable path, while every run is also retained under
 `outputs/workflow_reports/` with a timestamp and run ID. The launcher prints the
 same run ID around each command and provides **Clear log**, making repeated runs
 distinguishable without discarding their JSON history.
+To turn a reviewed run into an explicit regression baseline and compare a later
+run against it, use:
+```bash
+ohqbuild capture-report-baseline \
+  --outputs examples/SligoCreek/SligoCreekDemo/outputs \
+  --out examples/SligoCreek/report-baseline.json
+ohqbuild check-report-baseline \
+  --outputs examples/SligoCreek/SligoCreekDemo/outputs \
+  --baseline examples/SligoCreek/report-baseline.json \
+  --absolute-tolerance 0.001
+```
+The baseline keeps stable scientific and topology fields from the available
+pour-point, partition, reach, and watershed comparison reports while excluding
+machine-specific paths and volatile run timestamps. A mismatch exits with status
+3 and lists each changed JSON field; `--json` produces machine-readable results.
 After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
 pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
 for acquisition and tracing instead of recreating it from stale longitude/latitude.
