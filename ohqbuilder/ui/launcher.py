@@ -477,10 +477,20 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
                 argv.append("--documented-watershed-allow-outlet-outside")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
-            or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
+            or state.method in {
+                "outlet_buffer",
+                "oriented_outlet_buffer",
+                "upstream_network",
+                "documented_watershed",
+            }
         ):
             argv.extend(("--acquisition-area", str(state.acquisition_area)))
-        if state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}:
+        if state.method in {
+            "outlet_buffer",
+            "oriented_outlet_buffer",
+            "upstream_network",
+            "documented_watershed",
+        }:
             return WorkflowCommand(
                 "Full Run: Generate Default Area, then Download to OHQ",
                 ("ohqbuild", "prepare-dem", "--config", str(state.config_path)),

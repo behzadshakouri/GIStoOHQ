@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from zipfile import ZipFile
 
 from ohqbuilder.cli import main
 from ohqbuilder.dem_workflow import prepare_dem_from_config
@@ -115,6 +116,57 @@ def test_cli_prepare_dem_runs_config_workflow(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Wrote DEM workflow summary:" in out
     assert "Selected tile count: 1" in out
+
+
+def test_prepare_dem_from_config_can_use_documented_kmz_with_uncertainty_margin(tmp_path):
+    kmz = tmp_path / "estimated.kmz"
+    kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+<LineString><coordinates>
+-77.01,38.99,0 -76.99,38.99,0 -76.99,39.01,0 -77.01,39.01,0 -77.01,38.99,0
+</coordinates></LineString></Placemark></Document></kml>
+"""
+    with ZipFile(kmz, "w") as archive:
+        archive.writestr("doc.kml", kml)
+    tile_index = tmp_path / "tiles.geojson"
+    tile_index.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    _feature("near", (-77.02, 38.98, -76.98, 39.02), path="tile.tif"),
+                    _feature("far", (-76.5, 38.98, -76.4, 39.02), path="far.tif"),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+dem_acquisition:
+  method: documented_watershed
+  acquisition_area: intermediate/dem_acquisition_area.geojson
+  source: estimated.kmz
+  uncertainty_margin_km: 1
+  tile_index: tiles.geojson
+  tile_manifest: manifest.json
+documented_watershed:
+  source: estimated.kmz
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = prepare_dem_from_config(config)
+
+    assert result.acquisition_area is not None
+    assert result.acquisition_area.mode == "documented_watershed"
+    assert result.tile_manifest is not None
+    assert result.tile_manifest.selected_count == 1
+    area = json.loads((tmp_path / "intermediate" / "dem_acquisition_area.geojson").read_text())
+    props = area["features"][0]["properties"]
+    assert props["source_boundary_point_count"] == 5
+    assert props["uncertainty_margin_km"] == 1
 
 
 def test_validate_dem_from_config_writes_summary_and_expansion(tmp_path):

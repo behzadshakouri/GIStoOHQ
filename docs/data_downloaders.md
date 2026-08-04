@@ -273,7 +273,7 @@ scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml
 ```
 
 The command currently supports `outlet_buffer`, `oriented_outlet_buffer`,
-`upstream_network`, and `polygon` acquisition methods. When both `tile_index` and
+`upstream_network`, `documented_watershed`, and `polygon` acquisition methods. When both `tile_index` and
 `tile_manifest` are configured, it also selects the intersecting DEM tile records
 and writes the manifest. A machine-readable summary is written to
 `dem_acquisition.summary` or `intermediate/dem_workflow_summary.json` by default.
@@ -336,6 +336,12 @@ outlet, computes an oriented principal-axis rectangle or axis-aligned envelope,
 and applies upstream/downstream/lateral safety margins. This is not a full NHD
 topological trace yet, but it gives elongated basins such as Sligo Creek a better
 initial DEM area than a circular outlet buffer:
+
+The `documented_watershed` method creates the acquisition area from a local
+KML/KMZ reference boundary and expands its bounds by `uncertainty_margin_km`.
+Use it when a review KMZ is the best current watershed estimate but should be
+treated as approximate DEM coverage evidence rather than a surveyed final
+boundary.
 
 You can also snap the outlet as a separate inspectable step:
 

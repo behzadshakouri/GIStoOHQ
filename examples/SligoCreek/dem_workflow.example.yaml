@@ -16,8 +16,12 @@ outlet:
   snap_distance_m: 50
   snapped_path: inputs/outlet_snapped.geojson
 dem_acquisition:
-  method: upstream_network
+  # Base DEM acquisition on the estimated Sligo Creek KMZ boundary, then pad it
+  # because the KMZ is an operator-digitized estimate rather than a surveyed line.
+  method: documented_watershed
   acquisition_area: intermediate/dem_acquisition_area.geojson
+  source: Estimated Sligo Creek.kmz
+  uncertainty_margin_km: 2
   tile_index: indexes/usgs_3dep_tiles.demo.geojson
   tile_manifest: intermediate/dem_download_manifest.json
   flowline_path: hydro/NHDFlowline.demo.geojson
