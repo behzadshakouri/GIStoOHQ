@@ -27,7 +27,12 @@ from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 from .phase1_fetcher import write_outlet_shapefile
 from .dem_downloader import is_transient_remote_error
-from .documented_watershed import REFERENCE_FILENAME, REFERENCE_LAYER
+from .documented_watershed import (
+    DocumentedWatershedError,
+    REFERENCE_FILENAME,
+    REFERENCE_LAYER,
+    import_documented_watershed,
+)
 
 
 class FullRunError(RuntimeError):
@@ -534,6 +539,14 @@ def run_full_pipeline(
     nhdplus_snap_distance_m: float = 50.0,
     use_existing_outlet: bool = False,
     reuse_downloads: bool = False,
+    documented_watershed_source: str | Path | None = None,
+    documented_watershed_layer: str | None = None,
+    documented_watershed_name_field: str | None = None,
+    documented_watershed_name: str | None = None,
+    documented_watershed_title: str | None = None,
+    documented_watershed_organization: str | None = None,
+    documented_watershed_url: str | None = None,
+    documented_watershed_license: str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -718,6 +731,28 @@ def run_full_pipeline(
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
         generated_reaches = generated_boundary.with_name("reaches.gpkg")
         documented_reference = generated_boundary.with_name(REFERENCE_FILENAME)
+        if documented_watershed_source:
+            if not documented_watershed_title or not documented_watershed_organization:
+                raise FullRunError(
+                    "Documented watershed import requires a source title and organization."
+                )
+            try:
+                imported_reference = import_documented_watershed(
+                    documented_watershed_source,
+                    documented_reference,
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                    layer=documented_watershed_layer,
+                    name_field=documented_watershed_name_field,
+                    name=documented_watershed_name,
+                    source_title=documented_watershed_title,
+                    source_organization=documented_watershed_organization,
+                    source_url=documented_watershed_url,
+                    license_text=documented_watershed_license,
+                )
+            except DocumentedWatershedError as exc:
+                raise FullRunError(f"Documented watershed import failed: {exc}") from exc
+            emit(f"Imported documented watershed reference: {imported_reference}")
         if (
             materialized_hydro is not None
             and generated_reaches.is_file()

@@ -454,6 +454,22 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.append("--use-existing-outlet")
         if state.reuse_downloads:
             argv.append("--reuse-downloads")
+        if state.reference_source:
+            argv.extend(("--documented-watershed-source", state.reference_source))
+            if state.reference_layer:
+                argv.extend(("--documented-watershed-layer", state.reference_layer))
+            if state.reference_name_field:
+                argv.extend(("--documented-watershed-name-field", state.reference_name_field))
+            if state.reference_name:
+                argv.extend(("--documented-watershed-name", state.reference_name))
+            if state.reference_title:
+                argv.extend(("--documented-watershed-title", state.reference_title))
+            if state.reference_organization:
+                argv.extend(("--documented-watershed-organization", state.reference_organization))
+            if state.reference_url:
+                argv.extend(("--documented-watershed-url", state.reference_url))
+            if state.reference_license:
+                argv.extend(("--documented-watershed-license", state.reference_license))
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}

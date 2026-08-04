@@ -816,6 +816,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
     )
+    full.add_argument("--documented-watershed-source", default=None)
+    full.add_argument("--documented-watershed-layer", default=None)
+    full.add_argument("--documented-watershed-name-field", default=None)
+    full.add_argument("--documented-watershed-name", default=None)
+    full.add_argument("--documented-watershed-title", default=None)
+    full.add_argument("--documented-watershed-organization", default=None)
+    full.add_argument("--documented-watershed-url", default=None)
+    full.add_argument("--documented-watershed-license", default=None)
 
     capture_baseline = sub.add_parser(
         "capture-report-baseline",
@@ -1112,6 +1120,14 @@ def main(argv: list[str] | None = None) -> int:
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
+                documented_watershed_source=args.documented_watershed_source,
+                documented_watershed_layer=args.documented_watershed_layer,
+                documented_watershed_name_field=args.documented_watershed_name_field,
+                documented_watershed_name=args.documented_watershed_name,
+                documented_watershed_title=args.documented_watershed_title,
+                documented_watershed_organization=args.documented_watershed_organization,
+                documented_watershed_url=args.documented_watershed_url,
+                documented_watershed_license=args.documented_watershed_license,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:

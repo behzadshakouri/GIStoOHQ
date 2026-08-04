@@ -4,7 +4,22 @@ This folder is a small no-network smoke test for the outlet-first DEM acquisitio
 
 ## Outlet and study extent
 
-`SC.kmz` contains the original Google Earth point marker at **38.95840888229726, -76.97391566325376**; routing-grid review found that this marker required a 142.50 m move. The separate review file named `Estimated Sligo Creek.kmz` is not bundled in this repository, so the workflow and downloader CSV continue to use the reviewed routed-cell candidate **38.9571888036, -76.9744266065** (EPSG:26918 approximately **328920.79, 4313879.55**) until that estimated KMZ is added and independently snapped/confirmed against authoritative hydrography. Verify that the selected outlet is on Sligo Creek rather than Northwest Branch before design use.
+`SC.kmz` contains the original Google Earth point marker at **38.95840888229726, -76.97391566325376**; routing-grid review found that this marker required a 142.50 m move. `Estimated Sligo Creek.kmz` contains a closed Google Earth `LineString` outline named **Estimated SC**, not an outlet point. Its approximate spherical area is **45.8 km² (17.7 mi²)**, so treat it as an operator-digitized review/reference outline whose suitability depends on the intended “real Sligo Creek” reference area and expected ~20% tolerance. The workflow and downloader CSV continue to use the reviewed routed-cell outlet candidate **38.9571888036, -76.9744266065** (EPSG:26918 approximately **328920.79, 4313879.55**) because the KMZ outline is boundary evidence, not a snapped pour point. Verify that the selected outlet is on Sligo Creek rather than Northwest Branch before design use.
+
+The example config records that KMZ under `documented_watershed`, so a UI **FULL RUN** passes it into `full-run` and writes `watershed_documented_comparison.json` after delineation. In the run shown during review, the DEM-derived watershed area was **39.08 km²** versus the KMZ estimate of **45.77 km²**, a **-14.6%** difference relative to the KMZ estimate; that is within a ~20% area-screening tolerance, while the WBD HUC12 remains regional context rather than a Sligo Creek boundary. To process the bundled estimate manually, import it as the documented watershed reference after confirming that the modeled outlet lies inside the outline:
+
+```bash
+ohqbuild import-watershed-reference \
+  --root examples/SligoCreek --site SligoCreekDemo \
+  --source "examples/SligoCreek/Estimated Sligo Creek.kmz" \
+  --lon -76.9744266065 --lat 38.9571888036 \
+  --source-title "Estimated Sligo Creek review outline" \
+  --source-organization "Operator digitized Google Earth review" \
+  --source-url "examples/SligoCreek/Estimated Sligo Creek.kmz" \
+  --license "project review artifact; verify before design use"
+```
+
+The importer converts a closed KML/KMZ `LineString` into a derived polygon and records that provenance. It still rejects open lines, points, images, and PDFs as watershed boundaries.
 
 The acquisition envelope follows the Sligo centerline and uses **1,000 m** upstream, downstream, and lateral margins. This is acquisition padding, not a request to model the downstream Northwest Branch or the whole Anacostia basin. After DEM delineation, inspect the boundary and retain only the drainage area upstream of the Sligo-side pour point. See `outlet_and_extent.geojson` for the machine-readable point and review notes.
 
