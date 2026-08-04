@@ -25,6 +25,7 @@ from .dem_workflow import (
 from .documented_watershed import (
     DocumentedWatershedError,
     REFERENCE_FILENAME,
+    export_boundary_vertices,
     import_documented_watershed,
 )
 from .doctor import run_doctor
@@ -245,6 +246,19 @@ def build_parser() -> argparse.ArgumentParser:
     documented.add_argument("--source-url", default=None)
     documented.add_argument("--license", dest="license_text", default=None)
     documented.add_argument("--out", default=None)
+
+    vertices = sub.add_parser(
+        "export-watershed-coordinates",
+        help="Export all polygon boundary vertices to CSV without dropping parts or holes.",
+    )
+    vertices.add_argument("--source", required=True)
+    vertices.add_argument("--out", required=True)
+    vertices.add_argument("--layer", default=None)
+    vertices.add_argument(
+        "--target-crs",
+        default=None,
+        help="Optional output CRS (for example EPSG:26918 or EPSG:4326).",
+    )
 
     dl = sub.add_parser(
         "download-data",
@@ -1042,6 +1056,19 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Wrote documented watershed reference: {imported}")
         print(f"Wrote provenance metadata: {imported.with_suffix('.json')}")
+        return 0
+    if args.command == "export-watershed-coordinates":
+        try:
+            exported = export_boundary_vertices(
+                args.source,
+                args.out,
+                layer=args.layer,
+                target_crs=args.target_crs,
+            )
+        except DocumentedWatershedError as exc:
+            print(f"export-watershed-coordinates failed: {exc}")
+            return 2
+        print(f"Wrote watershed boundary coordinates: {exported}")
         return 0
     if args.command == "create-outlet":
         site_path = Path(args.site).expanduser()
