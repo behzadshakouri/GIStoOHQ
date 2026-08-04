@@ -38,6 +38,11 @@ from .legacy_inputs import (
 from .phase1_fetcher import Phase1FetchError, fetch_phase1_inputs
 from .pour_points import PourPointGenerationError, generate_pour_points
 from .pour_point_candidates import PourPointCandidateError, promote_pour_point_candidates
+from .report_baseline import (
+    ReportBaselineError,
+    compare_report_baseline,
+    create_report_baseline,
+)
 from .outlet_creator import OutletCreationError, create_outlet_from_flow_accumulation
 from .full_runner import FullRunError, run_full_pipeline
 from .hms_pipeline import build_hms_project, validate_hms_project
@@ -798,6 +803,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
     )
 
+    capture_baseline = sub.add_parser(
+        "capture-report-baseline",
+        help="Capture stable workflow-report fields for later regression checks.",
+    )
+    capture_baseline.add_argument("--outputs", required=True)
+    capture_baseline.add_argument("--out", required=True)
+
+    check_baseline = sub.add_parser(
+        "check-report-baseline",
+        help="Compare current workflow reports against a captured baseline.",
+    )
+    check_baseline.add_argument("--outputs", required=True)
+    check_baseline.add_argument("--baseline", required=True)
+    check_baseline.add_argument("--absolute-tolerance", type=float, default=1e-6)
+    check_baseline.add_argument("--relative-tolerance", type=float, default=0.0)
+    check_baseline.add_argument("--json", action="store_true")
+
     sub.add_parser("ui", help="Launch the lightweight GIStoOHQ DEM workflow UI.")
 
     doctor = sub.add_parser("doctor", help="Check runtime, GIS, and legacy-script availability.")
@@ -971,6 +993,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"create-pour-points failed: {exc}")
             return 2
         print(f"Generated {result.count} pour point(s): {result.output_path}")
+        print(f"Pour-point generation report: {result.report_path}")
         return 0
     if args.command == "promote-pour-points":
         site_path = Path(args.site).expanduser()
@@ -1526,6 +1549,37 @@ def main(argv: list[str] | None = None) -> int:
         if result:
             print(result)
         return 0
+    if args.command == "capture-report-baseline":
+        try:
+            result = create_report_baseline(args.outputs, args.out)
+        except ReportBaselineError as exc:
+            print(f"capture-report-baseline failed: {exc}")
+            return 2
+        print(f"Wrote workflow report baseline: {result}")
+        return 0
+    if args.command == "check-report-baseline":
+        try:
+            result = compare_report_baseline(
+                args.outputs,
+                args.baseline,
+                absolute_tolerance=args.absolute_tolerance,
+                relative_tolerance=args.relative_tolerance,
+            )
+        except (ReportBaselineError, OSError, json.JSONDecodeError) as exc:
+            print(f"check-report-baseline failed: {exc}")
+            return 2
+        if args.json:
+            print(json.dumps({"passed": result.passed, "differences": result.differences}, indent=2))
+        elif result.passed:
+            print("Workflow reports match the baseline.")
+        else:
+            print(f"Workflow report regression: {len(result.differences)} difference(s)")
+            for difference in result.differences:
+                print(
+                    f"  {difference['path']}: expected={difference['expected']!r}, "
+                    f"actual={difference['actual']!r}"
+                )
+        return 0 if result.passed else 3
     if args.command == "ui":
         from .ui.launcher import main as launch_ui
 
