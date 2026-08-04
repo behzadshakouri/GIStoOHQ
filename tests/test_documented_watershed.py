@@ -121,3 +121,63 @@ def test_import_rejects_polygon_that_misses_outlet(tmp_path):
             source_title="Wrong inventory",
             source_organization="Example County",
         )
+
+
+def test_import_kmz_closed_line_as_derived_boundary(tmp_path):
+    if not GIS_AVAILABLE:
+        pytest.skip("GIS dependencies are not installed")
+    import geopandas as gpd
+    from zipfile import ZipFile
+
+    kmz = tmp_path / "estimated.kmz"
+    kml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><Placemark>
+<name>Estimated SC</name><LineString><coordinates>
+-77.1,38.9,0 -76.9,38.9,0 -76.9,39.1,0 -77.1,39.1,0 -77.1,38.9,0
+</coordinates></LineString></Placemark></Document></kml>
+"""
+    with ZipFile(kmz, "w") as archive:
+        archive.writestr("doc.kml", kml)
+
+    result = import_documented_watershed(
+        kmz,
+        tmp_path / "DocumentedWatershed_reference.gpkg",
+        outlet_lon=-77.0,
+        outlet_lat=39.0,
+        source_title="Estimated Sligo Creek review outline",
+        source_organization="Operator digitized review",
+    )
+
+    frame = gpd.read_file(result, layer=REFERENCE_LAYER)
+    assert frame.geometry.geom_type.tolist() == ["Polygon"]
+    assert frame["name"].tolist() == ["Estimated SC"]
+    assert frame["source_geometry"].tolist() == ["LineString"]
+    assert frame["derived_from_closed_line"].tolist() == [True]
+    metadata = json.loads(result.with_suffix(".json").read_text())
+    assert metadata["source_dataset"].endswith("estimated.kmz")
+
+
+def test_import_kmz_open_line_is_not_boundary(tmp_path):
+    if not GIS_AVAILABLE:
+        pytest.skip("GIS dependencies are not installed")
+    from zipfile import ZipFile
+
+    kmz = tmp_path / "open.kmz"
+    kml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><Placemark>
+<name>Open line</name><LineString><coordinates>
+-77.1,38.9,0 -76.9,38.9,0 -76.9,39.1,0
+</coordinates></LineString></Placemark></Document></kml>
+"""
+    with ZipFile(kmz, "w") as archive:
+        archive.writestr("doc.kml", kml)
+
+    with pytest.raises(DocumentedWatershedError, match="Closed KML/KMZ lines"):
+        import_documented_watershed(
+            kmz,
+            tmp_path / "reference.gpkg",
+            outlet_lon=-77.0,
+            outlet_lat=39.0,
+            source_title="Open outline",
+            source_organization="Operator digitized review",
+        )
