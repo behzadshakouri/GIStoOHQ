@@ -84,6 +84,40 @@ def test_full_run_cli_forwards_one_command_options(monkeypatch, tmp_path, capsys
     assert "Full pipeline complete" in capsys.readouterr().out
 
 
+def test_full_run_cli_uses_documented_watershed_config_defaults(monkeypatch, tmp_path):
+    calls = []
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    config = tmp_path / "dem_workflow.example.yaml"
+    config.write_text(
+        "documented_watershed:\n"
+        "  source: Estimated Sligo Creek.kmz\n"
+        "  title: Estimated Sligo Creek review outline\n"
+        "  organization: Operator digitized Google Earth review\n"
+        "  license: review artifact\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.cli.run_full_pipeline",
+        lambda *args, **kwargs: calls.append(kwargs) or FullRunResult(tmp_path / "final.ohq"),
+    )
+
+    status = main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "38.9571888036", "--lon", "-76.9744266065",
+        "--config", str(config),
+    ])
+
+    assert status == 0
+    assert calls[0]["documented_watershed_source"] == str(source)
+    assert calls[0]["documented_watershed_title"] == "Estimated Sligo Creek review outline"
+    assert (
+        calls[0]["documented_watershed_organization"]
+        == "Operator digitized Google Earth review"
+    )
+    assert calls[0]["documented_watershed_license"] == "review artifact"
+
+
 def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "ohqbuilder.cli.run_full_pipeline",

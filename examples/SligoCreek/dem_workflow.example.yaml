@@ -35,3 +35,10 @@ dem_acquisition:
   watershed_boundary: intermediate/watershed_boundary.geojson
   validation_summary: intermediate/dem_boundary_validation_summary.json
   allow_acquisition_area_watershed_fallback: true
+
+documented_watershed:
+  source: Estimated Sligo Creek.kmz
+  title: Estimated Sligo Creek review outline
+  organization: Operator digitized Google Earth review
+  url: examples/SligoCreek/Estimated Sligo Creek.kmz
+  license: project review artifact; verify before design use

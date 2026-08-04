@@ -127,6 +127,38 @@ def test_launcher_builds_documented_watershed_import_command(tmp_path):
     assert command.argv[command.argv.index("--source-organization") + 1] == "Example County"
 
 
+def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    state = LauncherState(
+        config_path=tmp_path / "config.yaml",
+        root=tmp_path,
+        site="Sligo",
+        lon=-76.9744266065,
+        lat=38.9571888036,
+        method="upstream_network",
+        acquisition_area=tmp_path / "intermediate" / "dem_acquisition_area.geojson",
+        reference_source=str(source),
+        reference_title="Estimated Sligo Creek review outline",
+        reference_organization="Operator digitized Google Earth review",
+        reference_license="review artifact",
+    )
+
+    command = command_for_step("full-run", state)
+    full_run = command.followup_argv[0]
+
+    assert "--documented-watershed-source" in full_run
+    assert full_run[full_run.index("--documented-watershed-source") + 1] == str(source)
+    assert (
+        full_run[full_run.index("--documented-watershed-title") + 1]
+        == "Estimated Sligo Creek review outline"
+    )
+    assert (
+        full_run[full_run.index("--documented-watershed-organization") + 1]
+        == "Operator digitized Google Earth review"
+    )
+
+
 def test_launcher_keeps_reference_fields_in_compact_dialog():
     source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
 
@@ -278,6 +310,9 @@ def test_bundled_sligo_config_uses_reviewed_routed_outlet():
 
     assert state.lon == pytest.approx(-76.9744266065)
     assert state.lat == pytest.approx(38.9571888036)
+    assert state.reference_source == str(
+        Path("examples/SligoCreek/Estimated Sligo Creek.kmz").resolve()
+    )
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
@@ -654,6 +689,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     assert command.argv == ("ohqbuild", "prepare-dem", "--config", str(tmp_path / "config.yaml"))
     full_run = command.followup_argv[0]
     assert full_run[:2] == ("ohqbuild", "full-run")
+    assert full_run[full_run.index("--config") + 1] == str(tmp_path / "config.yaml")
     assert full_run[full_run.index("--lon") + 1] == "-76.99"
     assert full_run[full_run.index("--lat") + 1] == "38.94"
     assert full_run[full_run.index("--target-crs") + 1] == "EPSG:26918"

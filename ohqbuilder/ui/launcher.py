@@ -442,6 +442,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             str(state.lat),
             "--project-name",
             state.site,
+            "--config",
+            str(state.config_path),
         ]
         if state.target_crs:
             argv.extend(("--target-crs", state.target_crs))
@@ -454,6 +456,22 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.append("--use-existing-outlet")
         if state.reuse_downloads:
             argv.append("--reuse-downloads")
+        if state.reference_source:
+            argv.extend(("--documented-watershed-source", state.reference_source))
+            if state.reference_layer:
+                argv.extend(("--documented-watershed-layer", state.reference_layer))
+            if state.reference_name_field:
+                argv.extend(("--documented-watershed-name-field", state.reference_name_field))
+            if state.reference_name:
+                argv.extend(("--documented-watershed-name", state.reference_name))
+            if state.reference_title:
+                argv.extend(("--documented-watershed-title", state.reference_title))
+            if state.reference_organization:
+                argv.extend(("--documented-watershed-organization", state.reference_organization))
+            if state.reference_url:
+                argv.extend(("--documented-watershed-url", state.reference_url))
+            if state.reference_license:
+                argv.extend(("--documented-watershed-license", state.reference_license))
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -646,6 +664,8 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         except ValueError:
             return base / path
 
+    reference_source_path = path_value(reference.get("source"))
+
     return LauncherState(
         config_path=Path(config_path).expanduser(),
         manifest_path=path_value(dem.get("tile_manifest")),
@@ -669,7 +689,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
         nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
         reuse_downloads=bool(config.get("reuse_downloads", False)),
-        reference_source=str(reference.get("source") or "") or None,
+        reference_source=str(reference_source_path) if reference_source_path is not None else None,
         reference_layer=str(reference.get("layer") or "") or None,
         reference_name_field=str(reference.get("name_field") or "") or None,
         reference_name=str(reference.get("name") or "") or None,
