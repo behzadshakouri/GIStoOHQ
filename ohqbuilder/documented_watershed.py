@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
+from xml.etree import ElementTree
+from zipfile import ZipFile
 import urllib.parse
 import urllib.request
 
@@ -35,28 +37,53 @@ def export_boundary_vertices(
 
     source_path = Path(source).expanduser().resolve()
     if not source_path.exists():
-        raise DocumentedWatershedError(f"Watershed dataset does not exist: {source_path}")
-    frame = gpd.read_file(source_path, layer=layer) if layer else gpd.read_file(source_path)
+        raise DocumentedWatershedError(
+            f"Watershed dataset does not exist: {source_path}"
+        )
+    frame = (
+        gpd.read_file(source_path, layer=layer) if layer else gpd.read_file(source_path)
+    )
     if frame.empty or frame.crs is None:
-        raise DocumentedWatershedError("The watershed dataset must be non-empty and define a CRS.")
+        raise DocumentedWatershedError(
+            "The watershed dataset must be non-empty and define a CRS."
+        )
     if target_crs:
         frame = frame.to_crs(target_crs)
     if not frame.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
-        raise DocumentedWatershedError("Every watershed feature must be a Polygon or MultiPolygon.")
+        raise DocumentedWatershedError(
+            "Every watershed feature must be a Polygon or MultiPolygon."
+        )
 
     target = Path(output_csv).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["feature_id", "part_id", "ring_id", "ring_type", "vertex_id", "x", "y"])
+        writer.writerow(
+            ["feature_id", "part_id", "ring_id", "ring_type", "vertex_id", "x", "y"]
+        )
         for feature_id, geometry in enumerate(frame.geometry):
-            polygons = list(geometry.geoms) if geometry.geom_type == "MultiPolygon" else [geometry]
+            polygons = (
+                list(geometry.geoms)
+                if geometry.geom_type == "MultiPolygon"
+                else [geometry]
+            )
             for part_id, polygon in enumerate(polygons):
-                rings = [("exterior", polygon.exterior), *[("interior", ring) for ring in polygon.interiors]]
+                rings = [
+                    ("exterior", polygon.exterior),
+                    *[("interior", ring) for ring in polygon.interiors],
+                ]
                 for ring_id, (ring_type, ring) in enumerate(rings):
                     for vertex_id, coordinate in enumerate(ring.coords):
                         writer.writerow(
-                            [feature_id, part_id, ring_id, ring_type, vertex_id, coordinate[0], coordinate[1]]
+                            [
+                                feature_id,
+                                part_id,
+                                ring_id,
+                                ring_type,
+                                vertex_id,
+                                coordinate[0],
+                                coordinate[1],
+                            ]
                         )
     return target
 
@@ -67,6 +94,103 @@ def _require_gis() -> None:
             "Importing a documented boundary requires GIS dependencies; "
             "install with `pip install -e .[gis]`."
         )
+
+
+def _coordinates(text: str) -> list[tuple[float, float]]:
+    coordinates: list[tuple[float, float]] = []
+    for chunk in text.split():
+        parts = chunk.split(",")
+        if len(parts) < 2:
+            continue
+        coordinates.append((float(parts[0]), float(parts[1])))
+    return coordinates
+
+
+def _polygonize_closed_lines(frame):
+    from shapely.geometry import MultiPolygon, Polygon
+
+    geometries = []
+    converted = 0
+    for geometry in frame.geometry:
+        if geometry.geom_type == "LineString" and geometry.is_ring:
+            geometry = Polygon(geometry)
+            converted += 1
+        elif geometry.geom_type == "MultiLineString":
+            polygons = [Polygon(line) for line in geometry.geoms if line.is_ring]
+            if len(polygons) == len(geometry.geoms) and polygons:
+                geometry = MultiPolygon(polygons) if len(polygons) > 1 else polygons[0]
+                converted += 1
+        geometries.append(geometry)
+    frame = frame.copy()
+    frame.geometry = geometries
+    if converted:
+        frame["derived_from_closed_line"] = [
+            bool(geometry.geom_type in {"Polygon", "MultiPolygon"})
+            for geometry in frame.geometry
+        ]
+    return frame
+
+
+def _read_kml_or_kmz_reference(path: Path):
+    import geopandas as gpd
+    from shapely.geometry import LineString, Point, Polygon
+
+    if path.suffix.lower() == ".kmz":
+        with ZipFile(path) as archive:
+            kml_names = [
+                name for name in archive.namelist() if name.lower().endswith(".kml")
+            ]
+            if not kml_names:
+                raise DocumentedWatershedError(f"KMZ contains no KML document: {path}")
+            content = archive.read(kml_names[0])
+    else:
+        content = path.read_bytes()
+
+    root = ElementTree.fromstring(content)
+    namespace = {"k": "http://www.opengis.net/kml/2.2"}
+    rows = []
+    for placemark in root.findall(".//k:Placemark", namespace):
+        name = placemark.findtext("k:name", default=path.stem, namespaces=namespace)
+        geometry = None
+        polygon_text = placemark.findtext(
+            ".//k:Polygon//k:outerBoundaryIs//k:coordinates", namespaces=namespace
+        )
+        line_text = placemark.findtext(
+            ".//k:LineString/k:coordinates", namespaces=namespace
+        )
+        point_text = placemark.findtext(
+            ".//k:Point/k:coordinates", namespaces=namespace
+        )
+        if polygon_text:
+            geometry = Polygon(_coordinates(polygon_text))
+        elif line_text:
+            geometry = LineString(_coordinates(line_text))
+        elif point_text:
+            coordinates = _coordinates(point_text)
+            geometry = Point(coordinates[0]) if coordinates else None
+        if geometry is not None:
+            rows.append(
+                {
+                    "name": name,
+                    "source_geometry": geometry.geom_type,
+                    "geometry": geometry,
+                }
+            )
+    if not rows:
+        raise DocumentedWatershedError(
+            f"KML/KMZ contains no supported placemark geometry: {path}"
+        )
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
+
+
+def _read_local_reference(path: Path, layer: str | None):
+    import geopandas as gpd
+
+    if path.suffix.lower() in {".kml", ".kmz"}:
+        frame = _read_kml_or_kmz_reference(path)
+    else:
+        frame = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
+    return _polygonize_closed_lines(frame)
 
 
 def _arcgis_geojson(
@@ -133,7 +257,12 @@ def import_documented_watershed(
     source_text = str(source)
     is_service = source_text.lower().startswith(("http://", "https://"))
     if is_service:
-        if not urllib.parse.urlparse(source_text).path.rstrip("/").split("/")[-1].isdigit():
+        if (
+            not urllib.parse.urlparse(source_text)
+            .path.rstrip("/")
+            .split("/")[-1]
+            .isdigit()
+        ):
             raise DocumentedWatershedError(
                 "ArcGIS source must be a layer URL ending in a numeric layer id, "
                 "not the service catalog/root URL."
@@ -161,17 +290,20 @@ def import_documented_watershed(
             )
         if not path.exists():
             raise DocumentedWatershedError(f"Reference dataset does not exist: {path}")
-        frame = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
+        frame = _read_local_reference(path, layer)
         resolved_source = str(path)
 
     if frame.empty or frame.crs is None:
         raise DocumentedWatershedError(
             "The documented watershed dataset must be non-empty and define a CRS."
         )
+    frame = _polygonize_closed_lines(frame)
     polygonal = frame.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
     frame = frame[polygonal & ~frame.geometry.is_empty].copy()
     if frame.empty:
-        raise DocumentedWatershedError("The documented watershed dataset has no polygons.")
+        raise DocumentedWatershedError(
+            "The documented watershed dataset has no polygons. Closed KML/KMZ lines are accepted as derived polygon outlines; open lines and points are not watershed boundaries."
+        )
 
     if name is not None:
         if not name_field or name_field not in frame.columns:
@@ -184,13 +316,11 @@ def import_documented_watershed(
             == name.strip().casefold()
         ].copy()
         if frame.empty:
-            raise DocumentedWatershedError(
-                f"No feature has {name_field}={name!r}."
-            )
+            raise DocumentedWatershedError(f"No feature has {name_field}={name!r}.")
 
-    outlet = gpd.GeoSeries(
-        [Point(outlet_lon, outlet_lat)], crs="EPSG:4326"
-    ).to_crs(frame.crs)[0]
+    outlet = gpd.GeoSeries([Point(outlet_lon, outlet_lat)], crs="EPSG:4326").to_crs(
+        frame.crs
+    )[0]
     containing = frame[frame.geometry.covers(outlet)].copy()
     if containing.empty:
         raise DocumentedWatershedError(
