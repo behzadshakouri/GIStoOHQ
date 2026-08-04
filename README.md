@@ -139,6 +139,11 @@ It also removes raster/grid-snap strips from later units so final polygons are
 disjoint by construction and writes `outputs/subwatershed_partition_report.json`
 with hierarchy, cumulative and incremental areas, every pairwise overlap, and
 root-basin gap/outside measurements.
+The legacy GIS orchestrators also write `outputs/phase1_execution_report.json`
+and `outputs/phase2_execution_report.json`. Each report is updated atomically
+after every child script and records timestamps, duration, success/failure,
+errors, and files created or changed by that step. These phase reports complement
+the detailed domain reports instead of replacing them.
 After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
 pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
 for acquisition and tracing instead of recreating it from stale longitude/latitude.

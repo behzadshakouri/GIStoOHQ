@@ -171,6 +171,17 @@ def test_phase_runners_suppress_only_qgsfield_deprecation_noise():
         assert 'message="QgsField constructor is deprecated"' in source
 
 
+def test_phase_runners_write_incremental_json_execution_reports():
+    for phase in ("phase1", "phase2"):
+        source = Path(f"scripts/legacy_gis/run_{phase}.py").read_text(encoding="utf-8")
+        assert f'"{phase}_execution_report.json"' in source
+        assert '"outputs_created_or_updated"' in source
+        assert '"duration_seconds"' in source
+        assert 'os.replace(temporary, PHASE_REPORT_PATH)' in source
+        assert 'PHASE_REPORT["status"] = "failed"' in source
+        assert 'PHASE_REPORT["status"] = "success"' in source
+
+
 def test_outlet_snap_warns_at_eighty_percent_of_search_radius():
     source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
         encoding="utf-8"

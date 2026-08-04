@@ -63,8 +63,11 @@
 import importlib.util
 import os
 import sys
+import json
+import time
 import traceback
 import warnings
+from datetime import datetime, timezone
 
 warnings.filterwarnings(
     "ignore",
@@ -141,6 +144,39 @@ else:
 
 os.makedirs(OUT_DIR, exist_ok=True)
 FAILED_STEP_MARKER = os.path.join(OUT_DIR, ".phase2_failed_step")
+PHASE_REPORT_PATH = os.path.join(OUT_DIR, "phase2_execution_report.json")
+PHASE_REPORT = {
+    "phase": "phase2",
+    "status": "running",
+    "started_at": datetime.now(timezone.utc).isoformat(),
+    "root": ROOT,
+    "site": SITE_PATH,
+    "output_directory": OUT_DIR,
+    "steps": [],
+}
+
+
+def output_snapshot():
+    snapshot = {}
+    for directory, _, names in os.walk(OUT_DIR):
+        for name in names:
+            path = os.path.join(directory, name)
+            if path == PHASE_REPORT_PATH or not os.path.isfile(path):
+                continue
+            stat = os.stat(path)
+            snapshot[path] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def write_phase_report():
+    temporary = PHASE_REPORT_PATH + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as report_file:
+        json.dump(PHASE_REPORT, report_file, indent=2)
+        report_file.write("\n")
+    os.replace(temporary, PHASE_REPORT_PATH)
+
+
+write_phase_report()
 
 POUR_POINTS_PATH = globals().get(
     "POUR_POINTS_PATH",
@@ -499,6 +535,31 @@ def run_step(index, script):
 
     namespace = child_namespace(path)
 
+    before = output_snapshot()
+    started = time.monotonic()
+    step_report = {
+        "index": index,
+        "script": script,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    PHASE_REPORT["steps"].append(step_report)
+    write_phase_report()
+
+    def finish_step(status, error=None):
+        after = output_snapshot()
+        step_report["status"] = status
+        step_report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        step_report["duration_seconds"] = round(time.monotonic() - started, 3)
+        step_report["outputs_created_or_updated"] = sorted(
+            os.path.relpath(path, SITE_PATH)
+            for path, metadata in after.items()
+            if before.get(path) != metadata
+        )
+        if error is not None:
+            step_report["error"] = error
+        write_phase_report()
+
     try:
         with open(path, "r", encoding="utf-8") as handle:
             source = handle.read()
@@ -510,6 +571,7 @@ def run_step(index, script):
 
     except SystemExit as exc:
         if exc.code in (None, 0):
+            finish_step("success")
             print("\nCompleted with SystemExit(0):", script)
             return
 
@@ -519,6 +581,7 @@ def run_step(index, script):
         print("ERROR      :", exc)
         print("!" * 78)
         remember_failed_step(script)
+        finish_step("failed", {"type": "SystemExit", "message": str(exc.code)})
         raise Exception(
             "Phase 2 stopped at step %d (%s)."
             % (index, script)
@@ -530,6 +593,7 @@ def run_step(index, script):
         print("ERROR TYPE : KeyboardInterrupt")
         print("!" * 78)
         remember_failed_step(script)
+        finish_step("interrupted", {"type": "KeyboardInterrupt", "message": ""})
         raise
 
     except Exception as exc:
@@ -540,6 +604,7 @@ def run_step(index, script):
         print("!" * 78)
         traceback.print_exc()
         remember_failed_step(script)
+        finish_step("failed", {"type": type(exc).__name__, "message": str(exc)})
 
         raise Exception(
             "Phase 2 stopped at step %d (%s). See the traceback above."
@@ -547,12 +612,23 @@ def run_step(index, script):
         ) from exc
 
     print("\nCompleted:", script)
+    finish_step("success")
 
 
 if not DRY_RUN:
-    for step_index, step_script in enumerate(PHASE2_STEPS, start=1):
-        run_step(step_index, step_script)
+    try:
+        for step_index, step_script in enumerate(PHASE2_STEPS, start=1):
+            run_step(step_index, step_script)
+    except BaseException:
+        PHASE_REPORT["status"] = "failed"
+        PHASE_REPORT["finished_at"] = datetime.now(timezone.utc).isoformat()
+        write_phase_report()
+        raise
     clear_failed_step_marker()
+    PHASE_REPORT["status"] = "success"
+    PHASE_REPORT["finished_at"] = datetime.now(timezone.utc).isoformat()
+    write_phase_report()
+    print("Phase 2 JSON report:", PHASE_REPORT_PATH)
 
 
 # =============================================================================
@@ -582,6 +658,10 @@ if not DRY_RUN:
     print(
         " ",
         os.path.join(OUT_DIR, "subwatershed_partition_report.json"),
+    )
+    print(
+        " ",
+        os.path.join(OUT_DIR, "phase2_execution_report.json"),
     )
     print("")
     print("Current final writers also create the configured HEC-HMS files,")

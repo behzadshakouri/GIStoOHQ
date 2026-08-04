@@ -317,19 +317,6 @@ for a in range(len(carved)):
         })
         if overlap_area > OVERLAP_TOL_M2:
             overlaps.append((ida, idb, overlap_area))
-if overlaps:
-    print("\n  *** RESIDUAL OVERLAPS (subtraction incomplete) ***")
-    for ida, idb, ar in overlaps:
-        print("      id %s overlaps id %s by %.4f km2" % (ida, idb, ar / 1e6))
-    raise Exception(
-        "Subwatershed partition validation failed: residual overlap exceeds "
-        "%.0f m2. Check pour-point snapping and cumulative watershed hierarchy."
-        % OVERLAP_TOL_M2
-    )
-else:
-    print("Self-check: no residual overlaps > %.0f m2. Subwatersheds are clean."
-          % OVERLAP_TOL_M2)
-
 # The union of incremental pieces must reproduce the downstream/root basin.
 # Allow dropped slivers, but never silently accept a material gap or area
 # outside the root cumulative watershed.
@@ -343,6 +330,11 @@ print("Partition coverage: gap=%.0f m2, outside=%.0f m2 (tolerance %.0f m2)"
       % (gap_area, outside_area, coverage_tol))
 
 report = {
+    "status": (
+        "pass"
+        if not overlaps and gap_area <= coverage_tol and outside_area <= coverage_tol
+        else "fail"
+    ),
     "pour_point_method": "Phase 1 junction points snapped to routed cells",
     "pour_point_path": pourpts_p,
     "pour_point_count": len(pp_geom),
@@ -365,11 +357,28 @@ report = {
         for s in sheds
     ],
     "pairwise_overlaps": pairwise_overlap,
+    "checks": {
+        "overlap_within_tolerance": not overlaps,
+        "gap_within_tolerance": gap_area <= coverage_tol,
+        "outside_within_tolerance": outside_area <= coverage_tol,
+    },
 }
 with open(REPORT_PATH, "w", encoding="utf-8") as report_file:
     json.dump(report, report_file, indent=2)
     report_file.write("\n")
 print("Partition QA report:", REPORT_PATH)
+if overlaps:
+    print("\n  *** RESIDUAL OVERLAPS (subtraction incomplete) ***")
+    for ida, idb, ar in overlaps:
+        print("      id %s overlaps id %s by %.4f km2" % (ida, idb, ar / 1e6))
+    raise Exception(
+        "Subwatershed partition validation failed: residual overlap exceeds "
+        "%.0f m2. Check pour-point snapping and cumulative watershed hierarchy."
+        % OVERLAP_TOL_M2
+    )
+else:
+    print("Self-check: no residual overlaps > %.0f m2. Subwatersheds are clean."
+          % OVERLAP_TOL_M2)
 if gap_area > coverage_tol or outside_area > coverage_tol:
     raise Exception(
         "Subwatershed partition does not reproduce root watershed %s: "
