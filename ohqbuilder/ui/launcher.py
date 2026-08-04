@@ -311,6 +311,7 @@ class LauncherState:
     reference_organization: str | None = None
     reference_url: str | None = None
     reference_license: str | None = None
+    reference_allow_outlet_outside: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -472,6 +473,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
                 argv.extend(("--documented-watershed-url", state.reference_url))
             if state.reference_license:
                 argv.extend(("--documented-watershed-license", state.reference_license))
+            if state.reference_allow_outlet_outside:
+                argv.append("--documented-watershed-allow-outlet-outside")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -697,6 +700,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         reference_organization=str(reference.get("organization") or "") or None,
         reference_url=str(reference.get("url") or "") or None,
         reference_license=str(reference.get("license") or "") or None,
+        reference_allow_outlet_outside=bool(reference.get("allow_outlet_outside", False)),
     )
 
 
@@ -787,6 +791,10 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         ),
         reference_url=form_state.reference_url or config_state.reference_url,
         reference_license=form_state.reference_license or config_state.reference_license,
+        reference_allow_outlet_outside=(
+            form_state.reference_allow_outlet_outside
+            or config_state.reference_allow_outlet_outside
+        ),
     )
 
 

@@ -123,6 +123,34 @@ def test_import_rejects_polygon_that_misses_outlet(tmp_path):
         )
 
 
+def test_import_can_record_review_outline_that_misses_outlet(tmp_path):
+    if not GIS_AVAILABLE:
+        pytest.skip("GIS dependencies are not installed")
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    source = tmp_path / "review.geojson"
+    gpd.GeoDataFrame(
+        {"name": ["Estimated outline"]},
+        geometry=[box(-77.1, 39.0, -76.9, 39.1)],
+        crs="EPSG:4326",
+    ).to_file(source, driver="GeoJSON")
+
+    result = import_documented_watershed(
+        source,
+        tmp_path / "reference.gpkg",
+        outlet_lon=-76.974,
+        outlet_lat=38.957,
+        source_title="Estimated review outline",
+        source_organization="Operator digitized review",
+        require_outlet_containment=False,
+    )
+
+    metadata = json.loads(result.with_suffix(".json").read_text())
+    assert metadata["outlet_containment_required"] is False
+    assert metadata["outlet_containment_satisfied"] is False
+
+
 def test_import_kmz_closed_line_as_derived_boundary(tmp_path):
     if not GIS_AVAILABLE:
         pytest.skip("GIS dependencies are not installed")

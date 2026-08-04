@@ -547,6 +547,7 @@ def run_full_pipeline(
     documented_watershed_organization: str | None = None,
     documented_watershed_url: str | None = None,
     documented_watershed_license: str | None = None,
+    documented_watershed_allow_outlet_outside: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
     """Download, materialize, prepare, validate, and build a project in one call."""
@@ -749,6 +750,7 @@ def run_full_pipeline(
                     source_organization=documented_watershed_organization,
                     source_url=documented_watershed_url,
                     license_text=documented_watershed_license,
+                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
                 )
             except DocumentedWatershedError as exc:
                 raise FullRunError(f"Documented watershed import failed: {exc}") from exc

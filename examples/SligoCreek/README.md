@@ -16,10 +16,11 @@ ohqbuild import-watershed-reference \
   --source-title "Estimated Sligo Creek review outline" \
   --source-organization "Operator digitized Google Earth review" \
   --source-url "examples/SligoCreek/Estimated Sligo Creek.kmz" \
-  --license "project review artifact; verify before design use"
+  --license "project review artifact; verify before design use" \
+  --allow-outlet-outside
 ```
 
-The importer converts a closed KML/KMZ `LineString` into a derived polygon and records that provenance. It still rejects open lines, points, images, and PDFs as watershed boundaries.
+The importer converts a closed KML/KMZ `LineString` into a derived polygon and records that provenance. This particular review outline does not contain the routed outlet point, so the example config sets `allow_outlet_outside: true`; the resulting metadata records that outlet containment was not satisfied instead of stopping the run. It still rejects open lines, points, images, and PDFs as watershed boundaries.
 
 The acquisition envelope follows the Sligo centerline and uses **1,000 m** upstream, downstream, and lateral margins. This is acquisition padding, not a request to model the downstream Northwest Branch or the whole Anacostia basin. After DEM delineation, inspect the boundary and retain only the drainage area upstream of the Sligo-side pour point. See `outlet_and_extent.geojson` for the machine-readable point and review notes.
 

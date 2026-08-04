@@ -241,6 +241,7 @@ def import_documented_watershed(
     source_organization: str,
     source_url: str | None = None,
     license_text: str | None = None,
+    require_outlet_containment: bool = True,
     timeout: float = 60.0,
 ) -> Path:
     """Import a cited polygon reference and retain its provenance.
@@ -322,12 +323,15 @@ def import_documented_watershed(
         frame.crs
     )[0]
     containing = frame[frame.geometry.covers(outlet)].copy()
-    if containing.empty:
+    outlet_containment_required = require_outlet_containment
+    outlet_containment_satisfied = not containing.empty
+    if containing.empty and outlet_containment_required:
         raise DocumentedWatershedError(
             "No selected documented watershed contains the modeled outlet. "
             "Verify the outlet, layer, CRS, and named feature."
         )
-    frame = containing
+    if not containing.empty:
+        frame = containing
     if len(frame) > 1:
         metric_crs = frame.to_crs("EPSG:4326").estimate_utm_crs()
         if metric_crs is None:
@@ -361,6 +365,8 @@ def import_documented_watershed(
         "service_where": where if is_service else None,
         "outlet_lon": outlet_lon,
         "outlet_lat": outlet_lat,
+        "outlet_containment_required": outlet_containment_required,
+        "outlet_containment_satisfied": outlet_containment_satisfied,
         "feature_count": len(frame),
         "retrieved_utc": retrieved,
         "license": license_text or "not specified",

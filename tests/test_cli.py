@@ -94,7 +94,8 @@ def test_full_run_cli_uses_documented_watershed_config_defaults(monkeypatch, tmp
         "  source: Estimated Sligo Creek.kmz\n"
         "  title: Estimated Sligo Creek review outline\n"
         "  organization: Operator digitized Google Earth review\n"
-        "  license: review artifact\n",
+        "  license: review artifact\n"
+        "  allow_outlet_outside: true\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -116,6 +117,7 @@ def test_full_run_cli_uses_documented_watershed_config_defaults(monkeypatch, tmp
         == "Operator digitized Google Earth review"
     )
     assert calls[0]["documented_watershed_license"] == "review artifact"
+    assert calls[0]["documented_watershed_allow_outlet_outside"] is True
 
 
 def test_full_run_cli_reports_failure(monkeypatch, tmp_path):

@@ -245,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     documented.add_argument("--source-organization", required=True)
     documented.add_argument("--source-url", default=None)
     documented.add_argument("--license", dest="license_text", default=None)
+    documented.add_argument(
+        "--allow-outlet-outside",
+        action="store_true",
+        help="Import the selected reference even when it does not contain the modeled outlet.",
+    )
     documented.add_argument("--out", default=None)
 
     vertices = sub.add_parser(
@@ -829,6 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--documented-watershed-organization", default=None)
     full.add_argument("--documented-watershed-url", default=None)
     full.add_argument("--documented-watershed-license", default=None)
+    full.add_argument("--documented-watershed-allow-outlet-outside", action="store_true")
 
     capture_baseline = sub.add_parser(
         "capture-report-baseline",
@@ -863,7 +869,7 @@ def _print_input_result(result) -> None:
         print("ERROR:", error)
 
 
-def _documented_watershed_defaults(config_path: str | None) -> dict[str, str | None]:
+def _documented_watershed_defaults(config_path: str | None) -> dict[str, str | bool | None]:
     if not config_path:
         return {}
     path = Path(config_path).expanduser().resolve()
@@ -895,6 +901,7 @@ def _documented_watershed_defaults(config_path: str | None) -> dict[str, str | N
         else None,
         "url": reference.get("url") if isinstance(reference.get("url"), str) else None,
         "license": reference.get("license") if isinstance(reference.get("license"), str) else None,
+        "allow_outlet_outside": bool(reference.get("allow_outlet_outside", False)),
     }
 
 
@@ -1098,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_organization=args.source_organization,
                 source_url=args.source_url,
                 license_text=args.license_text,
+                require_outlet_containment=not args.allow_outlet_outside,
             )
         except DocumentedWatershedError as exc:
             print(f"import-watershed-reference failed: {exc}")
@@ -1142,6 +1150,10 @@ def main(argv: list[str] | None = None) -> int:
             reference_defaults = _documented_watershed_defaults(args.config)
             documented_source = (
                 args.documented_watershed_source or reference_defaults.get("source")
+            )
+            allow_outlet_outside = (
+                args.documented_watershed_allow_outlet_outside
+                or bool(reference_defaults.get("allow_outlet_outside"))
             )
             result = run_full_pipeline(
                 args.root,
@@ -1188,6 +1200,7 @@ def main(argv: list[str] | None = None) -> int:
                 documented_watershed_license=(
                     args.documented_watershed_license or reference_defaults.get("license")
                 ),
+                documented_watershed_allow_outlet_outside=allow_outlet_outside,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:

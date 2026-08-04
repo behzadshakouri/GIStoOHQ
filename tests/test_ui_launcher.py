@@ -142,6 +142,7 @@ def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
         reference_title="Estimated Sligo Creek review outline",
         reference_organization="Operator digitized Google Earth review",
         reference_license="review artifact",
+        reference_allow_outlet_outside=True,
     )
 
     command = command_for_step("full-run", state)
@@ -157,6 +158,7 @@ def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
         full_run[full_run.index("--documented-watershed-organization") + 1]
         == "Operator digitized Google Earth review"
     )
+    assert "--documented-watershed-allow-outlet-outside" in full_run
 
 
 def test_launcher_keeps_reference_fields_in_compact_dialog():
@@ -313,6 +315,7 @@ def test_bundled_sligo_config_uses_reviewed_routed_outlet():
     assert state.reference_source == str(
         Path("examples/SligoCreek/Estimated Sligo Creek.kmz").resolve()
     )
+    assert state.reference_allow_outlet_outside is True
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
