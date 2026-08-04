@@ -131,18 +131,25 @@ Expected phase-1 outputs include:
 ```
 
 After phase 1, pour points are generated automatically from the Phase 1 junction
-network when `prepare-inputs --phase all` advances to Phase 2. To create or
-inspect them as a separate step, run:
+network **and the snapped watershed outlet** when `prepare-inputs --phase all`
+advances to Phase 2. Including the outlet ensures that the incremental partition
+retains the drainage area between the final interior junction and the modeled
+outlet. To create or inspect the points as a separate step, run:
 
 ```bash
 ohqbuild create-pour-points --root /path/to/NHA --site WS3_GIS/AZ12-100
 ```
 
-This writes deterministic `id` and `name` fields to:
+This writes deterministic `id`, `name`, and `role` fields to:
 
 ```text
 <ROOT>/<SITE>/outputs/pour_points.shp
 ```
+
+The `role` is `junction` for interior points and `watershed_outlet` for the final
+point. Phase 2 routes the outlet's incremental catchment into the terminal reach.
+It writes a separate `subwatershed_boundary.gpkg` clipping mask and preserves the
+original Phase 1 `watershed_boundary.gpkg` for boundary comparisons and provenance.
 
 ### Phase 2 — create subbasin parameters and topology
 
