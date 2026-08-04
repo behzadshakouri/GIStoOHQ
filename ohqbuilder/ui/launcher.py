@@ -922,7 +922,11 @@ class CommandRunner(threading.Thread):
                     stderr=subprocess.STDOUT,
                     text=True,
                     start_new_session=True,
-                    env={**os.environ, "OHQ_RUN_ID": self.run_id},
+                    env={
+                        **os.environ,
+                        "OHQ_RUN_ID": self.run_id,
+                        "PYTHONUNBUFFERED": "1",
+                    },
                 )
                 assert self.process.stdout is not None
                 for line in self.process.stdout:
@@ -1275,7 +1279,7 @@ class LauncherApp:
         self.reference_license_var = tk.StringVar(value="")
         self._build()
         if Path(self.config_var.get()).exists():
-            self.load_config()
+            self.load_config(announce=False)
         else:
             self._refresh_step_buttons()
         self._poll_messages()
@@ -1537,7 +1541,9 @@ class LauncherApp:
                 state = state_with_config_defaults(state, load_project_config(config_path))
             command = qgis_command(state)
             subprocess.Popen(command, start_new_session=True)
-            self.messages.put(f"Opened {len(command) - 2} generated layer(s) in QGIS.\n")
+            self.messages.put(
+                f"\nOpened {len(command) - 2} generated layer(s) in QGIS.\n\n"
+            )
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: Could not open QGIS: {exc}\n")
 
@@ -1712,12 +1718,13 @@ class LauncherApp:
             for step, button in self.step_buttons.items():
                 button.config(state="normal" if step in {"init-dem-config", "full-run"} else "disabled")
 
-    def load_config(self) -> None:
+    def load_config(self, announce: bool = True) -> None:
         try:
             config = load_project_config(self.config_var.get())
             self.apply_state(state_from_config(self.config_var.get(), config))
             self._refresh_step_buttons()
-            self.messages.put("Loaded config.\n")
+            if announce:
+                self.messages.put("Loaded config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
 

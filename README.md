@@ -148,6 +148,9 @@ at the stable path, while every run is also retained under
 `outputs/workflow_reports/` with a timestamp and run ID. The launcher prints the
 same run ID around each command and provides **Clear log**, making repeated runs
 distinguishable without discarding their JSON history.
+Launcher child processes use unbuffered Python output so GDAL/QGIS warnings stay
+closer to the step that emitted them, and startup config loading is silent to avoid
+the misleading duplicate `Loaded config.` messages seen in older transcripts.
 To turn a reviewed run into an explicit regression baseline and compare a later
 run against it, use:
 ```bash

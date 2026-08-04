@@ -52,7 +52,7 @@ def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path)
         LauncherState(config_path=tmp_path / "config.yaml", root=tmp_path, site="SITE_A")
     )
 
-    assert paths == (dem.resolve(), reaches.resolve())
+    assert set(paths) == {dem.resolve(), reaches.resolve()}
 
 
 def test_qgis_layer_paths_sorts_latest_to_oldest(tmp_path):
@@ -177,6 +177,33 @@ def test_launcher_exposes_clear_log_control():
     assert 'text="Clear log"' in source
     assert 'def clear_log(self)' in source
     assert 'self.log.delete("1.0", "end")' in source
+
+
+def test_launcher_silences_startup_reload_and_unbuffers_workflow_output():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert "self.load_config(announce=False)" in source
+    assert "def load_config(self, announce: bool = True)" in source
+    assert '"PYTHONUNBUFFERED": "1"' in source
+
+
+def test_command_runner_propagates_run_id_and_unbuffered_python():
+    messages = queue.Queue()
+    command = WorkflowCommand(
+        "Environment check",
+        (
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['OHQ_RUN_ID'], os.environ['PYTHONUNBUFFERED'])",
+        ),
+    )
+    runner = CommandRunner(command, messages)
+    runner.start()
+    runner.join(timeout=3)
+
+    assert not runner.is_alive()
+    output = "".join(item for item in list(messages.queue) if isinstance(item, str))
+    assert f"{runner.run_id} 1" in output
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):
