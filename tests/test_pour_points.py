@@ -1,4 +1,5 @@
 import builtins
+import json
 
 import pytest
 
@@ -41,3 +42,10 @@ def test_generate_pour_points_uses_outlet_when_watershed_has_no_junctions(tmp_pa
     assert result.count == 1
     assert generated["id"].tolist() == [1]
     assert generated["name"].tolist() == ["P1"]
+    assert result.report_path == tmp_path / "pour_points_generation_report.json"
+    report = json.loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["method"] == "fallback_watershed_outlet"
+    assert report["count"] == 1
+    assert report["points"][0]["id"] == 1
+    assert report["points"][0]["x"] == pytest.approx(328900)
+    assert report["points"][0]["y"] == pytest.approx(4317700)

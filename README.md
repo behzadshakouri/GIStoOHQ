@@ -123,12 +123,22 @@ same snap-limit and reviewed-point controls plus an explicit overwrite checkbox;
 the plugin never overwrites promoted points merely because its promotion button
 was clicked. Project keys `nhdplus_snap_distance_m` and
 `use_reviewed_pour_points` remain supported as command defaults.
+By default, Phase 2 creates one pour point at every confluence in the Phase 1
+generated reach network (`junctions.gpkg`); a single-reach basin falls back to the
+watershed outlet. It writes `outputs/pour_points_generation_report.json` with the
+method, source, CRS, IDs, and coordinates. The reviewed workflow is separate: its
+candidates come from NHDPlus tributary confluences and only `approved` or `required`
+features are promoted.
 The per-point `wshed_*_clean.gpkg` files are cumulative upstream drainage areas,
 so overlap among those intermediate layers is expected. Phase 2 builds an explicit
 containment tree and writes incremental model units to `outputs/subwatersheds.gpkg`.
 It now stops instead of continuing when cumulative basins are duplicate, cross
 without nesting, produce more than one drainage root, leave a material coverage
 gap, extend outside the root basin, or leave residual overlaps in the final layer.
+It also removes raster/grid-snap strips from later units so final polygons are
+disjoint by construction and writes `outputs/subwatershed_partition_report.json`
+with hierarchy, cumulative and incremental areas, every pairwise overlap, and
+root-basin gap/outside measurements.
 After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
 pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
 for acquisition and tracing instead of recreating it from stale longitude/latitude.
