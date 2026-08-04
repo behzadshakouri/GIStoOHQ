@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,10 @@ class PourPointGenerationError(RuntimeError):
 class PourPointResult:
     output_path: Path
     count: int
+
+    @property
+    def report_path(self) -> Path:
+        return self.output_path.with_name("pour_points_generation_report.json")
 
 
 def generate_pour_points(
@@ -52,6 +57,7 @@ def generate_pour_points(
     except Exception as exc:
         raise PourPointGenerationError(f"Could not read junctions from {source}: {exc}") from exc
 
+    source_method = "phase1_junctions"
     if junctions.empty:
         if fallback_outlet_path is None:
             raise PourPointGenerationError(
@@ -82,6 +88,7 @@ def generate_pour_points(
         junctions = gpd.GeoDataFrame(
             {"junction_id": [1]}, geometry=outlet.geometry.copy(), crs=outlet.crs
         )
+        source_method = "fallback_watershed_outlet"
     if "junction_id" not in junctions.columns:
         raise PourPointGenerationError(f"Missing required field 'junction_id' in {source}")
     if junctions.crs is None:
@@ -118,4 +125,26 @@ def generate_pour_points(
         raise PourPointGenerationError(
             f"Could not write pour points to {destination}: {exc}"
         ) from exc
+    report_path = destination.with_name("pour_points_generation_report.json")
+    report = {
+        "method": source_method,
+        "description": (
+            "Each Phase 1 reach-network junction becomes a Phase 2 pour point. "
+            "A watershed with no interior junctions uses its single outlet instead."
+        ),
+        "source_path": str(source),
+        "output_path": str(destination),
+        "crs": str(pour_points.crs),
+        "count": len(pour_points),
+        "points": [
+            {
+                "id": int(row.id),
+                "name": str(row.name),
+                "x": float(row.geometry.x),
+                "y": float(row.geometry.y),
+            }
+            for row in pour_points.itertuples()
+        ],
+    }
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return PourPointResult(destination, len(pour_points))

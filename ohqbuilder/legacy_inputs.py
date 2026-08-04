@@ -368,6 +368,10 @@ def run_legacy_input_workflow(
                         f"Automatic pour-point generation failed: {exc}"
                     ) from exc
                 print(f"Generated {result.count} pour point(s): {result.output_path}")
+                print(
+                    "Pour-point generation report: "
+                    f"{Path(result.output_path).with_name('pour_points_generation_report.json')}"
+                )
         _require_phase_algorithms(selected_phase)
         check_required_inputs(root_path, site, selected_phase, workflow_options)
         _run_phase(

@@ -72,8 +72,11 @@
 
 import os
 import sys
+import json
+import time
 import traceback
 import warnings
+from datetime import datetime, timezone
 
 warnings.filterwarnings(
     "ignore",
@@ -356,6 +359,40 @@ SHARED_CHILD_VARIABLES = {
 
 SHARED_CHILD_VARIABLES.update(CHILD_OPTIONS)
 
+PHASE_REPORT_PATH = os.path.join(OUT_DIR, "phase1_execution_report.json")
+PHASE_REPORT = {
+    "phase": "phase1",
+    "status": "running",
+    "started_at": datetime.now(timezone.utc).isoformat(),
+    "root": ROOT,
+    "site": SITE_PATH,
+    "output_directory": OUT_DIR,
+    "steps": [],
+}
+
+
+def output_snapshot():
+    snapshot = {}
+    for directory, _, names in os.walk(OUT_DIR):
+        for name in names:
+            path = os.path.join(directory, name)
+            if path == PHASE_REPORT_PATH or not os.path.isfile(path):
+                continue
+            stat = os.stat(path)
+            snapshot[path] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def write_phase_report():
+    temporary = PHASE_REPORT_PATH + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as report_file:
+        json.dump(PHASE_REPORT, report_file, indent=2)
+        report_file.write("\n")
+    os.replace(temporary, PHASE_REPORT_PATH)
+
+
+write_phase_report()
+
 
 # =============================================================================
 # STEP RUNNER
@@ -387,6 +424,31 @@ def run_step(step_number, script_name):
 
     child_namespace.update(SHARED_CHILD_VARIABLES)
 
+    before = output_snapshot()
+    started = time.monotonic()
+    step_report = {
+        "index": step_number,
+        "script": script_name,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    PHASE_REPORT["steps"].append(step_report)
+    write_phase_report()
+
+    def finish_step(status, error=None):
+        after = output_snapshot()
+        step_report["status"] = status
+        step_report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        step_report["duration_seconds"] = round(time.monotonic() - started, 3)
+        step_report["outputs_created_or_updated"] = sorted(
+            os.path.relpath(path, SITE_PATH)
+            for path, metadata in after.items()
+            if before.get(path) != metadata
+        )
+        if error is not None:
+            step_report["error"] = error
+        write_phase_report()
+
     try:
         with open(script_path, "r", encoding="utf-8") as script_file:
             source = script_file.read()
@@ -398,6 +460,7 @@ def run_step(step_number, script_name):
         exit_code = exc.code
 
         if exit_code in (None, 0):
+            finish_step("success")
             print("\nCompleted with SystemExit(0):", script_name)
             return
 
@@ -408,12 +471,14 @@ def run_step(step_number, script_name):
 
         traceback.print_exc()
 
+        finish_step("failed", {"type": "SystemExit", "message": str(exit_code)})
         raise Exception(
             "Phase 1 stopped at step %d (%s) with exit code %s."
             % (step_number, script_name, exit_code)
         ) from exc
 
     except Exception as exc:
+        finish_step("failed", {"type": type(exc).__name__, "message": str(exc)})
         print("\n" + "!" * 78)
         print("STEP FAILED:", script_name)
         print("ERROR TYPE :", type(exc).__name__)
@@ -428,6 +493,7 @@ def run_step(step_number, script_name):
         ) from exc
 
     print("\nCompleted:", script_name)
+    finish_step("success")
 
 
 # =============================================================================
@@ -435,7 +501,18 @@ def run_step(step_number, script_name):
 # =============================================================================
 
 for index, script_name in enumerate(PHASE1_STEPS, start=1):
-    run_step(index, script_name)
+    try:
+        run_step(index, script_name)
+    except Exception:
+        PHASE_REPORT["status"] = "failed"
+        PHASE_REPORT["finished_at"] = datetime.now(timezone.utc).isoformat()
+        write_phase_report()
+        raise
+
+PHASE_REPORT["status"] = "success"
+PHASE_REPORT["finished_at"] = datetime.now(timezone.utc).isoformat()
+write_phase_report()
+print("Phase 1 JSON report:", PHASE_REPORT_PATH)
 
 
 # =============================================================================
@@ -452,6 +529,7 @@ print("\nExpected products:")
 print(" ", os.path.join(OUT_DIR, "watershed_boundary.gpkg"))
 print(" ", os.path.join(OUT_DIR, "reaches.gpkg"))
 print(" ", os.path.join(OUT_DIR, "junctions.gpkg"))
+print(" ", os.path.join(OUT_DIR, "phase1_execution_report.json"))
 
 print("\nExpected watershed-clipped DEM:")
 print(" ", os.path.join(OUT_DIR, "clipped", "cliped_utm_wsclip.tif"))
