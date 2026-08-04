@@ -310,6 +310,9 @@ def test_bundled_sligo_config_uses_reviewed_routed_outlet():
 
     assert state.lon == pytest.approx(-76.9744266065)
     assert state.lat == pytest.approx(38.9571888036)
+    assert state.reference_source == str(
+        Path("examples/SligoCreek/Estimated Sligo Creek.kmz").resolve()
+    )
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):
@@ -686,6 +689,7 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     assert command.argv == ("ohqbuild", "prepare-dem", "--config", str(tmp_path / "config.yaml"))
     full_run = command.followup_argv[0]
     assert full_run[:2] == ("ohqbuild", "full-run")
+    assert full_run[full_run.index("--config") + 1] == str(tmp_path / "config.yaml")
     assert full_run[full_run.index("--lon") + 1] == "-76.99"
     assert full_run[full_run.index("--lat") + 1] == "38.94"
     assert full_run[full_run.index("--target-crs") + 1] == "EPSG:26918"
