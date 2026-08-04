@@ -141,11 +141,14 @@ def test_subwatersheds_use_a_strict_incremental_partition():
     assert 's["parent"] = None' in source
     assert 'parent["children"].append(child)' in source
     assert 'to_subtract = [child["geom"] for child in s["children"]]' in source
+    assert 'sub.difference(QgsGeometry.unaryUnion(assigned_parts))' in source
     assert 'QgsField("parent_id", QVariant.String)' in source
     assert "Subwatershed partition contains empty unit(s)" in source
     assert "Subwatershed partition validation failed" in source
     assert 'gap = root_shed["geom"].difference(carved_union)' in source
     assert 'outside = carved_union.difference(root_shed["geom"])' in source
+    assert '"pairwise_overlaps": pairwise_overlap' in source
+    assert 'subwatershed_partition_report.json' in source
 
 
 def test_subwatershed_hierarchy_rejects_duplicates_and_crossing_basins():

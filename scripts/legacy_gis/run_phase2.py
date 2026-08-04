@@ -579,6 +579,10 @@ if not DRY_RUN:
         " ",
         os.path.join(OUT_DIR, "topology.gpkg"),
     )
+    print(
+        " ",
+        os.path.join(OUT_DIR, "subwatershed_partition_report.json"),
+    )
     print("")
     print("Current final writers also create the configured HEC-HMS files,")
     print("including the .basin, .met, and .hms project products.")
