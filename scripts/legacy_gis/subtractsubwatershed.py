@@ -19,6 +19,7 @@
 
 import os
 import glob
+import json
 import processing
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsField, QgsFields,
@@ -59,6 +60,7 @@ OUT_DIR   = os.path.join(site_path, "outputs")
 os.makedirs(OUT_DIR, exist_ok=True)
 WSHED_DIR = OUT_DIR
 OUT_PATH  = os.path.join(OUT_DIR, "subwatersheds.gpkg")
+REPORT_PATH = os.path.join(OUT_DIR, "subwatershed_partition_report.json")
 DEM_PATH  = os.path.join(site_path, DEM_REL)
 
 print("Site     :", site_path)
@@ -201,6 +203,7 @@ def drop_slivers(geom, min_area):
     return out
 
 print("\nCarving non-overlapping subwatersheds...")
+assigned_parts = []
 for i, s in enumerate(sheds):
     larger_geom = s["geom"]
     to_subtract = [child["geom"] for child in s["children"]]
@@ -212,12 +215,19 @@ for i, s in enumerate(sheds):
         sub = larger_geom
         n = 0
     sub = sub.makeValid()
+    # Raster polygonization and per-basin grid snapping can leave narrow shared
+    # strips even when the containment tree is correct. Give previously carved
+    # upstream units priority and remove their union from every subsequent unit.
+    # This makes disjointness a construction invariant, not merely a post-check.
+    if assigned_parts and not sub.isEmpty():
+        sub = sub.difference(QgsGeometry.unaryUnion(assigned_parts)).makeValid()
     sub = drop_slivers(sub, MIN_AREA_M2)
     s["sub"] = sub
     if sub.isEmpty():
         print("  id='%s': EMPTY after subtraction+cleanup -- points likely too "
               "close; consider removing this point" % s["id"])
     else:
+        assigned_parts.append(sub)
         print("  id='%s': subtracted %d immediate child(ren), area now %.4f km2"
               % (s["id"], n, sub.area() / 1e6))
 
@@ -294,13 +304,69 @@ print("Total subwatershed area: %.4f km2" % (total / 1e6))
 # --- strict partition QA ---------------------------------------------------
 carved = [(s["id"], s["sub"]) for s in sheds if not s["sub"].isEmpty()]
 overlaps = []
+pairwise_overlap = []
 for a in range(len(carved)):
     ida, ga = carved[a]
     for b in range(a + 1, len(carved)):
         idb, gb = carved[b]
         inter = ga.intersection(gb)
-        if not inter.isEmpty() and inter.area() > OVERLAP_TOL_M2:
-            overlaps.append((ida, idb, inter.area()))
+        overlap_area = 0.0 if inter.isEmpty() else inter.area()
+        pairwise_overlap.append({
+            "left_id": ida, "right_id": idb,
+            "overlap_m2": round(overlap_area, 3),
+        })
+        if overlap_area > OVERLAP_TOL_M2:
+            overlaps.append((ida, idb, overlap_area))
+# The union of incremental pieces must reproduce the downstream/root basin.
+# Allow dropped slivers, but never silently accept a material gap or area
+# outside the root cumulative watershed.
+carved_union = QgsGeometry.unaryUnion([g for _, g in carved])
+gap = root_shed["geom"].difference(carved_union)
+outside = carved_union.difference(root_shed["geom"])
+gap_area = 0.0 if gap.isEmpty() else gap.area()
+outside_area = 0.0 if outside.isEmpty() else outside.area()
+coverage_tol = max(5000.0, MIN_AREA_M2 * len(sheds))
+print("Partition coverage: gap=%.0f m2, outside=%.0f m2 (tolerance %.0f m2)"
+      % (gap_area, outside_area, coverage_tol))
+
+report = {
+    "status": (
+        "pass"
+        if not overlaps and gap_area <= coverage_tol and outside_area <= coverage_tol
+        else "fail"
+    ),
+    "pour_point_method": "Phase 1 junction points snapped to routed cells",
+    "pour_point_path": pourpts_p,
+    "pour_point_count": len(pp_geom),
+    "root_id": root_shed["id"],
+    "overlap_tolerance_m2": OVERLAP_TOL_M2,
+    "maximum_pairwise_overlap_m2": max(
+        [item["overlap_m2"] for item in pairwise_overlap], default=0.0
+    ),
+    "gap_m2": round(gap_area, 3),
+    "outside_m2": round(outside_area, 3),
+    "coverage_tolerance_m2": coverage_tol,
+    "subwatersheds": [
+        {
+            "id": s["id"],
+            "parent_id": s["parent"]["id"] if s["parent"] is not None else None,
+            "child_ids": [child["id"] for child in s["children"]],
+            "cumulative_area_km2": round(s["area"] / 1e6, 6),
+            "incremental_area_km2": round(s["sub"].area() / 1e6, 6),
+        }
+        for s in sheds
+    ],
+    "pairwise_overlaps": pairwise_overlap,
+    "checks": {
+        "overlap_within_tolerance": not overlaps,
+        "gap_within_tolerance": gap_area <= coverage_tol,
+        "outside_within_tolerance": outside_area <= coverage_tol,
+    },
+}
+with open(REPORT_PATH, "w", encoding="utf-8") as report_file:
+    json.dump(report, report_file, indent=2)
+    report_file.write("\n")
+print("Partition QA report:", REPORT_PATH)
 if overlaps:
     print("\n  *** RESIDUAL OVERLAPS (subtraction incomplete) ***")
     for ida, idb, ar in overlaps:
@@ -313,18 +379,6 @@ if overlaps:
 else:
     print("Self-check: no residual overlaps > %.0f m2. Subwatersheds are clean."
           % OVERLAP_TOL_M2)
-
-# The union of incremental pieces must reproduce the downstream/root basin.
-# Allow dropped slivers, but never silently accept a material gap or area
-# outside the root cumulative watershed.
-carved_union = QgsGeometry.unaryUnion([g for _, g in carved])
-gap = root_shed["geom"].difference(carved_union)
-outside = carved_union.difference(root_shed["geom"])
-gap_area = 0.0 if gap.isEmpty() else gap.area()
-outside_area = 0.0 if outside.isEmpty() else outside.area()
-coverage_tol = max(5000.0, MIN_AREA_M2 * len(sheds))
-print("Partition coverage: gap=%.0f m2, outside=%.0f m2 (tolerance %.0f m2)"
-      % (gap_area, outside_area, coverage_tol))
 if gap_area > coverage_tol or outside_area > coverage_tol:
     raise Exception(
         "Subwatershed partition does not reproduce root watershed %s: "
