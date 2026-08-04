@@ -5,9 +5,16 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 METERS_PER_DEGREE = 111_320.0
-AcquisitionMode = Literal["outlet_buffer", "oriented_outlet_buffer", "upstream_network"]
+AcquisitionMode = Literal[
+    "outlet_buffer",
+    "oriented_outlet_buffer",
+    "upstream_network",
+    "documented_watershed",
+]
 
 
 class DemAcquisitionError(RuntimeError):
@@ -174,6 +181,104 @@ def _write_geojson_polygon(path: Path, coords: list[tuple[float, float]], proper
         ],
     }
     path.write_text(json.dumps(feature, indent=2), encoding="utf-8")
+
+
+def _coordinates_from_kml_text(text: str) -> list[tuple[float, float]]:
+    coordinates: list[tuple[float, float]] = []
+    for chunk in text.split():
+        parts = chunk.split(",")
+        if len(parts) < 2:
+            continue
+        try:
+            coordinates.append((float(parts[0]), float(parts[1])))
+        except ValueError as exc:
+            raise DemAcquisitionError(f"Invalid KML coordinate: {chunk}") from exc
+    return coordinates
+
+
+def _read_kml_or_kmz_boundary(path: Path) -> list[tuple[float, float]]:
+    if path.suffix.lower() == ".kmz":
+        with ZipFile(path) as archive:
+            kml_names = [
+                name for name in archive.namelist() if name.lower().endswith(".kml")
+            ]
+            if not kml_names:
+                raise DemAcquisitionError(f"KMZ contains no KML document: {path}")
+            content = archive.read(kml_names[0])
+    else:
+        content = path.read_bytes()
+
+    root = ElementTree.fromstring(content)
+    namespace = {"k": "http://www.opengis.net/kml/2.2"}
+    for placemark in root.findall(".//k:Placemark", namespace):
+        polygon_text = placemark.findtext(
+            ".//k:Polygon//k:outerBoundaryIs//k:coordinates", namespaces=namespace
+        )
+        line_text = placemark.findtext(
+            ".//k:LineString/k:coordinates", namespaces=namespace
+        )
+        text = polygon_text or line_text
+        if not text:
+            continue
+        coords = _coordinates_from_kml_text(text)
+        if len(coords) < 4:
+            continue
+        if coords[0] != coords[-1]:
+            raise DemAcquisitionError(
+                "Documented watershed KML/KMZ lines must be closed to create an acquisition area."
+            )
+        return coords
+    raise DemAcquisitionError(
+        f"KML/KMZ contains no closed Polygon or LineString boundary: {path}"
+    )
+
+
+def create_documented_watershed_area(
+    source: str | Path,
+    output_path: str | Path,
+    *,
+    uncertainty_margin_km: float = 2.0,
+) -> DemAcquisitionArea:
+    """Create a DEM acquisition polygon from a documented KML/KMZ watershed outline.
+
+    The output is an axis-aligned EPSG:4326 envelope around the documented outline,
+    expanded by ``uncertainty_margin_km`` on every side.  This intentionally keeps
+    the estimated boundary as the source of truth while adding room for operator
+    digitizing error, outlet uncertainty, and DEM-routing edge effects.
+    """
+
+    if uncertainty_margin_km < 0:
+        raise DemAcquisitionError("uncertainty_margin_km cannot be negative.")
+    source_path = Path(source).expanduser().resolve()
+    output = Path(output_path).expanduser().resolve()
+    if source_path.suffix.lower() not in {".kml", ".kmz"}:
+        raise DemAcquisitionError("documented_watershed acquisition requires a KML/KMZ source.")
+    coords = _read_kml_or_kmz_boundary(source_path)
+    minx, miny, maxx, maxy = _bounds_from_points(coords)
+    center_lat = (miny + maxy) / 2.0
+    lon_deg, lat_deg = _degrees_per_meter(center_lat)
+    delta_lon = uncertainty_margin_km * 1000.0 * lon_deg
+    delta_lat = uncertainty_margin_km * 1000.0 * lat_deg
+    minx -= delta_lon
+    maxx += delta_lon
+    miny -= delta_lat
+    maxy += delta_lat
+    envelope = [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy), (minx, miny)]
+    width_km = (maxx - minx) / lon_deg / 1000.0
+    height_km = (maxy - miny) / lat_deg / 1000.0
+    area_km2 = width_km * height_km
+    _write_geojson_polygon(
+        output,
+        envelope,
+        {
+            "mode": "documented_watershed",
+            "source_area": str(source_path),
+            "source_boundary_point_count": len(coords),
+            "uncertainty_margin_km": uncertainty_margin_km,
+            "area_km2": area_km2,
+        },
+    )
+    return DemAcquisitionArea("documented_watershed", output, (minx, miny, maxx, maxy), area_km2)
 
 
 def create_outlet_buffer_area(

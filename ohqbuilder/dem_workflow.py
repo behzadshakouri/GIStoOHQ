@@ -11,6 +11,7 @@ from .dem_acquisition import (
     DemAcquisitionArea,
     DemTileManifest,
     build_dem_tile_manifest,
+    create_documented_watershed_area,
     create_outlet_buffer_area,
     create_upstream_network_area,
     snap_outlet_to_flowlines,
@@ -93,6 +94,7 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     config = _read_config(path)
     outlet = _section(config, "outlet")
     dem_acquisition = _section(config, "dem_acquisition")
+    documented_watershed = _section(config, "documented_watershed")
 
     method = str(
         dem_acquisition.get("method") or dem_acquisition.get("acquisition_mode") or ""
@@ -184,9 +186,22 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
             raise DemWorkflowError(
                 f"Configured acquisition polygon does not exist: {acquisition_path}"
             )
+    elif method == "documented_watershed":
+        source_value = dem_acquisition.get("source") or documented_watershed.get("source")
+        if not source_value:
+            raise DemWorkflowError(
+                "dem_acquisition.source or documented_watershed.source is required for documented_watershed."
+            )
+        acquisition_result = create_documented_watershed_area(
+            _resolve(source_value, base),
+            acquisition_path,
+            uncertainty_margin_km=float(
+                dem_acquisition.get("uncertainty_margin_km", 2.0)
+            ),
+        )
     else:
         raise DemWorkflowError(
-            "dem_acquisition.method must be outlet_buffer, oriented_outlet_buffer, upstream_network, or polygon."
+            "dem_acquisition.method must be outlet_buffer, oriented_outlet_buffer, upstream_network, polygon, or documented_watershed."
         )
 
     tile_manifest_result: DemTileManifest | None = None

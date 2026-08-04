@@ -282,6 +282,8 @@ def _command_for_workflow(
             str(float(outlet["latitude"])),
             "--project-name",
             _site_name(config),
+            "--config",
+            str(config_path),
         ]
         target_crs = _target_crs(config)
         if target_crs:
@@ -308,10 +310,38 @@ def _command_for_workflow(
             argv.append("--use-existing-outlet")
         if reuse_downloads:
             argv.append("--reuse-downloads")
+        reference = _as_mapping(
+            config.get("documented_watershed"), "documented_watershed"
+        )
+        reference_source = reference.get("source")
+        if reference_source:
+            source = str(reference_source)
+            if not source.lower().startswith(("http://", "https://")):
+                source = str(_relative_to_config(config_path, source))
+            argv.extend(["--documented-watershed-source", source])
+            for flag, key in (
+                ("--documented-watershed-layer", "layer"),
+                ("--documented-watershed-name-field", "name_field"),
+                ("--documented-watershed-name", "name"),
+                ("--documented-watershed-title", "title"),
+                ("--documented-watershed-organization", "organization"),
+                ("--documented-watershed-url", "url"),
+                ("--documented-watershed-license", "license"),
+            ):
+                if reference.get(key):
+                    argv.extend([flag, str(reference[key])])
+            if reference.get("allow_outlet_outside"):
+                argv.append("--documented-watershed-allow-outlet-outside")
         acquisition = _relative_to_config(config_path, dem.get("acquisition_area"))
         if acquisition is not None and (
             acquisition.is_file()
-            or dem.get("method") in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
+            or dem.get("method")
+            in {
+                "outlet_buffer",
+                "oriented_outlet_buffer",
+                "upstream_network",
+                "documented_watershed",
+            }
         ):
             argv.extend(["--acquisition-area", str(acquisition)])
         return argv
