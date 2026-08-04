@@ -150,6 +150,8 @@ The `role` is `junction` for interior points and `watershed_outlet` for the fina
 point. Phase 2 routes the outlet's incremental catchment into the terminal reach.
 It writes a separate `subwatershed_boundary.gpkg` clipping mask and preserves the
 original Phase 1 `watershed_boundary.gpkg` for boundary comparisons and provenance.
+The extracted `reaches.gpkg` and `junctions.gpkg` likewise remain complete QA
+layers; OHQ and HMS writers serialize only elements retained by `topology.gpkg`.
 
 ### Phase 2 — create subbasin parameters and topology
 

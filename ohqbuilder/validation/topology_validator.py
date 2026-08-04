@@ -12,6 +12,9 @@ class TopologyValidator:
                 problems.append(f"Dangling downstream target: {link.name} -> {link.ds_name}")
         graph = {link.name: link.ds_name for link in watershed.topology if link.name in names}
         graph[watershed.outlet.name] = None
+        for name in names - {watershed.outlet.name}:
+            if name not in graph:
+                problems.append(f"Model element has no topology entry: {name}")
         for start in list(graph):
             seen = []
             cur = start
