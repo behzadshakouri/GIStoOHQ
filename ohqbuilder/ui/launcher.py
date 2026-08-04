@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
+import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -890,6 +891,7 @@ class CommandRunner(threading.Thread):
         self.messages = messages
         self.process: subprocess.Popen[str] | None = None
         self.cancelled = threading.Event()
+        self.run_id = uuid.uuid4().hex[:12]
 
     def cancel(self) -> None:
         """Stop the active command and its child process group."""
@@ -905,6 +907,9 @@ class CommandRunner(threading.Thread):
     def run(self) -> None:
         status = 0
         commands = (self.command.argv, *self.command.followup_argv)
+        self.messages.put(
+            f"\n=== RUN {self.run_id}: {self.command.label} STARTED ===\n"
+        )
         try:
             for argv in commands:
                 if self.cancelled.is_set():
@@ -917,6 +922,7 @@ class CommandRunner(threading.Thread):
                     stderr=subprocess.STDOUT,
                     text=True,
                     start_new_session=True,
+                    env={**os.environ, "OHQ_RUN_ID": self.run_id},
                 )
                 assert self.process.stdout is not None
                 for line in self.process.stdout:
@@ -930,9 +936,13 @@ class CommandRunner(threading.Thread):
             status = 2
             self.messages.put(f"Could not start workflow command: {exc}\n")
         if self.cancelled.is_set():
-            self.messages.put(f"\n[{self.command.label} cancelled by user]\n")
+            self.messages.put(
+                f"\n[RUN {self.run_id}: {self.command.label} cancelled by user]\n"
+            )
         else:
-            self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
+            self.messages.put(
+                f"\n[RUN {self.run_id}: {self.command.label} exited with {status}]\n"
+            )
         if self.command.label == "Validate DEM" and status == 3:
             self.messages.put(
                 "DEM validation requested a larger acquisition area. This is an actionable "
@@ -1438,6 +1448,9 @@ class LauncherApp:
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
         self.log = tk.Text(frame, height=14, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
+        tk.Button(frame, text="Clear log", command=self.clear_log).grid(
+            row=len(rows) + 5, column=0, columnspan=2, sticky="e", pady=(4, 0)
+        )
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 4, weight=1)
 
@@ -1495,6 +1508,10 @@ class LauncherApp:
         tk.Button(buttons, text="Save", command=done).pack(side="right", padx=3)
         dialog.columnconfigure(1, weight=1)
         dialog.grab_set()
+
+    def clear_log(self) -> None:
+        """Clear completed console output without affecting the active process."""
+        self.log.delete("1.0", "end")
 
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")

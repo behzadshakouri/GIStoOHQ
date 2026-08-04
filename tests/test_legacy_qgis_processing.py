@@ -177,7 +177,10 @@ def test_phase_runners_write_incremental_json_execution_reports():
         assert f'"{phase}_execution_report.json"' in source
         assert '"outputs_created_or_updated"' in source
         assert '"duration_seconds"' in source
-        assert 'os.replace(temporary, PHASE_REPORT_PATH)' in source
+        assert 'os.replace(temporary, destination)' in source
+        assert '"run_id": PHASE_RUN_ID' in source
+        assert 'PHASE_HISTORY_REPORT_PATH' in source
+        assert '"workflow_reports"' in source
         assert 'PHASE_REPORT["status"] = "failed"' in source
         assert 'PHASE_REPORT["status"] = "success"' in source
 

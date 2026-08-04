@@ -163,7 +163,20 @@ def test_command_runner_stop_terminates_active_process():
     queued = list(messages.queue)
     finished = [item for item in queued if isinstance(item, RunnerFinished)]
     assert finished[-1].status == 130
-    assert any("[Slow command cancelled by user]" in item for item in queued if isinstance(item, str))
+    assert any("Slow command cancelled by user" in item for item in queued if isinstance(item, str))
+    assert any(
+        f"RUN {runner.run_id}: Slow command STARTED" in item
+        for item in queued
+        if isinstance(item, str)
+    )
+
+
+def test_launcher_exposes_clear_log_control():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+
+    assert 'text="Clear log"' in source
+    assert 'def clear_log(self)' in source
+    assert 'self.log.delete("1.0", "end")' in source
 
 
 def test_osm_tile_cache_path_is_zoom_x_y_png(tmp_path):

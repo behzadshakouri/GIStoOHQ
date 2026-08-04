@@ -143,7 +143,11 @@ The legacy GIS orchestrators also write `outputs/phase1_execution_report.json`
 and `outputs/phase2_execution_report.json`. Each report is updated atomically
 after every child script and records timestamps, duration, success/failure,
 errors, and files created or changed by that step. These phase reports complement
-the detailed domain reports instead of replacing them.
+the detailed domain reports instead of replacing them. The latest report remains
+at the stable path, while every run is also retained under
+`outputs/workflow_reports/` with a timestamp and run ID. The launcher prints the
+same run ID around each command and provides **Clear log**, making repeated runs
+distinguishable without discarding their JSON history.
 After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
 pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
 for acquisition and tracing instead of recreating it from stale longitude/latitude.

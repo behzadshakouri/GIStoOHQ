@@ -75,6 +75,7 @@ import sys
 import json
 import time
 import traceback
+import uuid
 import warnings
 from datetime import datetime, timezone
 
@@ -360,8 +361,16 @@ SHARED_CHILD_VARIABLES = {
 SHARED_CHILD_VARIABLES.update(CHILD_OPTIONS)
 
 PHASE_REPORT_PATH = os.path.join(OUT_DIR, "phase1_execution_report.json")
+PHASE_RUN_ID = os.environ.get("OHQ_RUN_ID") or uuid.uuid4().hex
+PHASE_RUN_STAMP = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+PHASE_REPORT_DIR = os.path.join(OUT_DIR, "workflow_reports")
+os.makedirs(PHASE_REPORT_DIR, exist_ok=True)
+PHASE_HISTORY_REPORT_PATH = os.path.join(
+    PHASE_REPORT_DIR, "phase1_%s_%s.json" % (PHASE_RUN_STAMP, PHASE_RUN_ID[:12])
+)
 PHASE_REPORT = {
     "phase": "phase1",
+    "run_id": PHASE_RUN_ID,
     "status": "running",
     "started_at": datetime.now(timezone.utc).isoformat(),
     "root": ROOT,
@@ -376,7 +385,11 @@ def output_snapshot():
     for directory, _, names in os.walk(OUT_DIR):
         for name in names:
             path = os.path.join(directory, name)
-            if path == PHASE_REPORT_PATH or not os.path.isfile(path):
+            if (
+                path == PHASE_REPORT_PATH
+                or os.path.commonpath([path, PHASE_REPORT_DIR]) == PHASE_REPORT_DIR
+                or not os.path.isfile(path)
+            ):
                 continue
             stat = os.stat(path)
             snapshot[path] = (stat.st_mtime_ns, stat.st_size)
@@ -384,11 +397,12 @@ def output_snapshot():
 
 
 def write_phase_report():
-    temporary = PHASE_REPORT_PATH + ".tmp"
-    with open(temporary, "w", encoding="utf-8") as report_file:
-        json.dump(PHASE_REPORT, report_file, indent=2)
-        report_file.write("\n")
-    os.replace(temporary, PHASE_REPORT_PATH)
+    for destination in (PHASE_REPORT_PATH, PHASE_HISTORY_REPORT_PATH):
+        temporary = destination + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as report_file:
+            json.dump(PHASE_REPORT, report_file, indent=2)
+            report_file.write("\n")
+        os.replace(temporary, destination)
 
 
 write_phase_report()
@@ -513,6 +527,7 @@ PHASE_REPORT["status"] = "success"
 PHASE_REPORT["finished_at"] = datetime.now(timezone.utc).isoformat()
 write_phase_report()
 print("Phase 1 JSON report:", PHASE_REPORT_PATH)
+print("Phase 1 archived report:", PHASE_HISTORY_REPORT_PATH)
 
 
 # =============================================================================
