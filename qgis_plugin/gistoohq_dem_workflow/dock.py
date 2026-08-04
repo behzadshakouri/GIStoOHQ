@@ -177,7 +177,8 @@ def _command_for_workflow(
         root = _relative_to_config(config_path, config.get("root") or ".")
         argv = ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
         source_dir = _relative_to_config(
-            config_path, config.get("download_dir") or config.get("source_dir")
+            config_path,
+            config.get("download_dir") or config.get("source_dir") or "source_downloads",
         )
         if source_dir is not None:
             argv.extend(["--source-dir", str(source_dir)])
@@ -229,7 +230,8 @@ def _command_for_workflow(
             "ohqbuild", "import-watershed-reference",
             "--root", str(root), "--site", _site_name(config),
             "--source", source,
-            "--lon", str(outlet["longitude"]), "--lat", str(outlet["latitude"]),
+            "--lon", str(float(outlet["longitude"])),
+            "--lat", str(float(outlet["latitude"])),
             "--source-title", str(reference["title"]),
             "--source-organization", str(reference["organization"]),
         ]
@@ -275,16 +277,18 @@ def _command_for_workflow(
             "--site",
             _site_name(config),
             "--lon",
-            str(outlet["longitude"]),
+            str(float(outlet["longitude"])),
             "--lat",
-            str(outlet["latitude"]),
+            str(float(outlet["latitude"])),
             "--project-name",
             _site_name(config),
         ]
         target_crs = _target_crs(config)
         if target_crs:
             argv.extend(["--target-crs", target_crs])
-        source_dir = _relative_to_config(config_path, config.get("download_dir"))
+        source_dir = _relative_to_config(
+            config_path, config.get("download_dir") or "source_downloads"
+        )
         if source_dir is not None:
             argv.extend(["--download-dir", str(source_dir)])
         snap_distance = (

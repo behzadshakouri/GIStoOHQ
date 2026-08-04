@@ -494,10 +494,16 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             raise LauncherError(
                 "Documented watershed import requires: " + ", ".join(missing) + "."
             )
+        reference_source = str(state.reference_source)
+        if not reference_source.lower().startswith(("http://", "https://")):
+            source_path = Path(reference_source).expanduser()
+            if not source_path.is_absolute():
+                source_path = state.config_path.expanduser().resolve().parent / source_path
+            reference_source = str(source_path)
         argv = [
             "ohqbuild", "import-watershed-reference",
             "--root", str(state.root), "--site", str(state.site),
-            "--source", str(state.reference_source),
+            "--source", reference_source,
             "--lon", str(state.lon), "--lat", str(state.lat),
             "--source-title", str(state.reference_title),
             "--source-organization", str(state.reference_organization),
