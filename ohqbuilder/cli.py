@@ -245,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     documented.add_argument("--source-organization", required=True)
     documented.add_argument("--source-url", default=None)
     documented.add_argument("--license", dest="license_text", default=None)
+    documented.add_argument(
+        "--allow-outlet-outside",
+        action="store_true",
+        help="Import the selected reference even when it does not contain the modeled outlet.",
+    )
     documented.add_argument("--out", default=None)
 
     vertices = sub.add_parser(
@@ -762,6 +767,11 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--lon", type=float, required=True, help="Approximate outlet longitude.")
     full.add_argument("--project-name", default=None)
     full.add_argument("--out", default=None)
+    full.add_argument(
+        "--config",
+        default=None,
+        help="Optional YAML/JSON config used to fill documented_watershed defaults.",
+    )
     full.add_argument("--script-dir", default=None)
     full.add_argument(
         "--buffer", type=float, default=None,
@@ -816,6 +826,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use outputs/outlet.shp as reviewed input and do not recreate it from --lon/--lat.",
     )
+    full.add_argument("--documented-watershed-source", default=None)
+    full.add_argument("--documented-watershed-layer", default=None)
+    full.add_argument("--documented-watershed-name-field", default=None)
+    full.add_argument("--documented-watershed-name", default=None)
+    full.add_argument("--documented-watershed-title", default=None)
+    full.add_argument("--documented-watershed-organization", default=None)
+    full.add_argument("--documented-watershed-url", default=None)
+    full.add_argument("--documented-watershed-license", default=None)
+    full.add_argument("--documented-watershed-allow-outlet-outside", action="store_true")
 
     capture_baseline = sub.add_parser(
         "capture-report-baseline",
@@ -848,6 +867,42 @@ def _print_input_result(result) -> None:
         print("WARNING:", warning)
     for error in result.errors:
         print("ERROR:", error)
+
+
+def _documented_watershed_defaults(config_path: str | None) -> dict[str, str | bool | None]:
+    if not config_path:
+        return {}
+    path = Path(config_path).expanduser().resolve()
+    try:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+    except (OSError, json.JSONDecodeError, yaml.YAMLError) as exc:
+        raise FullRunError(f"Could not load full-run config {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        return {}
+    reference = data.get("documented_watershed")
+    if not isinstance(reference, dict):
+        return {}
+    source = reference.get("source")
+    if isinstance(source, str) and source:
+        source_path = Path(source).expanduser()
+        if not source_path.is_absolute():
+            source = str(path.parent / source_path)
+    return {
+        "source": source if isinstance(source, str) else None,
+        "layer": reference.get("layer") if isinstance(reference.get("layer"), str) else None,
+        "name_field": reference.get("name_field")
+        if isinstance(reference.get("name_field"), str)
+        else None,
+        "name": reference.get("name") if isinstance(reference.get("name"), str) else None,
+        "title": reference.get("title") if isinstance(reference.get("title"), str) else None,
+        "organization": reference.get("organization")
+        if isinstance(reference.get("organization"), str)
+        else None,
+        "url": reference.get("url") if isinstance(reference.get("url"), str) else None,
+        "license": reference.get("license") if isinstance(reference.get("license"), str) else None,
+        "allow_outlet_outside": bool(reference.get("allow_outlet_outside", False)),
+    }
 
 
 def _validate_inputs(settings: BuilderSettings, no_schema: bool, json_output: bool = False) -> int:
@@ -1050,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_organization=args.source_organization,
                 source_url=args.source_url,
                 license_text=args.license_text,
+                require_outlet_containment=not args.allow_outlet_outside,
             )
         except DocumentedWatershedError as exc:
             print(f"import-watershed-reference failed: {exc}")
@@ -1091,6 +1147,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "full-run":
         try:
+            reference_defaults = _documented_watershed_defaults(args.config)
+            documented_source = (
+                args.documented_watershed_source or reference_defaults.get("source")
+            )
+            allow_outlet_outside = (
+                args.documented_watershed_allow_outlet_outside
+                or bool(reference_defaults.get("allow_outlet_outside"))
+            )
             result = run_full_pipeline(
                 args.root,
                 args.site,
@@ -1112,6 +1176,31 @@ def main(argv: list[str] | None = None) -> int:
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
+                documented_watershed_source=documented_source,
+                documented_watershed_layer=(
+                    args.documented_watershed_layer or reference_defaults.get("layer")
+                ),
+                documented_watershed_name_field=(
+                    args.documented_watershed_name_field
+                    or reference_defaults.get("name_field")
+                ),
+                documented_watershed_name=(
+                    args.documented_watershed_name or reference_defaults.get("name")
+                ),
+                documented_watershed_title=(
+                    args.documented_watershed_title or reference_defaults.get("title")
+                ),
+                documented_watershed_organization=(
+                    args.documented_watershed_organization
+                    or reference_defaults.get("organization")
+                ),
+                documented_watershed_url=(
+                    args.documented_watershed_url or reference_defaults.get("url")
+                ),
+                documented_watershed_license=(
+                    args.documented_watershed_license or reference_defaults.get("license")
+                ),
+                documented_watershed_allow_outlet_outside=allow_outlet_outside,
                 progress=lambda message: print(message, flush=True),
             )
         except FullRunError as exc:

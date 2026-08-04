@@ -667,3 +667,88 @@ def test_full_pipeline_preserves_area_that_already_contains_outlet(monkeypatch, 
 
     assert calls["materialize"]["clip_bounds"] == (-77.002, 38.998, -76.998, 39.002)
     assert calls["download"]["buffer_m"] < 500.0
+
+
+def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatch, tmp_path):
+    calls = []
+    outputs = tmp_path / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    (outputs / "watershed_boundary.gpkg").write_bytes(b"boundary")
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: calls.append("download")
+        or SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: calls.append("materialize") or SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_hydrology_preprocessing",
+        lambda *a, **k: calls.append("routing"),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_legacy_input_workflow",
+        lambda *a, **k: calls.append("phases"),
+    )
+
+    def fake_import(source_arg, output_arg, **kwargs):
+        calls.append(("import", Path(source_arg), Path(output_arg), kwargs))
+        Path(output_arg).write_bytes(b"reference")
+        return Path(output_arg)
+
+    def fake_compare(generated, reference, output, **kwargs):
+        calls.append(("compare", Path(generated), Path(reference), kwargs))
+        Path(output).write_text(
+            json.dumps(
+                {
+                    "reference_layer": kwargs["reference_layer"],
+                    "best_match": {
+                        "reference_id": "Estimated Sligo Creek review outline",
+                        "generated_area_km2": 39.0807,
+                        "reference_area_km2": 45.7732,
+                        "iou": 0.8,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return Path(output)
+
+    monkeypatch.setattr("ohqbuilder.full_runner.import_documented_watershed", fake_import)
+    monkeypatch.setattr("ohqbuilder.full_runner.compare_watersheds", fake_compare)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "SITE_A.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "SITE_A.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-76.9744266065,
+        lat=38.9571888036,
+        documented_watershed_source=source,
+        documented_watershed_title="Estimated Sligo Creek review outline",
+        documented_watershed_organization="Operator digitized Google Earth review",
+        documented_watershed_license="review artifact",
+        documented_watershed_allow_outlet_outside=True,
+    )
+
+    import_call = next(call for call in calls if call[0] == "import")
+    assert import_call[1] == source
+    assert import_call[2] == outputs / "DocumentedWatershed_reference.gpkg"
+    assert import_call[3]["source_title"] == "Estimated Sligo Creek review outline"
+    assert import_call[3]["require_outlet_containment"] is False
+    compare_call = next(call for call in calls if call[0] == "compare")
+    assert compare_call[2] == outputs / "DocumentedWatershed_reference.gpkg"
+    assert compare_call[3]["reference_kind"] == "documented_named_watershed"

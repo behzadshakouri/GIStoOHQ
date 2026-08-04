@@ -88,6 +88,11 @@ polygon. GIStoOHQ deliberately rejects PNG/JPEG/PDF input. Obtain the underlying
 publisher layer when possible; if it must be digitized, save the digitized polygon
 as a separately identified derived reference and cite the map, scale, control
 points, and digitizing method rather than calling it an agency GIS boundary.
+Closed KML/KMZ `LineString` outlines are accepted as derived polygons so Google
+Earth review files such as `examples/SligoCreek/Estimated Sligo Creek.kmz` can be
+compared, but the import metadata preserves that they came from a line outline
+rather than an authoritative polygon layer. Open lines and point placemarks remain
+invalid watershed boundaries.
 
 ## What each national dataset can establish
 

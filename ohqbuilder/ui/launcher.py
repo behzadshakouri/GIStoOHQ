@@ -311,6 +311,7 @@ class LauncherState:
     reference_organization: str | None = None
     reference_url: str | None = None
     reference_license: str | None = None
+    reference_allow_outlet_outside: bool = False
 
 
 def _path_for_config_value(path: Path, config_path: Path) -> str:
@@ -442,6 +443,8 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             str(state.lat),
             "--project-name",
             state.site,
+            "--config",
+            str(state.config_path),
         ]
         if state.target_crs:
             argv.extend(("--target-crs", state.target_crs))
@@ -454,6 +457,24 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.append("--use-existing-outlet")
         if state.reuse_downloads:
             argv.append("--reuse-downloads")
+        if state.reference_source:
+            argv.extend(("--documented-watershed-source", state.reference_source))
+            if state.reference_layer:
+                argv.extend(("--documented-watershed-layer", state.reference_layer))
+            if state.reference_name_field:
+                argv.extend(("--documented-watershed-name-field", state.reference_name_field))
+            if state.reference_name:
+                argv.extend(("--documented-watershed-name", state.reference_name))
+            if state.reference_title:
+                argv.extend(("--documented-watershed-title", state.reference_title))
+            if state.reference_organization:
+                argv.extend(("--documented-watershed-organization", state.reference_organization))
+            if state.reference_url:
+                argv.extend(("--documented-watershed-url", state.reference_url))
+            if state.reference_license:
+                argv.extend(("--documented-watershed-license", state.reference_license))
+            if state.reference_allow_outlet_outside:
+                argv.append("--documented-watershed-allow-outlet-outside")
         if state.acquisition_area is not None and (
             state.acquisition_area.is_file()
             or state.method in {"outlet_buffer", "oriented_outlet_buffer", "upstream_network"}
@@ -646,6 +667,8 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         except ValueError:
             return base / path
 
+    reference_source_path = path_value(reference.get("source"))
+
     return LauncherState(
         config_path=Path(config_path).expanduser(),
         manifest_path=path_value(dem.get("tile_manifest")),
@@ -669,7 +692,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
         nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
         reuse_downloads=bool(config.get("reuse_downloads", False)),
-        reference_source=str(reference.get("source") or "") or None,
+        reference_source=str(reference_source_path) if reference_source_path is not None else None,
         reference_layer=str(reference.get("layer") or "") or None,
         reference_name_field=str(reference.get("name_field") or "") or None,
         reference_name=str(reference.get("name") or "") or None,
@@ -677,6 +700,7 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         reference_organization=str(reference.get("organization") or "") or None,
         reference_url=str(reference.get("url") or "") or None,
         reference_license=str(reference.get("license") or "") or None,
+        reference_allow_outlet_outside=bool(reference.get("allow_outlet_outside", False)),
     )
 
 
@@ -767,6 +791,10 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         ),
         reference_url=form_state.reference_url or config_state.reference_url,
         reference_license=form_state.reference_license or config_state.reference_license,
+        reference_allow_outlet_outside=(
+            form_state.reference_allow_outlet_outside
+            or config_state.reference_allow_outlet_outside
+        ),
     )
 
 
