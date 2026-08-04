@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 def test_qgis_plugin_scaffold_files_exist():
     root = Path("qgis_plugin/gistoohq_dem_workflow")
@@ -224,6 +226,58 @@ def test_qgis_plugin_has_direct_dem_prep_button():
 
     assert "Run Direct DEM Prep" in dock
     assert "run-dem-prep" in dock
+
+
+def test_qgis_plugin_and_tk_launcher_build_identical_core_commands(tmp_path):
+    from ohqbuilder.ui.launcher import command_for_step, state_from_config
+    from qgis_plugin.gistoohq_dem_workflow.dock import _command_for_workflow
+
+    config = {
+        "root": "project-root",
+        "site": {"name": "Demo", "target_crs": "EPSG:26918"},
+        "outlet": {"longitude": -76.97, "latitude": 38.99},
+        "dem_acquisition": {
+            "method": "polygon",
+            "acquisition_area": "intermediate/area.geojson",
+            "tile_manifest": "intermediate/manifest.json",
+        },
+        "documented_watershed": {
+            "source": "references/watershed.gpkg",
+            "title": "Reviewed watershed",
+            "organization": "Example agency",
+            "layer": "boundary",
+            "name_field": "NAME",
+            "name": "Demo watershed",
+            "url": "https://example.test/watershed",
+            "license": "Public domain",
+        },
+    }
+    config_path = tmp_path / "project.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    (tmp_path / "intermediate").mkdir()
+    (tmp_path / "intermediate" / "area.geojson").write_text("{}", encoding="utf-8")
+    state = state_from_config(config_path, config)
+
+    commands = (
+        ("prepare-dem", "prepare-dem"),
+        ("run-dem-prep", "run-dem-prep"),
+        ("download-dem-manifest", "download-dem-manifest"),
+        ("materialize-inputs", "materialize-inputs"),
+        ("validate-dem", "validate-dem"),
+        ("prepare-hydrology", "prepare-hydrology"),
+        ("prepare-inputs", "prepare-inputs"),
+        ("check-inputs", "check-inputs"),
+        ("build-ohq", "build"),
+        ("full-run", "full-run"),
+        ("promote-pour-points", "promote-pour-points"),
+        ("import-watershed-reference", "import-watershed-reference"),
+        ("build-hms", "build-hms"),
+        ("validate-hms", "validate-hms"),
+    )
+    for launcher_step, plugin_command in commands:
+        assert command_for_step(launcher_step, state).argv == tuple(
+            _command_for_workflow(plugin_command, str(config_path))
+        )
 
 
 def test_qgis_plugin_exposes_full_download_to_ohq_workflow():

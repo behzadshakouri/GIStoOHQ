@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
+import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -493,10 +494,16 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             raise LauncherError(
                 "Documented watershed import requires: " + ", ".join(missing) + "."
             )
+        reference_source = str(state.reference_source)
+        if not reference_source.lower().startswith(("http://", "https://")):
+            source_path = Path(reference_source).expanduser()
+            if not source_path.is_absolute():
+                source_path = state.config_path.expanduser().resolve().parent / source_path
+            reference_source = str(source_path)
         argv = [
             "ohqbuild", "import-watershed-reference",
             "--root", str(state.root), "--site", str(state.site),
-            "--source", str(state.reference_source),
+            "--source", reference_source,
             "--lon", str(state.lon), "--lat", str(state.lat),
             "--source-title", str(state.reference_title),
             "--source-organization", str(state.reference_organization),
@@ -890,6 +897,7 @@ class CommandRunner(threading.Thread):
         self.messages = messages
         self.process: subprocess.Popen[str] | None = None
         self.cancelled = threading.Event()
+        self.run_id = uuid.uuid4().hex[:12]
 
     def cancel(self) -> None:
         """Stop the active command and its child process group."""
@@ -905,6 +913,9 @@ class CommandRunner(threading.Thread):
     def run(self) -> None:
         status = 0
         commands = (self.command.argv, *self.command.followup_argv)
+        self.messages.put(
+            f"\n=== RUN {self.run_id}: {self.command.label} STARTED ===\n"
+        )
         try:
             for argv in commands:
                 if self.cancelled.is_set():
@@ -917,6 +928,11 @@ class CommandRunner(threading.Thread):
                     stderr=subprocess.STDOUT,
                     text=True,
                     start_new_session=True,
+                    env={
+                        **os.environ,
+                        "OHQ_RUN_ID": self.run_id,
+                        "PYTHONUNBUFFERED": "1",
+                    },
                 )
                 assert self.process.stdout is not None
                 for line in self.process.stdout:
@@ -930,9 +946,13 @@ class CommandRunner(threading.Thread):
             status = 2
             self.messages.put(f"Could not start workflow command: {exc}\n")
         if self.cancelled.is_set():
-            self.messages.put(f"\n[{self.command.label} cancelled by user]\n")
+            self.messages.put(
+                f"\n[RUN {self.run_id}: {self.command.label} cancelled by user]\n"
+            )
         else:
-            self.messages.put(f"\n[{self.command.label} exited with {status}]\n")
+            self.messages.put(
+                f"\n[RUN {self.run_id}: {self.command.label} exited with {status}]\n"
+            )
         if self.command.label == "Validate DEM" and status == 3:
             self.messages.put(
                 "DEM validation requested a larger acquisition area. This is an actionable "
@@ -943,7 +963,7 @@ class CommandRunner(threading.Thread):
 
 
 def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
-    """Return generated watershed rasters and vectors suitable for QGIS."""
+    """Return generated watershed layers, newest modification first."""
     if state.root is None or not state.site:
         return ()
     site_path = (state.root / state.site).resolve()
@@ -956,18 +976,28 @@ def qgis_layer_paths(state: LauncherState) -> tuple[Path, ...]:
         for path in root.rglob("*")
         if path.is_file() and path.suffix.lower() in supported
     }
-    return tuple(sorted(paths, key=lambda path: str(path)))
+    return tuple(
+        sorted(
+            paths,
+            key=lambda path: (-path.stat().st_mtime_ns, str(path)),
+        )
+    )
 
 
 def qgis_command(state: LauncherState, executable: str | None = None) -> tuple[str, ...]:
-    """Build a QGIS command that opens all currently generated workflow layers."""
+    """Build a QGIS command whose layer panel is newest-to-oldest.
+
+    QGIS inserts each command-line layer at the top of the layer tree.  Supplying
+    the oldest file first therefore leaves the newest file at the top after all
+    arguments have been processed.
+    """
     qgis = executable or shutil.which("qgis")
     if not qgis:
         raise LauncherError("QGIS executable was not found on PATH.")
     layers = qgis_layer_paths(state)
     if not layers:
         raise LauncherError("No generated DEM, hydrology, or delineation layers exist yet.")
-    return (qgis, "--nologo", *(str(path) for path in layers))
+    return (qgis, "--nologo", *(str(path) for path in reversed(layers)))
 
 
 class MapPicker:
@@ -1255,7 +1285,7 @@ class LauncherApp:
         self.reference_license_var = tk.StringVar(value="")
         self._build()
         if Path(self.config_var.get()).exists():
-            self.load_config()
+            self.load_config(announce=False)
         else:
             self._refresh_step_buttons()
         self._poll_messages()
@@ -1309,21 +1339,31 @@ class LauncherApp:
             ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
             ("Documented watershed…", self.configure_documented_watershed),
-            (
-                "Open Sligo example",
-                lambda: self.open_example("examples/SligoCreek/dem_workflow.example.yaml"),
-            ),
-            (
-                "Open John McCormack example",
-                lambda: self.open_example(
-                    "examples/JohnMcCormack3600/dem_workflow.example.yaml"
-                ),
-            ),
         )
         for index, (label, command) in enumerate(project_specs):
             tk.Button(project_buttons, text=label, command=command).grid(
                 row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew"
             )
+        examples_button = tk.Menubutton(
+            project_buttons,
+            text="Examples ▾",
+            relief="raised",
+        )
+        examples_menu = tk.Menu(examples_button, tearoff=False)
+        examples_menu.add_command(
+            label="Sligo Creek",
+            command=lambda: self.open_example(
+                "examples/SligoCreek/dem_workflow.example.yaml"
+            ),
+        )
+        examples_menu.add_command(
+            label="John McCormack (JM)",
+            command=lambda: self.open_example(
+                "examples/JohnMcCormack3600/dem_workflow.example.yaml"
+            ),
+        )
+        examples_button.config(menu=examples_menu)
+        examples_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
         recommended_button = tk.Button(
             project_buttons,
             text="▶ RUN RECOMMENDED NEXT STEP",
@@ -1418,6 +1458,9 @@ class LauncherApp:
             hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
         self.log = tk.Text(frame, height=14, width=100)
         self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
+        tk.Button(frame, text="Clear log", command=self.clear_log).grid(
+            row=len(rows) + 5, column=0, columnspan=2, sticky="e", pady=(4, 0)
+        )
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(len(rows) + 4, weight=1)
 
@@ -1476,6 +1519,10 @@ class LauncherApp:
         dialog.columnconfigure(1, weight=1)
         dialog.grab_set()
 
+    def clear_log(self) -> None:
+        """Clear completed console output without affecting the active process."""
+        self.log.delete("1.0", "end")
+
     def pick_outlet_map(self) -> None:
         self.open_map_picker("Outlet")
 
@@ -1500,7 +1547,9 @@ class LauncherApp:
                 state = state_with_config_defaults(state, load_project_config(config_path))
             command = qgis_command(state)
             subprocess.Popen(command, start_new_session=True)
-            self.messages.put(f"Opened {len(command) - 2} generated layer(s) in QGIS.\n")
+            self.messages.put(
+                f"\nOpened {len(command) - 2} generated layer(s) in QGIS.\n\n"
+            )
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: Could not open QGIS: {exc}\n")
 
@@ -1675,12 +1724,13 @@ class LauncherApp:
             for step, button in self.step_buttons.items():
                 button.config(state="normal" if step in {"init-dem-config", "full-run"} else "disabled")
 
-    def load_config(self) -> None:
+    def load_config(self, announce: bool = True) -> None:
         try:
             config = load_project_config(self.config_var.get())
             self.apply_state(state_from_config(self.config_var.get(), config))
             self._refresh_step_buttons()
-            self.messages.put("Loaded config.\n")
+            if announce:
+                self.messages.put("Loaded config.\n")
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
 
