@@ -80,7 +80,7 @@ MIN_SNAP_ACC_CELLS = float(globals().get("MIN_SNAP_ACC_CELLS", 50.0))
 SNAP_EDGE_FRACTION = float(globals().get("SNAP_EDGE_FRACTION", 0.80))
 MAX_OUTLET_SNAP_M = float(globals().get("MAX_OUTLET_SNAP_M", 50.0))
 MIN_WATERSHED_AREA_KM2 = float(
-    globals().get("MIN_WATERSHED_AREA_KM2", 0.01)
+    globals().get("MIN_WATERSHED_AREA_KM2", 0.05)
 )
 FALLBACK_EPSG = int(globals().get("FALLBACK_EPSG", 26912))
 ADD_TO_PROJECT = bool(globals().get("ADD_TO_PROJECT", False))
