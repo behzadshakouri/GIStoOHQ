@@ -14,6 +14,8 @@ from .dem_acquisition import (
     create_documented_watershed_area,
     create_outlet_buffer_area,
     create_upstream_network_area,
+    read_outlet_point,
+    snap_outlet_to_boundary,
     snap_outlet_to_flowlines,
     write_outlet_point,
 )
@@ -100,6 +102,7 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         dem_acquisition.get("method") or dem_acquisition.get("acquisition_mode") or ""
     ).lower()
     flowline_value = dem_acquisition.get("flowline_path") or dem_acquisition.get("flowlines")
+    outlet_source_value = outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
     outlet_lon = (
         _required_float(outlet, "longitude", "outlet")
         if outlet.get("longitude") is not None
@@ -110,8 +113,11 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         if outlet.get("latitude") is not None
         else None
     )
+    if outlet_source_value and (outlet_lon is None or outlet_lat is None):
+        outlet_lon, outlet_lat = read_outlet_point(_resolve(outlet_source_value, base))
     raw_outlet_path: Path | None = None
     snapped = None
+    boundary_snapped = None
     if outlet_lon is not None and outlet_lat is not None:
         raw_outlet_path = write_outlet_point(
             outlet_lon,
@@ -139,6 +145,27 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
     if not acquisition_path_value:
         raise DemWorkflowError("dem_acquisition.acquisition_area is required.")
     acquisition_path = _resolve(acquisition_path_value, base)
+
+    boundary_source_value = dem_acquisition.get("source") or documented_watershed.get("source")
+    if (
+        outlet.get("snap_to_documented_watershed")
+        and boundary_source_value
+        and outlet_lon is not None
+        and outlet_lat is not None
+    ):
+        boundary_snapped = snap_outlet_to_boundary(
+            outlet_lon,
+            outlet_lat,
+            _resolve(boundary_source_value, base),
+            output_path=_resolve(
+                outlet.get("documented_snapped_path")
+                or outlet.get("boundary_snapped_path")
+                or "inputs/outlet_documented_snapped.geojson",
+                base,
+            ),
+        )
+        outlet_lon = boundary_snapped.snapped_lon
+        outlet_lat = boundary_snapped.snapped_lat
 
     acquisition_result: DemAcquisitionArea | None = None
     if method in {"outlet_buffer", "oriented_outlet_buffer"}:
@@ -240,6 +267,15 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         if snapped and snapped.output_path
         else None,
         "snap_distance_m": snapped.distance_m if snapped else None,
+        "documented_snapped_outlet": _relativize(boundary_snapped.output_path, base)
+        if boundary_snapped and boundary_snapped.output_path
+        else None,
+        "documented_snap_distance_m": boundary_snapped.distance_m
+        if boundary_snapped
+        else None,
+        "documented_snap_was_inside": boundary_snapped.was_inside
+        if boundary_snapped
+        else None,
     }
     if acquisition_result:
         summary["acquisition_bounds"] = acquisition_result.bounds
