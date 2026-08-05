@@ -264,9 +264,12 @@ def _command_for_workflow(
 
     if command == "full-run":
         outlet = _as_mapping(config.get("outlet"), "outlet")
-        if outlet.get("longitude") is None or outlet.get("latitude") is None:
+        outlet_source = outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
+        if not outlet_source and (
+            outlet.get("longitude") is None or outlet.get("latitude") is None
+        ):
             raise QgisDockConfigError(
-                "outlet.longitude and outlet.latitude are required for full-run."
+                "Choose outlet.source KML/KMZ or provide outlet.longitude and outlet.latitude for full-run."
             )
         root = _relative_to_config(config_path, config.get("root") or ".")
         argv = [
@@ -276,15 +279,20 @@ def _command_for_workflow(
             str(root),
             "--site",
             _site_name(config),
-            "--lon",
-            str(float(outlet["longitude"])),
-            "--lat",
-            str(float(outlet["latitude"])),
             "--project-name",
             _site_name(config),
             "--config",
             str(config_path),
         ]
+        if outlet.get("longitude") is not None and outlet.get("latitude") is not None:
+            argv.extend(["--lon", str(float(outlet["longitude"])), "--lat", str(float(outlet["latitude"]))])
+        if outlet_source:
+            source = str(outlet_source)
+            if not source.lower().startswith(("http://", "https://")):
+                source = str(_relative_to_config(config_path, source))
+            argv.extend(["--outlet-source", source])
+        if outlet.get("snap_to_documented_watershed"):
+            argv.append("--snap-outlet-to-documented-watershed")
         target_crs = _target_crs(config)
         if target_crs:
             argv.extend(["--target-crs", target_crs])

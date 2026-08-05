@@ -169,6 +169,53 @@ documented_watershed:
     assert props["uncertainty_margin_km"] == 1
 
 
+
+def test_prepare_dem_reads_outlet_kmz_and_snaps_to_documented_boundary(tmp_path):
+    boundary = tmp_path / "estimated.kmz"
+    boundary_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><LineString><coordinates>
+-77.00,39.00,0 -76.90,39.00,0 -76.90,39.10,0 -77.00,39.10,0 -77.00,39.00,0
+</coordinates></LineString></Placemark></Document></kml>
+"""
+    with ZipFile(boundary, "w") as archive:
+        archive.writestr("doc.kml", boundary_kml)
+    outlet = tmp_path / "SC Outlet.kmz"
+    outlet_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><Point><coordinates>
+-76.95,38.98,0
+</coordinates></Point></Placemark></Document></kml>
+"""
+    with ZipFile(outlet, "w") as archive:
+        archive.writestr("doc.kml", outlet_kml)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+outlet:
+  source: SC Outlet.kmz
+  snap_to_documented_watershed: true
+dem_acquisition:
+  method: outlet_buffer
+  acquisition_area: area.geojson
+  source: estimated.kmz
+  upstream_km: 1
+  downstream_km: 1
+  lateral_km: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = prepare_dem_from_config(config)
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary["raw_outlet"] == "inputs/outlet_raw.geojson"
+    assert summary["documented_snapped_outlet"] == "inputs/outlet_documented_snapped.geojson"
+    assert summary["documented_snap_was_inside"] is False
+    area = json.loads((tmp_path / "area.geojson").read_text(encoding="utf-8"))
+    props = area["features"][0]["properties"]
+    assert props["outlet_lon"] == -76.95
+    assert props["outlet_lat"] == 39.00
+
+
 def test_validate_dem_from_config_writes_summary_and_expansion(tmp_path):
     from ohqbuilder.dem_workflow import validate_dem_from_config
 
@@ -683,7 +730,7 @@ def test_sligo_creek_demo_config_runs_prepare(tmp_path):
     assert main(["run-dem-prep", "--config", str(project / "dem_workflow.example.yaml")]) == 0
 
     assert (project / "inputs" / "outlet_raw.geojson").exists()
-    assert (project / "inputs" / "outlet_snapped.geojson").exists()
+    assert (project / "inputs" / "outlet_documented_snapped.geojson").exists()
     assert (project / "intermediate" / "dem_acquisition_area.geojson").exists()
     manifest = json.loads(
         (project / "intermediate" / "dem_download_manifest.json").read_text(encoding="utf-8")

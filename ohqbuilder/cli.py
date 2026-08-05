@@ -763,8 +763,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     full.add_argument("--root", required=True)
     full.add_argument("--site", required=True)
-    full.add_argument("--lat", type=float, required=True, help="Approximate outlet latitude.")
-    full.add_argument("--lon", type=float, required=True, help="Approximate outlet longitude.")
+    full.add_argument("--lat", type=float, default=None, help="Fallback outlet latitude.")
+    full.add_argument("--lon", type=float, default=None, help="Fallback outlet longitude.")
+    full.add_argument("--outlet-source", default=None, help="KML/KMZ point file for the modeled outlet.")
+    full.add_argument(
+        "--snap-outlet-to-documented-watershed",
+        action="store_true",
+        help="Move an outlet outside the documented watershed to the nearest boundary point.",
+    )
     full.add_argument("--project-name", default=None)
     full.add_argument("--out", default=None)
     full.add_argument(
@@ -881,14 +887,40 @@ def _documented_watershed_defaults(config_path: str | None) -> dict[str, str | b
     if not isinstance(data, dict):
         return {}
     reference = data.get("documented_watershed")
+    outlet = data.get("outlet") if isinstance(data.get("outlet"), dict) else {}
     if not isinstance(reference, dict):
-        return {}
+        reference = {}
     source = reference.get("source")
     if isinstance(source, str) and source:
         source_path = Path(source).expanduser()
         if not source_path.is_absolute():
             source = str(path.parent / source_path)
+    outlet_source = (
+        outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
+        if isinstance(outlet, dict)
+        else None
+    )
+    if isinstance(outlet_source, str) and outlet_source:
+        outlet_source_path = Path(outlet_source).expanduser()
+        if not outlet_source_path.is_absolute():
+            outlet_source = str(path.parent / outlet_source_path)
+    documented_snapped_path = (
+        outlet.get("documented_snapped_path") or outlet.get("boundary_snapped_path")
+        if isinstance(outlet, dict)
+        else None
+    )
+    if isinstance(documented_snapped_path, str) and documented_snapped_path:
+        snapped_path = Path(documented_snapped_path).expanduser()
+        if not snapped_path.is_absolute():
+            documented_snapped_path = str(path.parent / snapped_path)
     return {
+        "outlet_source": outlet_source if isinstance(outlet_source, str) else None,
+        "snap_outlet_to_documented_watershed": bool(
+            outlet.get("snap_to_documented_watershed", False)
+        ) if isinstance(outlet, dict) else False,
+        "documented_snapped_outlet_path": documented_snapped_path
+        if isinstance(documented_snapped_path, str)
+        else None,
         "source": source if isinstance(source, str) else None,
         "layer": reference.get("layer") if isinstance(reference.get("layer"), str) else None,
         "name_field": reference.get("name_field")
@@ -1155,6 +1187,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.documented_watershed_allow_outlet_outside
                 or bool(reference_defaults.get("allow_outlet_outside"))
             )
+            outlet_source = args.outlet_source or reference_defaults.get("outlet_source")
+            if not outlet_source and (args.lon is None or args.lat is None):
+                raise FullRunError("full-run requires --outlet-source or both --lon and --lat.")
             result = run_full_pipeline(
                 args.root,
                 args.site,
@@ -1176,6 +1211,14 @@ def main(argv: list[str] | None = None) -> int:
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
+                outlet_source=outlet_source,
+                snap_outlet_to_documented_watershed=(
+                    args.snap_outlet_to_documented_watershed
+                    or bool(reference_defaults.get("snap_outlet_to_documented_watershed"))
+                ),
+                documented_snapped_outlet_path=reference_defaults.get(
+                    "documented_snapped_outlet_path"
+                ),
                 documented_watershed_source=documented_source,
                 documented_watershed_layer=(
                     args.documented_watershed_layer or reference_defaults.get("layer")

@@ -293,6 +293,8 @@ class LauncherState:
     target_crs: str | None = None
     lon: float | None = None
     lat: float | None = None
+    outlet_source: str | None = None
+    snap_outlet_to_documented_watershed: bool = False
     method: str | None = None
     flowline_path: Path | None = None
     tile_index: Path | None = None
@@ -426,9 +428,11 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--dem-manifest", str(state.manifest_path)))
         return WorkflowCommand("Materialize Inputs", tuple(argv))
     if step == "full-run":
-        if state.root is None or not state.site or state.lon is None or state.lat is None:
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required for full-run.")
+        if not state.outlet_source and (state.lon is None or state.lat is None):
             raise LauncherError(
-                "Root, site, and verified outlet coordinates are required for full-run."
+                "Choose an outlet KML/KMZ or enter verified outlet coordinates for full-run."
             )
         argv = [
             "ohqbuild",
@@ -437,15 +441,17 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             str(state.root),
             "--site",
             state.site,
-            "--lon",
-            str(state.lon),
-            "--lat",
-            str(state.lat),
             "--project-name",
             state.site,
             "--config",
             str(state.config_path),
         ]
+        if state.lon is not None and state.lat is not None:
+            argv.extend(("--lon", str(state.lon), "--lat", str(state.lat)))
+        if state.outlet_source:
+            argv.extend(("--outlet-source", state.outlet_source))
+        if state.snap_outlet_to_documented_watershed:
+            argv.append("--snap-outlet-to-documented-watershed")
         if state.target_crs:
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
@@ -677,6 +683,10 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         except ValueError:
             return base / path
 
+    outlet = config.get("outlet") if isinstance(config.get("outlet"), dict) else {}
+    outlet_source_path = path_value(
+        outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
+    )
     reference_source_path = path_value(reference.get("source"))
 
     return LauncherState(
@@ -695,6 +705,10 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         if isinstance(config.get("outlet"), dict)
         and config.get("outlet", {}).get("latitude") is not None
         else None,
+        outlet_source=str(outlet_source_path) if outlet_source_path is not None else None,
+        snap_outlet_to_documented_watershed=bool(
+            outlet.get("snap_to_documented_watershed", False)
+        ),
         method=str(dem.get("method") or "") or None,
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
@@ -731,6 +745,14 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "outlet", "longitude", state.lon)
     if state.lat is not None:
         _set_nested(updated, "outlet", "latitude", state.lat)
+    if state.outlet_source:
+        _set_nested(updated, "outlet", "source", state.outlet_source)
+    _set_nested(
+        updated,
+        "outlet",
+        "snap_to_documented_watershed",
+        state.snap_outlet_to_documented_watershed,
+    )
     if state.method:
         _set_nested(updated, "dem_acquisition", "method", state.method)
     if state.flowline_path is not None:
@@ -789,6 +811,11 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
         use_existing_outlet=form_state.use_existing_outlet,
         reuse_downloads=form_state.reuse_downloads,
+        outlet_source=form_state.outlet_source or config_state.outlet_source,
+        snap_outlet_to_documented_watershed=(
+            form_state.snap_outlet_to_documented_watershed
+            or config_state.snap_outlet_to_documented_watershed
+        ),
         reference_source=form_state.reference_source or config_state.reference_source,
         reference_layer=form_state.reference_layer or config_state.reference_layer,
         reference_name_field=(
@@ -1313,6 +1340,8 @@ class LauncherApp:
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self.reuse_downloads_var = tk.BooleanVar(value=False)
+        self.outlet_source_var = tk.StringVar(value="")
+        self.snap_outlet_doc_var = tk.BooleanVar(value=False)
         self.reference_source_var = tk.StringVar(value="")
         self.reference_layer_var = tk.StringVar(value="")
         self.reference_name_field_var = tk.StringVar(value="")
@@ -1342,6 +1371,7 @@ class LauncherApp:
             ("Target CRS", self.crs_var),
             ("Outlet lon", self.lon_var),
             ("Outlet lat", self.lat_var),
+            ("Outlet KML/KMZ", self.outlet_source_var),
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
@@ -1351,7 +1381,7 @@ class LauncherApp:
             tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
             tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
             if label in {
-                "Config", "Manifest", "Flowlines", "Tile index",
+                "Config", "Manifest", "Flowlines", "Tile index", "Outlet KML/KMZ",
             }:
                 tk.Button(
                     frame,
@@ -1366,8 +1396,14 @@ class LauncherApp:
                     text="Browse…",
                     command=lambda value=variable: self.browse_directory(value),
                 ).grid(row=row, column=2, sticky="w")
+        snap_doc = tk.Checkbutton(
+            frame,
+            text="Snap outside outlet to documented watershed boundary",
+            variable=self.snap_outlet_doc_var,
+        )
+        snap_doc.grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(2, 4))
         project_buttons = tk.LabelFrame(frame, text="Project and map")
-        project_buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=4)
+        project_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
         project_specs = (
             ("Load config", self.load_config),
             ("Save config", self.save_config),
@@ -1708,6 +1744,8 @@ class LauncherApp:
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
             use_existing_outlet=self.use_existing_outlet_var.get(),
             reuse_downloads=self.reuse_downloads_var.get(),
+            outlet_source=self.outlet_source_var.get().strip() or None,
+            snap_outlet_to_documented_watershed=self.snap_outlet_doc_var.get(),
             reference_source=self.reference_source_var.get().strip() or None,
             reference_layer=self.reference_layer_var.get().strip() or None,
             reference_name_field=self.reference_name_field_var.get().strip() or None,
@@ -1736,6 +1774,8 @@ class LauncherApp:
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
         self.use_existing_outlet_var.set(state.use_existing_outlet)
         self.reuse_downloads_var.set(state.reuse_downloads)
+        self.outlet_source_var.set(state.outlet_source or "")
+        self.snap_outlet_doc_var.set(state.snap_outlet_to_documented_watershed)
         self.reference_source_var.set(state.reference_source or "")
         self.reference_layer_var.set(state.reference_layer or "")
         self.reference_name_field_var.set(state.reference_name_field or "")

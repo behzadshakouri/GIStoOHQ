@@ -56,6 +56,38 @@ def test_documented_watershed_area_uses_all_closed_kmz_boundaries(tmp_path):
     assert data["features"][0]["properties"]["source_boundary_point_count"] == 10
 
 
+
+def test_outlet_kmz_outside_documented_boundary_snaps_to_nearest_boundary(tmp_path):
+    from ohqbuilder.dem_acquisition import read_outlet_point, snap_outlet_to_boundary
+
+    boundary = tmp_path / "SC Estimated.kmz"
+    boundary_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><LineString><coordinates>
+-77.00,39.00,0 -76.90,39.00,0 -76.90,39.10,0 -77.00,39.10,0 -77.00,39.00,0
+</coordinates></LineString></Placemark></Document></kml>
+"""
+    with ZipFile(boundary, "w") as archive:
+        archive.writestr("doc.kml", boundary_kml)
+    outlet = tmp_path / "SC Outlet.kmz"
+    outlet_kml = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><Point><coordinates>
+-76.95,38.98,0
+</coordinates></Point></Placemark></Document></kml>
+"""
+    with ZipFile(outlet, "w") as archive:
+        archive.writestr("doc.kml", outlet_kml)
+
+    lon, lat = read_outlet_point(outlet)
+    result = snap_outlet_to_boundary(lon, lat, boundary, output_path=tmp_path / "snapped.geojson")
+
+    assert result.was_inside is False
+    assert result.snapped_lon == -76.95
+    assert result.snapped_lat == 39.00
+    assert result.distance_m > 2000
+    data = json.loads((tmp_path / "snapped.geojson").read_text(encoding="utf-8"))
+    assert data["features"][0]["properties"]["was_inside_documented_watershed"] is False
+
+
 def test_read_dem_manifest_uses_explicit_tiles(tmp_path):
     raw = tmp_path / "dem" / "raw"
     raw.mkdir(parents=True)
