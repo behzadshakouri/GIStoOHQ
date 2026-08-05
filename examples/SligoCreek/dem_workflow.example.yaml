@@ -46,4 +46,3 @@ documented_watershed:
   organization: Operator digitized Google Earth review
   url: examples/SligoCreek/Estimated Sligo Creek.kmz
   license: project review artifact; verify before design use
-  allow_outlet_outside: true

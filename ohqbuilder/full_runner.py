@@ -566,6 +566,42 @@ def run_full_pipeline(
             emit(f"Reviewed outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
         else:
             emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
+
+        documented_reference = (
+            Path(root).expanduser().resolve()
+            / site
+            / "outputs"
+            / REFERENCE_FILENAME
+        )
+        documented_reference_ready = False
+        if documented_watershed_source:
+            if not documented_watershed_title or not documented_watershed_organization:
+                raise FullRunError(
+                    "Documented watershed import requires a source title and organization."
+                )
+            try:
+                imported_reference = import_documented_watershed(
+                    documented_watershed_source,
+                    documented_reference,
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                    layer=documented_watershed_layer,
+                    name_field=documented_watershed_name_field,
+                    name=documented_watershed_name,
+                    source_title=documented_watershed_title,
+                    source_organization=documented_watershed_organization,
+                    source_url=documented_watershed_url,
+                    license_text=documented_watershed_license,
+                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
+                )
+            except DocumentedWatershedError as exc:
+                raise FullRunError(
+                    "Documented watershed import failed before routing; correct the "
+                    "outlet or use --documented-watershed-allow-outlet-outside only "
+                    f"for an explicitly reviewed exception: {exc}"
+                ) from exc
+            documented_reference_ready = True
+            emit(f"Imported documented watershed reference before routing: {imported_reference}")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         buffer_was_supplied = buffer_m is not None
         if buffer_m is None:
@@ -732,29 +768,8 @@ def run_full_pipeline(
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
         generated_reaches = generated_boundary.with_name("reaches.gpkg")
         documented_reference = generated_boundary.with_name(REFERENCE_FILENAME)
-        if documented_watershed_source:
-            if not documented_watershed_title or not documented_watershed_organization:
-                raise FullRunError(
-                    "Documented watershed import requires a source title and organization."
-                )
-            try:
-                imported_reference = import_documented_watershed(
-                    documented_watershed_source,
-                    documented_reference,
-                    outlet_lon=lon,
-                    outlet_lat=lat,
-                    layer=documented_watershed_layer,
-                    name_field=documented_watershed_name_field,
-                    name=documented_watershed_name,
-                    source_title=documented_watershed_title,
-                    source_organization=documented_watershed_organization,
-                    source_url=documented_watershed_url,
-                    license_text=documented_watershed_license,
-                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
-                )
-            except DocumentedWatershedError as exc:
-                raise FullRunError(f"Documented watershed import failed: {exc}") from exc
-            emit(f"Imported documented watershed reference: {imported_reference}")
+        if documented_watershed_source and not documented_reference_ready:
+            raise FullRunError("Documented watershed reference was not imported before routing.")
         if (
             materialized_hydro is not None
             and generated_reaches.is_file()

@@ -159,6 +159,13 @@ def test_phase2_clipping_preserves_phase1_watershed_boundary():
     assert 'mask_path = os.path.join(OUT_DIR, "watershed_boundary.gpkg")' not in source
 
 
+def test_phase2_vector_clipping_repairs_geometries_before_clip():
+    source = Path("scripts/legacy_gis/cliptowatershed.py").read_text(encoding="utf-8")
+
+    assert '"native:fixgeometries"' in source
+    assert source.index('"native:fixgeometries"') < source.index('"native:clip"')
+
+
 def test_model_topology_routes_outlet_incremental_basin_to_outlet_reach():
     source = Path("scripts/legacy_gis/build_topology.py").read_text(encoding="utf-8")
 
