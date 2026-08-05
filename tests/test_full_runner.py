@@ -733,13 +733,13 @@ def test_full_pipeline_prefers_outlet_kmz_and_boundary_snap(monkeypatch, tmp_pat
         documented_watershed_source=source,
         documented_watershed_title="Estimated Sligo Creek review outline",
         documented_watershed_organization="Operator digitized Google Earth review",
-        documented_watershed_allow_outlet_outside=True,
     )
 
     assert calls["outlet_source"] == outlet
     assert calls["snap"][:3] == (-76.95, 38.98, source)
     assert calls["import"]["outlet_lon"] == -76.95
     assert calls["import"]["outlet_lat"] == 39.0
+    assert calls["import"]["require_outlet_containment"] is False
     assert calls["download"]["lon"] == -76.95
     assert calls["download"]["lat"] == 39.0
 

@@ -763,8 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     full.add_argument("--root", required=True)
     full.add_argument("--site", required=True)
-    full.add_argument("--lat", type=float, required=True, help="Fallback outlet latitude.")
-    full.add_argument("--lon", type=float, required=True, help="Fallback outlet longitude.")
+    full.add_argument("--lat", type=float, default=None, help="Fallback outlet latitude.")
+    full.add_argument("--lon", type=float, default=None, help="Fallback outlet longitude.")
     full.add_argument("--outlet-source", default=None, help="KML/KMZ point file for the modeled outlet.")
     full.add_argument(
         "--snap-outlet-to-documented-watershed",
@@ -1187,6 +1187,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.documented_watershed_allow_outlet_outside
                 or bool(reference_defaults.get("allow_outlet_outside"))
             )
+            outlet_source = args.outlet_source or reference_defaults.get("outlet_source")
+            if not outlet_source and (args.lon is None or args.lat is None):
+                raise FullRunError("full-run requires --outlet-source or both --lon and --lat.")
             result = run_full_pipeline(
                 args.root,
                 args.site,
@@ -1208,7 +1211,7 @@ def main(argv: list[str] | None = None) -> int:
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
-                outlet_source=args.outlet_source or reference_defaults.get("outlet_source"),
+                outlet_source=outlet_source,
                 snap_outlet_to_documented_watershed=(
                     args.snap_outlet_to_documented_watershed
                     or bool(reference_defaults.get("snap_outlet_to_documented_watershed"))

@@ -626,6 +626,7 @@ def run_full_pipeline(
         else:
             emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
 
+        boundary_snap = None
         if (
             not use_existing_outlet
             and snap_outlet_to_documented_watershed
@@ -676,7 +677,10 @@ def run_full_pipeline(
                     source_organization=documented_watershed_organization,
                     source_url=documented_watershed_url,
                     license_text=documented_watershed_license,
-                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
+                    require_outlet_containment=(
+                        not documented_watershed_allow_outlet_outside
+                        and not (boundary_snap is not None and not boundary_snap.was_inside)
+                    ),
                 )
             except DocumentedWatershedError as exc:
                 raise FullRunError(
