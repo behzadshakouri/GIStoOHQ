@@ -36,7 +36,7 @@ ohqbuild import-watershed-reference \
   --root examples/SligoCreek --site SligoCreekDemo \
   --source /path/to/county_watersheds.gpkg --layer watersheds \
   --name-field BASIN_NAME --name "Sligo Creek" \
-  --lon -76.9744266065 --lat 38.9571888036 \
+  --lon -77.0000 --lat 38.9700 \
   --source-title "County watershed inventory" \
   --source-organization "Publishing agency" \
   --source-url "https://agency.example/watersheds" \
