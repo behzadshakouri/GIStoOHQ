@@ -5,6 +5,7 @@ import zipfile
 
 import pytest
 
+from ohqbuilder.documented_watershed import DocumentedWatershedError
 from ohqbuilder.full_runner import (
     FullRunError,
     acquisition_bounds,
@@ -752,3 +753,92 @@ def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatc
     compare_call = next(call for call in calls if call[0] == "compare")
     assert compare_call[2] == outputs / "DocumentedWatershed_reference.gpkg"
     assert compare_call[3]["reference_kind"] == "documented_named_watershed"
+
+
+def test_full_pipeline_fails_before_routing_when_documented_outlet_is_outside(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    calls = []
+
+    def fake_import(*args, **kwargs):
+        calls.append("import")
+        raise DocumentedWatershedError("Contains outlet: False")
+
+    monkeypatch.setattr("ohqbuilder.full_runner.import_documented_watershed", fake_import)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: calls.append("download"),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_hydrology_preprocessing",
+        lambda *a, **k: calls.append("routing"),
+    )
+
+    with pytest.raises(FullRunError, match="failed before routing"):
+        run_full_pipeline(
+            tmp_path,
+            "SITE_A",
+            lon=-76.9744266065,
+            lat=38.9571888036,
+            documented_watershed_source=source,
+            documented_watershed_title="Estimated Sligo Creek review outline",
+            documented_watershed_organization="Operator digitized Google Earth review",
+        )
+
+    assert calls == ["import"]
+
+
+def test_full_pipeline_restricts_hydro_burn_network_to_documented_reference(
+    monkeypatch, tmp_path
+):
+    outputs = tmp_path / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    reference = outputs / "DocumentedWatershed_reference.gpkg"
+    flowlines = outputs / "NHDFlowline_clip.gpkg"
+    calls = []
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.import_documented_watershed",
+        lambda *args, **kwargs: reference.write_bytes(b"reference") or reference,
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: SimpleNamespace(download_dir=tmp_path / "downloads"),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs",
+        lambda *a, **k: SimpleNamespace(
+            hydro=SimpleNamespace(output_path=flowlines, catchment_path=None)
+        ),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.restrict_flowlines_to_documented_watershed",
+        lambda *args, **kwargs: calls.append(args) or (2082, 73),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "x.ohq")
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "x.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=38.97,
+        documented_watershed_source=source,
+        documented_watershed_title="Estimated Sligo Creek review outline",
+        documented_watershed_organization="Operator digitized Google Earth review",
+    )
+
+    assert calls == [(flowlines, reference)]

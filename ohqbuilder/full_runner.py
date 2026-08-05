@@ -517,6 +517,57 @@ def bounds_covering_outlet(
     )
 
 
+def restrict_flowlines_to_documented_watershed(
+    flowline_path: str | Path,
+    documented_reference: str | Path,
+    *,
+    reference_layer: str = REFERENCE_LAYER,
+    buffer_m: float = 250.0,
+) -> tuple[int, int]:
+    """Clip the burned hydrography network to a documented named watershed.
+
+    The acquisition rectangle can intentionally be wider than the named basin so
+    DEM downloads have edge room.  Burning every NHD line in that rectangle is
+    unsafe near confluences because adjacent named watersheds can steer the
+    routed outlet.  When a documented watershed is available, retain only lines
+    that intersect that polygon plus a small projected safety buffer.
+    """
+
+    import geopandas as gpd
+
+    flowline = Path(flowline_path).expanduser().resolve()
+    reference = Path(documented_reference).expanduser().resolve()
+    flowlines = gpd.read_file(flowline)
+    if flowlines.empty or flowlines.crs is None:
+        raise FullRunError(
+            f"Cannot restrict flowlines; layer is empty or missing CRS: {flowline}"
+        )
+    watershed = gpd.read_file(reference, layer=reference_layer).to_crs(flowlines.crs)
+    watershed = watershed[~watershed.geometry.is_empty & watershed.geometry.notna()]
+    if watershed.empty:
+        raise FullRunError(
+            f"Cannot restrict flowlines; documented watershed is empty: {reference}"
+        )
+
+    mask_geometry = watershed.geometry.unary_union
+    if buffer_m > 0:
+        mask_geometry = mask_geometry.buffer(buffer_m)
+    selected = flowlines[flowlines.geometry.intersects(mask_geometry)].copy()
+    if selected.empty:
+        raise FullRunError(
+            "Documented watershed restriction removed all NHD flowlines; verify the "
+            "documented boundary, outlet, CRS, and downloaded hydrography."
+        )
+
+    temp = flowline.with_name(flowline.stem + "_documented_filter.gpkg")
+    if temp.exists():
+        temp.unlink()
+    selected.to_file(temp, layer=flowline.stem, driver="GPKG")
+    flowline.unlink()
+    temp.replace(flowline)
+    return len(flowlines), len(selected)
+
+
 def run_full_pipeline(
     root: str | Path,
     site: str,
@@ -566,6 +617,42 @@ def run_full_pipeline(
             emit(f"Reviewed outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
         else:
             emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
+
+        documented_reference = (
+            Path(root).expanduser().resolve()
+            / site
+            / "outputs"
+            / REFERENCE_FILENAME
+        )
+        documented_reference_ready = False
+        if documented_watershed_source:
+            if not documented_watershed_title or not documented_watershed_organization:
+                raise FullRunError(
+                    "Documented watershed import requires a source title and organization."
+                )
+            try:
+                imported_reference = import_documented_watershed(
+                    documented_watershed_source,
+                    documented_reference,
+                    outlet_lon=lon,
+                    outlet_lat=lat,
+                    layer=documented_watershed_layer,
+                    name_field=documented_watershed_name_field,
+                    name=documented_watershed_name,
+                    source_title=documented_watershed_title,
+                    source_organization=documented_watershed_organization,
+                    source_url=documented_watershed_url,
+                    license_text=documented_watershed_license,
+                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
+                )
+            except DocumentedWatershedError as exc:
+                raise FullRunError(
+                    "Documented watershed import failed before routing; correct the "
+                    "outlet or use --documented-watershed-allow-outlet-outside only "
+                    f"for an explicitly reviewed exception: {exc}"
+                ) from exc
+            documented_reference_ready = True
+            emit(f"Imported documented watershed reference before routing: {imported_reference}")
         selected_bounds = acquisition_bounds(acquisition_area) if acquisition_area else None
         buffer_was_supplied = buffer_m is not None
         if buffer_m is None:
@@ -659,6 +746,15 @@ def run_full_pipeline(
         )
         materialized_hydro = getattr(materialized, "hydro", None)
         materialized_wbd = getattr(materialized, "wbd_reference", None)
+        if documented_reference_ready and materialized_hydro is not None:
+            before_count, after_count = restrict_flowlines_to_documented_watershed(
+                materialized_hydro.output_path,
+                documented_reference,
+            )
+            emit(
+                "Restricted NHD flowline burn network to documented watershed: "
+                f"{after_count} of {before_count} feature(s) retained."
+            )
         if materialized_wbd is not None:
             emit(
                 "WBD HUC12 reference ready (downloaded package or official service): "
@@ -732,29 +828,8 @@ def run_full_pipeline(
         generated_boundary = Path(root).expanduser().resolve() / site / "outputs" / "watershed_boundary.gpkg"
         generated_reaches = generated_boundary.with_name("reaches.gpkg")
         documented_reference = generated_boundary.with_name(REFERENCE_FILENAME)
-        if documented_watershed_source:
-            if not documented_watershed_title or not documented_watershed_organization:
-                raise FullRunError(
-                    "Documented watershed import requires a source title and organization."
-                )
-            try:
-                imported_reference = import_documented_watershed(
-                    documented_watershed_source,
-                    documented_reference,
-                    outlet_lon=lon,
-                    outlet_lat=lat,
-                    layer=documented_watershed_layer,
-                    name_field=documented_watershed_name_field,
-                    name=documented_watershed_name,
-                    source_title=documented_watershed_title,
-                    source_organization=documented_watershed_organization,
-                    source_url=documented_watershed_url,
-                    license_text=documented_watershed_license,
-                    require_outlet_containment=not documented_watershed_allow_outlet_outside,
-                )
-            except DocumentedWatershedError as exc:
-                raise FullRunError(f"Documented watershed import failed: {exc}") from exc
-            emit(f"Imported documented watershed reference: {imported_reference}")
+        if documented_watershed_source and not documented_reference_ready:
+            raise FullRunError("Documented watershed reference was not imported before routing.")
         if (
             materialized_hydro is not None
             and generated_reaches.is_file()
