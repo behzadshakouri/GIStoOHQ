@@ -75,6 +75,8 @@ def test_reach_extraction_adapts_threshold_to_tiny_demo_accumulation():
     assert "max_accumulation" in source
     assert "using adaptive threshold" in source
     assert "No raster-extracted reaches; clipping mapped flowlines as fallback" in source
+    assert "tiny_watershed_axis_fallback" in source
+    assert "No raster or mapped reaches intersect the delineated watershed" in source
 
 
 def test_reach_output_releases_stale_qgis_handle_before_rewrite():
@@ -86,6 +88,25 @@ def test_reach_output_releases_stale_qgis_handle_before_rewrite():
     assert "size_bytes=%s" in source
     assert "reaches.gpkg contains zero features" in source
     assert 'REACH_WRITER_REVISION = "stale-layer-release-v2"' in source
+
+
+
+def test_phase2_delineation_removes_stale_generated_outputs_before_wshed_creation():
+    source = Path("scripts/legacy_gis/delineatewatershed.py").read_text(encoding="utf-8")
+
+    assert "def remove_stale_phase2_outputs():" in source
+    assert 'os.path.join(OUT_DIR, "wshed_*.gpkg*")' in source
+    assert 'os.path.join(TEMP_DIR, "wshed_*")' in source
+    assert 'os.path.join(OUT_DIR, "subwatersheds.gpkg*")' in source
+    assert 'os.path.join(OUT_DIR, "pour_points_snapped.gpkg*")' in source
+    assert 'os.path.join(OUT_DIR, "topology.gpkg*")' in source
+    assert 'os.path.join(OUT_DIR, "pour_points.*")' not in source
+
+
+def test_whole_watershed_minimum_area_rejects_tiny_outlet_runs():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(encoding="utf-8")
+
+    assert 'globals().get("MIN_WATERSHED_AREA_KM2", 0.05)' in source
 
 
 def test_phase2_accepts_single_reach_watershed_without_interior_junctions():

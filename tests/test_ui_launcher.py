@@ -134,8 +134,8 @@ def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
         config_path=tmp_path / "config.yaml",
         root=tmp_path,
         site="Sligo",
-        lon=-77.0000,
-        lat=38.9700,
+        outlet_source=str(tmp_path / "SC outlet.kmz"),
+        snap_outlet_to_documented_watershed=True,
         method="upstream_network",
         acquisition_area=tmp_path / "intermediate" / "dem_acquisition_area.geojson",
         reference_source=str(source),
@@ -148,6 +148,11 @@ def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
     command = command_for_step("full-run", state)
     full_run = command.followup_argv[0]
 
+    assert "--outlet-source" in full_run
+    assert full_run[full_run.index("--outlet-source") + 1] == str(tmp_path / "SC outlet.kmz")
+    assert "--snap-outlet-to-documented-watershed" in full_run
+    assert "--lon" not in full_run
+    assert "--lat" not in full_run
     assert "--documented-watershed-source" in full_run
     assert full_run[full_run.index("--documented-watershed-source") + 1] == str(source)
     assert (
@@ -310,8 +315,12 @@ def test_bundled_sligo_config_uses_inside_documented_outlet():
     path = Path("examples/SligoCreek/dem_workflow.example.yaml")
     state = state_from_config(path, load_project_config(path))
 
-    assert state.lon == pytest.approx(-77.0000)
-    assert state.lat == pytest.approx(38.9700)
+    assert state.lon is None
+    assert state.lat is None
+    assert state.outlet_source == str(
+        Path("examples/SligoCreek/SC outlet.kmz").resolve()
+    )
+    assert state.snap_outlet_to_documented_watershed is True
     assert state.reference_source == str(
         Path("examples/SligoCreek/Estimated Sligo Creek.kmz").resolve()
     )

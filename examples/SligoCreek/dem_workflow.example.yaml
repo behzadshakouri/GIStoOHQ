@@ -5,14 +5,14 @@ site:
 spatial_input:
   mode: outlet
 outlet:
-  # Upstream Sligo Creek outlet candidate inside the estimated review outline.
-  # Keep this point upstream of the Northwest Branch confluence; moving it
-  # downstream would delineate a larger combined drainage system.
-  longitude: -77.0000
-  latitude: 38.9700
+  # Reviewed Sligo Creek outlet point from Google Earth. The full-run command
+  # prefers this KMZ over fallback CLI lon/lat values when --config is supplied.
+  source: SC outlet.kmz
   input_crs: EPSG:4326
   raw_path: inputs/outlet_raw.geojson
-  snap_to_flowline: true
+  snap_to_documented_watershed: true
+  documented_snapped_path: inputs/outlet_documented_snapped.geojson
+  snap_to_flowline: false
   snap_distance_m: 50
   snapped_path: inputs/outlet_snapped.geojson
 dem_acquisition:
