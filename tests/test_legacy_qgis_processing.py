@@ -75,6 +75,8 @@ def test_reach_extraction_adapts_threshold_to_tiny_demo_accumulation():
     assert "max_accumulation" in source
     assert "using adaptive threshold" in source
     assert "No raster-extracted reaches; clipping mapped flowlines as fallback" in source
+    assert "tiny_watershed_axis_fallback" in source
+    assert "No raster or mapped reaches intersect the delineated watershed" in source
 
 
 def test_reach_output_releases_stale_qgis_handle_before_rewrite():

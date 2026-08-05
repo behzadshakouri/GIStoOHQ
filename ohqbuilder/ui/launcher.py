@@ -1393,9 +1393,14 @@ class LauncherApp:
             ("Tile index", self.tile_index_var),
             ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
-        for row, (label, variable) in enumerate(rows):
-            tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
-            tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
+        form_rows = (len(rows) + 1) // 2
+        for index, (label, variable) in enumerate(rows):
+            row = index // 2
+            column = 0 if index % 2 == 0 else 3
+            tk.Label(frame, text=label).grid(row=row, column=column, sticky="w")
+            tk.Entry(frame, textvariable=variable, width=34).grid(
+                row=row, column=column + 1, sticky="ew"
+            )
             if label in {
                 "Config", "Manifest", "Flowlines", "Tile index", "Outlet KML/KMZ",
             }:
@@ -1405,21 +1410,23 @@ class LauncherApp:
                     command=lambda value=variable, is_config=label == "Config": self.browse_file(
                         value, load_config=is_config
                     ),
-                ).grid(row=row, column=2, sticky="w")
+                ).grid(row=row, column=column + 2, sticky="w")
             elif label in {"Raw DEM dir", "Root", "Source dir"}:
                 tk.Button(
                     frame,
                     text="Browse…",
                     command=lambda value=variable: self.browse_directory(value),
-                ).grid(row=row, column=2, sticky="w")
+                ).grid(row=row, column=column + 2, sticky="w")
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(4, weight=1)
         snap_doc = tk.Checkbutton(
             frame,
             text="Snap outside outlet to documented watershed boundary",
             variable=self.snap_outlet_doc_var,
         )
-        snap_doc.grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(2, 4))
+        snap_doc.grid(row=form_rows, column=0, columnspan=6, sticky="w", pady=(2, 4))
         project_buttons = tk.LabelFrame(frame, text="Project setup and controls")
-        project_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
+        project_buttons.grid(row=form_rows + 1, column=0, columnspan=6, sticky="ew", pady=4)
         project_buttons.columnconfigure(0, weight=1)
         project_buttons.columnconfigure(1, weight=1)
         project_buttons.columnconfigure(2, weight=1)
@@ -1506,7 +1513,7 @@ class LauncherApp:
             group.columnconfigure(0, weight=1)
 
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
-        dem_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
+        dem_buttons.grid(row=form_rows + 2, column=0, columnspan=6, sticky="ew", pady=4)
         for index, step in enumerate((
             "init-dem-config",
             "prepare-dem",
@@ -1526,8 +1533,8 @@ class LauncherApp:
         )
         for column in range(4):
             dem_buttons.columnconfigure(column, weight=1, uniform="dem_buttons")
-        ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
-        ohq_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
+        output_buttons = tk.LabelFrame(frame, text="2. Model outputs (OHQ and HEC-HMS)")
+        output_buttons.grid(row=form_rows + 3, column=0, columnspan=6, sticky="ew", pady=4)
         for index, (label, step) in enumerate((
             ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
@@ -1535,37 +1542,25 @@ class LauncherApp:
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
+            ("Build HEC-HMS", "build-hms"),
+            ("Validate HEC-HMS", "validate-hms"),
             ("Promote reviewed pour points", "promote-pour-points"),
             ("Import documented watershed", "import-watershed-reference"),
         )):
             button = tk.Button(
-                ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
+                output_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
-            button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
+            button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
             self.step_buttons[step] = button
-        for column in range(3):
-            ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
-        hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
-        hms_buttons.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="ew", pady=4)
-        for index, (label, step) in enumerate((
-            ("Build HEC-HMS", "build-hms"),
-            ("Validate HEC-HMS", "validate-hms"),
-        )):
-            button = tk.Button(
-                hms_buttons, text=label, command=lambda value=step: self.run_step(value)
-            )
-            button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
-            self.workflow_buttons.append(button)
-            self.step_buttons[step] = button
-            hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
+        for column in range(4):
+            output_buttons.columnconfigure(column, weight=1, uniform="output_buttons")
         self.log = tk.Text(frame, height=14, width=100)
-        self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
+        self.log.grid(row=form_rows + 4, column=0, columnspan=6, sticky="nsew")
         tk.Button(frame, text="Clear log", command=self.clear_log).grid(
-            row=len(rows) + 5, column=0, columnspan=2, sticky="e", pady=(4, 0)
+            row=form_rows + 5, column=0, columnspan=6, sticky="e", pady=(4, 0)
         )
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(len(rows) + 4, weight=1)
+        frame.rowconfigure(form_rows + 4, weight=1)
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""
