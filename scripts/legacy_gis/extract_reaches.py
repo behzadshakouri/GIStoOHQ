@@ -90,8 +90,8 @@ WATERSHED_REL = "watershed_boundary.gpkg"   # outer boundary polygon (whole site
 #  before interior pour points are placed by hand.)
 
 # --- channel-initiation parameter ------------------------------------------
-STREAM_AREA_FRACTION = 0.03      # A_crit = fraction * watershed area
-A_CRIT_FLOOR_KM2     = 0.05      # clamp A_crit to this floor; None to disable
+STREAM_AREA_FRACTION = 0.015     # lower threshold to recover mapped tributaries
+A_CRIT_FLOOR_KM2     = 0.02      # clamp A_crit to this floor; None to disable
 
 SPLIT_AT_JUNCTIONS   = False     # confluence-only for now. r.stream.extract
                                  # splits at confluences + gives stream/next_stream.
