@@ -1359,8 +1359,24 @@ class LauncherApp:
 
     def _build(self) -> None:
         tk = self.tk
-        frame = tk.Frame(self.root, padx=10, pady=10)
-        frame.pack(fill="both", expand=True)
+        container = tk.Frame(self.root)
+        container.pack(fill="both", expand=True)
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        frame = tk.Frame(canvas, padx=10, pady=10)
+        window_id = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def sync_scroll_region(_event=None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_frame_width(event) -> None:
+            canvas.itemconfigure(window_id, width=event.width)
+
+        frame.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_frame_width)
         rows = [
             ("Config", self.config_var),
             ("Manifest", self.manifest_var),
@@ -1402,27 +1418,30 @@ class LauncherApp:
             variable=self.snap_outlet_doc_var,
         )
         snap_doc.grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(2, 4))
-        project_buttons = tk.LabelFrame(frame, text="Project and map")
+        project_buttons = tk.LabelFrame(frame, text="Project setup and controls")
         project_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
-        project_specs = (
+        project_buttons.columnconfigure(0, weight=1)
+        project_buttons.columnconfigure(1, weight=1)
+        project_buttons.columnconfigure(2, weight=1)
+
+        config_group = tk.LabelFrame(project_buttons, text="Config")
+        config_group.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        map_group = tk.LabelFrame(project_buttons, text="Map / review")
+        map_group.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
+        run_group = tk.LabelFrame(project_buttons, text="Run controls")
+        run_group.grid(row=0, column=2, sticky="nsew", padx=2, pady=2)
+
+        config_specs = (
             ("Load config", self.load_config),
             ("Save config", self.save_config),
-            ("Preview acquisition", self.preview_acquisition),
-            ("Pick outlet", self.pick_outlet_map),
-            ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
-            ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
-            ("Documented watershed…", self.configure_documented_watershed),
         )
-        for index, (label, command) in enumerate(project_specs):
-            tk.Button(project_buttons, text=label, command=command).grid(
-                row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew"
+        for index, (label, command) in enumerate(config_specs):
+            tk.Button(config_group, text=label, command=command).grid(
+                row=index, column=0, padx=2, pady=2, sticky="ew"
             )
-        examples_button = tk.Menubutton(
-            project_buttons,
-            text="Examples ▾",
-            relief="raised",
-        )
+
+        examples_button = tk.Menubutton(config_group, text="Examples ▾", relief="raised")
         examples_menu = tk.Menu(examples_button, tearoff=False)
         examples_menu.add_command(
             label="Sligo Creek",
@@ -1437,47 +1456,57 @@ class LauncherApp:
             ),
         )
         examples_button.config(menu=examples_menu)
-        examples_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        examples_button.grid(row=len(config_specs), column=0, padx=2, pady=2, sticky="ew")
+
+        map_specs = (
+            ("Preview acquisition", self.preview_acquisition),
+            ("Pick outlet", self.pick_outlet_map),
+            ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
+            ("Draw polygon", lambda: self.open_map_picker("Polygon")),
+            ("Documented watershed…", self.configure_documented_watershed),
+            ("Open generated layers in QGIS", self.open_generated_layers_in_qgis),
+        )
+        for index, (label, command) in enumerate(map_specs):
+            tk.Button(map_group, text=label, command=command).grid(
+                row=index, column=0, padx=2, pady=2, sticky="ew"
+            )
+
         recommended_button = tk.Button(
-            project_buttons,
+            run_group,
             text="▶ RUN RECOMMENDED NEXT STEP",
             command=self.run_recommended_step,
         )
-        recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        recommended_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
+        self.stop_button = tk.Button(
+            run_group, text="■ STOP", command=self.stop_workflow, state="disabled"
+        )
+        self.stop_button.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Use reviewed pour points",
             variable=self.reviewed_points_var,
-        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        ).grid(row=2, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Overwrite existing promoted pour points",
             variable=self.overwrite_promoted_var,
-        ).grid(row=3, column=2, columnspan=2, sticky="w")
+        ).grid(row=3, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Use edited existing outlet.shp",
             variable=self.use_existing_outlet_var,
-        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        ).grid(row=4, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Offline: reuse existing downloads",
             variable=self.reuse_downloads_var,
-        ).grid(row=4, column=2, columnspan=2, sticky="w")
-        tk.Button(
-            project_buttons,
-            text="Open generated layers in QGIS",
-            command=self.open_generated_layers_in_qgis,
-        ).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
-        self.stop_button = tk.Button(
-            project_buttons, text="■ STOP", command=self.stop_workflow, state="disabled"
-        )
-        self.stop_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
-        for column in range(4):
-            project_buttons.columnconfigure(column, weight=1, uniform="project_buttons")
+        ).grid(row=5, column=0, sticky="w")
+        for group in (config_group, map_group, run_group):
+            group.columnconfigure(0, weight=1)
+
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
-        dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
+        dem_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
         for index, step in enumerate((
             "init-dem-config",
             "prepare-dem",
@@ -1498,7 +1527,7 @@ class LauncherApp:
         for column in range(4):
             dem_buttons.columnconfigure(column, weight=1, uniform="dem_buttons")
         ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
-        ohq_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
+        ohq_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
         for index, (label, step) in enumerate((
             ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
@@ -1518,7 +1547,7 @@ class LauncherApp:
         for column in range(3):
             ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
         hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
-        hms_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
+        hms_buttons.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="ew", pady=4)
         for index, (label, step) in enumerate((
             ("Build HEC-HMS", "build-hms"),
             ("Validate HEC-HMS", "validate-hms"),
