@@ -27,6 +27,7 @@ from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
 from .phase1_fetcher import write_outlet_shapefile
 from .dem_downloader import is_transient_remote_error
+from .dem_acquisition import read_outlet_point, snap_outlet_to_boundary
 from .documented_watershed import (
     DocumentedWatershedError,
     REFERENCE_FILENAME,
@@ -590,6 +591,9 @@ def run_full_pipeline(
     nhdplus_snap_distance_m: float = 50.0,
     use_existing_outlet: bool = False,
     reuse_downloads: bool = False,
+    outlet_source: str | Path | None = None,
+    snap_outlet_to_documented_watershed: bool = False,
+    documented_snapped_outlet_path: str | Path | None = None,
     documented_watershed_source: str | Path | None = None,
     documented_watershed_layer: str | None = None,
     documented_watershed_name_field: str | None = None,
@@ -615,8 +619,37 @@ def run_full_pipeline(
             lon, lat = existing_outlet_lonlat(root, site)
             emit("Outlet source: existing outputs/outlet.shp")
             emit(f"Reviewed outlet in EPSG:4326: {lon:.10f}, {lat:.10f}")
+        elif outlet_source:
+            lon, lat = read_outlet_point(outlet_source)
+            emit(f"Outlet source: KML/KMZ point {Path(outlet_source).expanduser().resolve()}")
+            emit(f"Outlet from KML/KMZ in EPSG:4326: {lon:.10f}, {lat:.10f}")
         else:
             emit("Outlet source: CLI longitude/latitude (outlet.shp will be recreated)")
+
+        if (
+            not use_existing_outlet
+            and snap_outlet_to_documented_watershed
+            and documented_watershed_source
+        ):
+            snap_output = (
+                Path(documented_snapped_outlet_path).expanduser().resolve()
+                if documented_snapped_outlet_path
+                else Path(root).expanduser().resolve()
+                / site
+                / "outputs"
+                / "outlet_documented_snapped.geojson"
+            )
+            boundary_snap = snap_outlet_to_boundary(
+                lon, lat, documented_watershed_source, output_path=snap_output
+            )
+            lon, lat = boundary_snap.snapped_lon, boundary_snap.snapped_lat
+            if boundary_snap.was_inside:
+                emit("Outlet is inside documented watershed; no boundary move needed.")
+            else:
+                emit(
+                    "Moved outlet to nearest documented watershed boundary point "
+                    f"({boundary_snap.distance_m:.2f} m): {snap_output}"
+                )
 
         documented_reference = (
             Path(root).expanduser().resolve()
