@@ -4,6 +4,7 @@
 
 import importlib
 import importlib.util
+import glob
 import os
 import sys
 import numpy as np
@@ -188,6 +189,41 @@ print("Site        :", site_path)
 print("Flow dir    :", FLOWDIR_PATH)
 print("Pour points :", POINTS_PATH)
 print("Outputs     :", OUT_DIR)
+
+
+def remove_stale_phase2_outputs():
+    """Delete stale generated Phase 2 products before delineating new wshed_* files."""
+
+    patterns = [
+        os.path.join(OUT_DIR, "wshed_*.gpkg*"),
+        os.path.join(TEMP_DIR, "wshed_*"),
+        os.path.join(OUT_DIR, "subwatersheds.gpkg*"),
+        os.path.join(OUT_DIR, "subwatershed_params.gpkg*"),
+        os.path.join(OUT_DIR, "subwatershed_boundary.gpkg*"),
+        os.path.join(OUT_DIR, "pour_points_snapped.gpkg*"),
+        os.path.join(OUT_DIR, "longest_flow_paths.gpkg*"),
+        os.path.join(OUT_DIR, "topology.gpkg*"),
+        os.path.join(OUT_DIR, "topology_connectors.gpkg*"),
+        os.path.join(OUT_DIR, "topology_connectors_subbasins.gpkg*"),
+    ]
+    removed = []
+    for pattern in patterns:
+        for path in glob.glob(pattern):
+            if os.path.isdir(path):
+                continue
+            try:
+                os.remove(path)
+                removed.append(path)
+            except OSError as exc:
+                raise Exception(
+                    "Could not remove stale Phase 2 output %s; close it in QGIS and rerun: %s"
+                    % (path, exc)
+                )
+    if removed:
+        print("Removed %d stale Phase 2 output file(s)." % len(removed))
+
+
+remove_stale_phase2_outputs()
 
 
 def grass_id(name):
