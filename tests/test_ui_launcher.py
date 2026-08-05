@@ -134,8 +134,8 @@ def test_launcher_full_run_passes_documented_watershed_config(tmp_path):
         config_path=tmp_path / "config.yaml",
         root=tmp_path,
         site="Sligo",
-        lon=-76.9744266065,
-        lat=38.9571888036,
+        lon=-77.0000,
+        lat=38.9700,
         method="upstream_network",
         acquisition_area=tmp_path / "intermediate" / "dem_acquisition_area.geojson",
         reference_source=str(source),
@@ -306,16 +306,16 @@ def test_sligo_demo_reset_args_preserve_map_picked_coordinates(tmp_path):
     assert str(args["tile_index"]) == "indexes/usgs_3dep_tiles.demo.geojson"
 
 
-def test_bundled_sligo_config_uses_reviewed_routed_outlet():
+def test_bundled_sligo_config_uses_inside_documented_outlet():
     path = Path("examples/SligoCreek/dem_workflow.example.yaml")
     state = state_from_config(path, load_project_config(path))
 
-    assert state.lon == pytest.approx(-76.9744266065)
-    assert state.lat == pytest.approx(38.9571888036)
+    assert state.lon == pytest.approx(-77.0000)
+    assert state.lat == pytest.approx(38.9700)
     assert state.reference_source == str(
         Path("examples/SligoCreek/Estimated Sligo Creek.kmz").resolve()
     )
-    assert state.reference_allow_outlet_outside is True
+    assert state.reference_allow_outlet_outside is False
 
 
 def test_state_with_config_defaults_keeps_map_picked_outlet_and_config_paths(tmp_path):

@@ -1,7 +1,11 @@
 import json
+from zipfile import ZipFile
 
 from ohqbuilder.cli import main
-from ohqbuilder.dem_acquisition import create_outlet_buffer_area
+from ohqbuilder.dem_acquisition import (
+    create_documented_watershed_area,
+    create_outlet_buffer_area,
+)
 from ohqbuilder.dem_materializer import read_dem_manifest
 
 
@@ -24,6 +28,32 @@ def test_create_oriented_outlet_buffer_area_writes_geojson(tmp_path):
     assert props["mode"] == "oriented_outlet_buffer"
     assert props["area_km2"] == 304
     assert len(data["features"][0]["geometry"]["coordinates"][0]) == 5
+
+
+def test_documented_watershed_area_uses_all_closed_kmz_boundaries(tmp_path):
+    kmz = tmp_path / "estimated.kmz"
+    kml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document>
+<Placemark><name>older upper layer</name><LineString><coordinates>
+-77.01,39.00,0 -77.00,39.00,0 -77.00,39.01,0 -77.01,39.01,0 -77.01,39.00,0
+</coordinates></LineString></Placemark>
+<Placemark><name>latest lower layer</name><LineString><coordinates>
+-77.10,38.90,0 -76.90,38.90,0 -76.90,39.10,0 -77.10,39.10,0 -77.10,38.90,0
+</coordinates></LineString></Placemark>
+</Document></kml>
+"""
+    with ZipFile(kmz, "w") as archive:
+        archive.writestr("doc.kml", kml)
+
+    result = create_documented_watershed_area(
+        kmz,
+        tmp_path / "area.geojson",
+        uncertainty_margin_km=0,
+    )
+
+    assert result.bounds == (-77.10, 38.90, -76.90, 39.10)
+    data = json.loads(result.output_path.read_text(encoding="utf-8"))
+    assert data["features"][0]["properties"]["source_boundary_point_count"] == 10
 
 
 def test_read_dem_manifest_uses_explicit_tiles(tmp_path):

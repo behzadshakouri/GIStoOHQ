@@ -210,24 +210,35 @@ def _read_kml_or_kmz_boundary(path: Path) -> list[tuple[float, float]]:
 
     root = ElementTree.fromstring(content)
     namespace = {"k": "http://www.opengis.net/kml/2.2"}
+    boundaries: list[tuple[float, float]] = []
+    saw_open_boundary = False
     for placemark in root.findall(".//k:Placemark", namespace):
-        polygon_text = placemark.findtext(
-            ".//k:Polygon//k:outerBoundaryIs//k:coordinates", namespaces=namespace
-        )
-        line_text = placemark.findtext(
-            ".//k:LineString/k:coordinates", namespaces=namespace
-        )
-        text = polygon_text or line_text
-        if not text:
-            continue
-        coords = _coordinates_from_kml_text(text)
-        if len(coords) < 4:
-            continue
-        if coords[0] != coords[-1]:
-            raise DemAcquisitionError(
-                "Documented watershed KML/KMZ lines must be closed to create an acquisition area."
+        coordinate_texts = [
+            text
+            for text in placemark.findall(
+                ".//k:Polygon//k:outerBoundaryIs//k:coordinates", namespace
             )
-        return coords
+            if text.text
+        ]
+        coordinate_texts.extend(
+            text
+            for text in placemark.findall(".//k:LineString/k:coordinates", namespace)
+            if text.text
+        )
+        for coordinate_text in coordinate_texts:
+            coords = _coordinates_from_kml_text(coordinate_text.text or "")
+            if len(coords) < 4:
+                continue
+            if coords[0] != coords[-1]:
+                saw_open_boundary = True
+                continue
+            boundaries.extend(coords)
+    if boundaries:
+        return boundaries
+    if saw_open_boundary:
+        raise DemAcquisitionError(
+            "Documented watershed KML/KMZ lines must be closed to create an acquisition area."
+        )
     raise DemAcquisitionError(
         f"KML/KMZ contains no closed Polygon or LineString boundary: {path}"
     )
