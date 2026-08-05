@@ -363,6 +363,15 @@ for v in vectors:
             print("     WARNING: invalid vector skipped")
             continue
 
+        fixed = processing.run(
+            "native:fixgeometries",
+            {
+                "INPUT": src,
+                "OUTPUT": "TEMPORARY_OUTPUT",
+            },
+        )
+        src = fixed["OUTPUT"]
+
         if not vcrs.isValid():
             print("     input has no CRS -> assigning", crs_authid)
             asg = processing.run(
@@ -385,6 +394,15 @@ for v in vectors:
                 },
             )
             src = rep["OUTPUT"]
+
+        fixed = processing.run(
+            "native:fixgeometries",
+            {
+                "INPUT": src,
+                "OUTPUT": "TEMPORARY_OUTPUT",
+            },
+        )
+        src = fixed["OUTPUT"]
 
         remove_existing_gpkg(out_path)
 

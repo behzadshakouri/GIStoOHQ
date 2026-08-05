@@ -5,6 +5,7 @@ import zipfile
 
 import pytest
 
+from ohqbuilder.documented_watershed import DocumentedWatershedError
 from ohqbuilder.full_runner import (
     FullRunError,
     acquisition_bounds,
@@ -752,3 +753,38 @@ def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatc
     compare_call = next(call for call in calls if call[0] == "compare")
     assert compare_call[2] == outputs / "DocumentedWatershed_reference.gpkg"
     assert compare_call[3]["reference_kind"] == "documented_named_watershed"
+
+
+def test_full_pipeline_fails_before_routing_when_documented_outlet_is_outside(
+    monkeypatch, tmp_path
+):
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    calls = []
+
+    def fake_import(*args, **kwargs):
+        calls.append("import")
+        raise DocumentedWatershedError("Contains outlet: False")
+
+    monkeypatch.setattr("ohqbuilder.full_runner.import_documented_watershed", fake_import)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.download_all_inputs",
+        lambda *a, **k: calls.append("download"),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.run_hydrology_preprocessing",
+        lambda *a, **k: calls.append("routing"),
+    )
+
+    with pytest.raises(FullRunError, match="failed before routing"):
+        run_full_pipeline(
+            tmp_path,
+            "SITE_A",
+            lon=-76.9744266065,
+            lat=38.9571888036,
+            documented_watershed_source=source,
+            documented_watershed_title="Estimated Sligo Creek review outline",
+            documented_watershed_organization="Operator digitized Google Earth review",
+        )
+
+    assert calls == ["import"]
