@@ -670,6 +670,80 @@ def test_full_pipeline_preserves_area_that_already_contains_outlet(monkeypatch, 
     assert calls["download"]["buffer_m"] < 500.0
 
 
+
+def test_full_pipeline_prefers_outlet_kmz_and_boundary_snap(monkeypatch, tmp_path):
+    calls = {}
+    outputs = tmp_path / "SITE_A" / "outputs"
+    outputs.mkdir(parents=True)
+    source = tmp_path / "Estimated Sligo Creek.kmz"
+    source.write_bytes(b"kmz")
+    outlet = tmp_path / "SC outlet.kmz"
+    outlet.write_bytes(b"kmz")
+
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.read_outlet_point",
+        lambda path: calls.update({"outlet_source": Path(path)}) or (-76.95, 38.98),
+    )
+
+    def fake_snap(lon, lat, boundary_source, *, output_path=None):
+        calls["snap"] = (lon, lat, Path(boundary_source), Path(output_path))
+        return SimpleNamespace(
+            snapped_lon=-76.95,
+            snapped_lat=39.0,
+            distance_m=2226.4,
+            was_inside=False,
+        )
+
+    def fake_import(source_arg, output_arg, **kwargs):
+        calls["import"] = kwargs
+        Path(output_arg).write_bytes(b"reference")
+        return Path(output_arg)
+
+    def fake_download(*args, **kwargs):
+        calls["download"] = kwargs
+        return SimpleNamespace(download_dir=tmp_path / "downloads")
+
+    monkeypatch.setattr("ohqbuilder.full_runner.snap_outlet_to_boundary", fake_snap)
+    monkeypatch.setattr("ohqbuilder.full_runner.import_documented_watershed", fake_import)
+    monkeypatch.setattr("ohqbuilder.full_runner.download_all_inputs", fake_download)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.materialize_source_inputs", lambda *a, **k: SimpleNamespace()
+    )
+    monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.InputValidator",
+        lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_ohq_project", lambda *a, **k: tmp_path / "SITE_A.ohq"
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.full_runner.build_hms_project",
+        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "SITE_A.hms"),
+    )
+
+    run_full_pipeline(
+        tmp_path,
+        "SITE_A",
+        lon=-77.0,
+        lat=38.97,
+        outlet_source=outlet,
+        snap_outlet_to_documented_watershed=True,
+        documented_watershed_source=source,
+        documented_watershed_title="Estimated Sligo Creek review outline",
+        documented_watershed_organization="Operator digitized Google Earth review",
+    )
+
+    assert calls["outlet_source"] == outlet
+    assert calls["snap"][:3] == (-76.95, 38.98, source)
+    assert calls["import"]["outlet_lon"] == -76.95
+    assert calls["import"]["outlet_lat"] == 39.0
+    assert calls["import"]["require_outlet_containment"] is False
+    assert calls["download"]["lon"] == -76.95
+    assert calls["download"]["lat"] == 39.0
+
+
 def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatch, tmp_path):
     calls = []
     outputs = tmp_path / "SITE_A" / "outputs"
