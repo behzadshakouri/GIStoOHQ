@@ -730,7 +730,7 @@ def test_sligo_creek_demo_config_runs_prepare(tmp_path):
     assert main(["run-dem-prep", "--config", str(project / "dem_workflow.example.yaml")]) == 0
 
     assert (project / "inputs" / "outlet_raw.geojson").exists()
-    assert (project / "inputs" / "outlet_snapped.geojson").exists()
+    assert (project / "inputs" / "outlet_documented_snapped.geojson").exists()
     assert (project / "intermediate" / "dem_acquisition_area.geojson").exists()
     manifest = json.loads(
         (project / "intermediate" / "dem_download_manifest.json").read_text(encoding="utf-8")
