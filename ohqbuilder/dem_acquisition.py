@@ -39,6 +39,17 @@ class SnappedOutlet:
     output_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class BoundarySnappedOutlet:
+    raw_lon: float
+    raw_lat: float
+    snapped_lon: float
+    snapped_lat: float
+    distance_m: float
+    was_inside: bool
+    output_path: Path | None = None
+
+
 def _closest_point_on_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> tuple[float, float]:
     dx = bx - ax
     dy = by - ay
@@ -71,6 +82,85 @@ def write_outlet_point(lon: float, lat: float, output_path: str | Path, *, sourc
     _write_geojson_point(output, lon, lat, {"source": source, "outlet_lon": lon, "outlet_lat": lat})
     return output
 
+
+
+def read_outlet_point(source: str | Path) -> tuple[float, float]:
+    """Read the first EPSG:4326 Point coordinate from a KML/KMZ outlet file."""
+
+    source_path = Path(source).expanduser().resolve()
+    if source_path.suffix.lower() not in {".kml", ".kmz"}:
+        raise DemAcquisitionError("outlet.source requires a KML/KMZ point file.")
+    if source_path.suffix.lower() == ".kmz":
+        with ZipFile(source_path) as archive:
+            kml_names = [
+                name for name in archive.namelist() if name.lower().endswith(".kml")
+            ]
+            if not kml_names:
+                raise DemAcquisitionError(f"KMZ contains no KML document: {source_path}")
+            content = archive.read(kml_names[0])
+    else:
+        content = source_path.read_bytes()
+
+    root = ElementTree.fromstring(content)
+    namespace = {"k": "http://www.opengis.net/kml/2.2"}
+    for coordinate_text in root.findall(".//k:Point/k:coordinates", namespace):
+        coords = _coordinates_from_kml_text(coordinate_text.text or "")
+        if coords:
+            return coords[0]
+    raise DemAcquisitionError(f"KML/KMZ contains no Point outlet coordinate: {source_path}")
+
+
+def snap_outlet_to_boundary(
+    lon: float,
+    lat: float,
+    boundary_source: str | Path,
+    *,
+    output_path: str | Path | None = None,
+) -> BoundarySnappedOutlet:
+    """Move an outlet onto the nearest possible point of a documented boundary.
+
+    If the outlet is already inside any documented watershed ring, it is preserved.
+    Otherwise the returned point is the nearest point on the KML/KMZ boundary. This
+    intentionally uses pure-Python geometry helpers so the DEM planning workflow
+    does not depend on binary GIS packages.
+    """
+
+    boundary_path = Path(boundary_source).expanduser().resolve()
+    rings = _read_kml_or_kmz_boundary_rings(boundary_path)
+    inside = any(_point_in_ring((lon, lat), ring) for ring in rings)
+    if inside:
+        snapped_lon, snapped_lat, distance = lon, lat, 0.0
+    else:
+        local_rings = [
+            [_lonlat_to_local_m(point_lon, point_lat, lon, lat) for point_lon, point_lat in ring]
+            for ring in rings
+        ]
+        best: tuple[float, float, float] | None = None
+        for local_ring in local_rings:
+            for (ax, ay), (bx, by) in _ring_edges(local_ring):
+                sx, sy = _closest_point_on_segment(0.0, 0.0, ax, ay, bx, by)
+                candidate_distance = math.hypot(sx, sy)
+                if best is None or candidate_distance < best[2]:
+                    best = (sx, sy, candidate_distance)
+        if best is None:
+            raise DemAcquisitionError("Documented watershed boundary has no segments for outlet snapping.")
+        snapped_lon, snapped_lat = _local_m_to_lonlat(best[0], best[1], lon, lat)
+        distance = best[2]
+    output = Path(output_path).expanduser().resolve() if output_path is not None else None
+    if output is not None:
+        _write_geojson_point(
+            output,
+            snapped_lon,
+            snapped_lat,
+            {
+                "raw_lon": lon,
+                "raw_lat": lat,
+                "snap_distance_m": distance,
+                "was_inside_documented_watershed": inside,
+                "boundary_source": str(boundary_path),
+            },
+        )
+    return BoundarySnappedOutlet(lon, lat, snapped_lon, snapped_lat, distance, inside, output)
 
 def snap_outlet_to_flowlines(
     lon: float,
@@ -197,6 +287,10 @@ def _coordinates_from_kml_text(text: str) -> list[tuple[float, float]]:
 
 
 def _read_kml_or_kmz_boundary(path: Path) -> list[tuple[float, float]]:
+    return [point for ring in _read_kml_or_kmz_boundary_rings(path) for point in ring]
+
+
+def _read_kml_or_kmz_boundary_rings(path: Path) -> list[list[tuple[float, float]]]:
     if path.suffix.lower() == ".kmz":
         with ZipFile(path) as archive:
             kml_names = [
@@ -210,7 +304,7 @@ def _read_kml_or_kmz_boundary(path: Path) -> list[tuple[float, float]]:
 
     root = ElementTree.fromstring(content)
     namespace = {"k": "http://www.opengis.net/kml/2.2"}
-    boundaries: list[tuple[float, float]] = []
+    boundaries: list[list[tuple[float, float]]] = []
     saw_open_boundary = False
     for placemark in root.findall(".//k:Placemark", namespace):
         coordinate_texts = [
@@ -232,7 +326,7 @@ def _read_kml_or_kmz_boundary(path: Path) -> list[tuple[float, float]]:
             if coords[0] != coords[-1]:
                 saw_open_boundary = True
                 continue
-            boundaries.extend(coords)
+            boundaries.append(coords)
     if boundaries:
         return boundaries
     if saw_open_boundary:
