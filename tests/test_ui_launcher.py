@@ -611,6 +611,9 @@ def test_john_mccormack_example_config_is_loadable():
     assert config["project"]["title"] == "3600 John McCormack Rd NE Plan Set 20240709"
     assert config["site"]["target_crs"] == "EPSG:26918"
     assert config["dem_acquisition"]["method"] == "outlet_buffer"
+    assert config["dem_acquisition"]["upstream_km"] == 0.5
+    assert config["dem_acquisition"]["downstream_km"] == 0.5
+    assert config["dem_acquisition"]["lateral_km"] == 0.5
 
 
 def test_use_expanded_acquisition_promotes_validation_output(tmp_path):

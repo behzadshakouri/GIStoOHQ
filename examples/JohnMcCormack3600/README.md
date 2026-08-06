@@ -3,10 +3,10 @@
 This is a starter workflow for **3600 John McCormack Rd NE Plan Set 20240709**.
 The repository does not include the plan-set documents or authoritative survey, outfall, drainage-boundary, or hydrography data. The example now uses the outlet candidate supplied in `JM.kmz`: **38.93589535566567, -76.99597205373109**. Public basemaps can locate the point, but they do not establish the private/site storm-drain connection. Consequently the repository treats it as a **local drainage candidate**, not a surveyed or record-drawing-confirmed outfall. Reconcile it with the 2024-07-09 plan-set drainage structures, DC Water records, and a field survey before final design.
 
-The configured acquisition area uses a **200 m half-width** (a focused 400 m by 400 m window) around the candidate. That scale is intended to assess John McCormack Road and its immediate surroundings for bioretention; it is not a watershed-scale delineation. The machine-readable point, extent, and limitations are recorded in `outlet_and_extent.geojson`. Useful authoritative follow-up sources are the [DC Open Data portal](https://opendata.dc.gov/) and [DC Water](https://www.dcwater.com/), because a surface-water web map alone cannot verify a buried storm-sewer outlet.
+The configured acquisition area uses a **500 m half-width** (a 1 km by 1 km window) around the candidate. That scale provides more local drainage context around John McCormack Road for bioretention screening; it is still not a watershed-scale delineation. The machine-readable point, extent, and limitations are recorded in `outlet_and_extent.geojson`. Useful authoritative follow-up sources are the [DC Open Data portal](https://opendata.dc.gov/) and [DC Water](https://www.dcwater.com/), because a surface-water web map alone cannot verify a buried storm-sewer outlet.
 
 If **FULL RUN** is pressed without drawing an area, the UI first regenerates the
-configured 400 m by 400 m default polygon and passes it to `full-run`. Because
+configured 1 km by 1 km default polygon and passes it to `full-run`. Because
 the outlet is already inside that polygon, full-run preserves its clipping
 bounds rather than replacing it with the former 500 m outlet safety extent. Its
 default source query radius is derived from the polygon instead of reverting to

@@ -20,10 +20,10 @@ outlet:
 dem_acquisition:
   method: outlet_buffer
   acquisition_area: intermediate/dem_acquisition_area.geojson
-  # A 200 m half-width gives a focused 400 m x 400 m street/near-area window.
-  upstream_km: 0.2
-  downstream_km: 0.2
-  lateral_km: 0.2
+  # A 500 m half-width gives a 1 km x 1 km local study window.
+  upstream_km: 0.5
+  downstream_km: 0.5
+  lateral_km: 0.5
   auto_expand: true
   directional_expansion: true
   boundary_safety_distance_m: 50
