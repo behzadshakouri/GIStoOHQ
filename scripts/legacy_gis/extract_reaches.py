@@ -90,8 +90,8 @@ WATERSHED_REL = "watershed_boundary.gpkg"   # outer boundary polygon (whole site
 #  before interior pour points are placed by hand.)
 
 # --- channel-initiation parameter ------------------------------------------
-STREAM_AREA_FRACTION = 0.03      # A_crit = fraction * watershed area
-A_CRIT_FLOOR_KM2     = 0.05      # clamp A_crit to this floor; None to disable
+STREAM_AREA_FRACTION = 0.015     # lower threshold to recover mapped tributaries
+A_CRIT_FLOOR_KM2     = 0.02      # clamp A_crit to this floor; None to disable
 
 SPLIT_AT_JUNCTIONS   = False     # confluence-only for now. r.stream.extract
                                  # splits at confluences + gives stream/next_stream.
@@ -193,6 +193,50 @@ def grass_id(name):
     if reg.algorithmById("grass:r.watershed"):
         return "grass:" + name
     return "grass7:" + name
+
+
+def _feature_count(layer_or_path, name):
+    layer = QgsVectorLayer(layer_or_path, name, "ogr") if isinstance(layer_or_path, str) else layer_or_path
+    return layer.featureCount() if layer and layer.isValid() else 0
+
+
+def _single_reach_from_watershed_axis(watershed_layer, target_crs):
+    """Create a last-resort synthetic reach through a tiny delineated watershed."""
+
+    from qgis.core import QgsFeature, QgsField, QgsGeometry, QgsPointXY, QgsVectorLayer
+    from qgis.PyQt.QtCore import QVariant
+
+    extent = watershed_layer.extent()
+    center = extent.center()
+    width = extent.width()
+    height = extent.height()
+    if width <= 0 and height <= 0:
+        raise Exception("Cannot create fallback reach from a zero-size watershed extent.")
+    if width >= height:
+        start = QgsPointXY(extent.xMinimum(), center.y())
+        end = QgsPointXY(extent.xMaximum(), center.y())
+    else:
+        start = QgsPointXY(center.x(), extent.yMaximum())
+        end = QgsPointXY(center.x(), extent.yMinimum())
+
+    memory = QgsVectorLayer("LineString?crs=%s" % target_crs.authid(), "synthetic_reach", "memory")
+    provider = memory.dataProvider()
+    provider.addAttributes([QgsField("source", QVariant.String)])
+    memory.updateFields()
+    feature = QgsFeature(memory.fields())
+    feature.setGeometry(QgsGeometry.fromPolylineXY([start, end]))
+    feature["source"] = "tiny_watershed_axis_fallback"
+    provider.addFeature(feature)
+    memory.updateExtents()
+    clipped = processing.run(
+        "native:clip",
+        {"INPUT": memory, "OVERLAY": WATERSHED_CLIP_INPUT, "OUTPUT": "TEMPORARY_OUTPUT"},
+    )["OUTPUT"]
+    if _feature_count(clipped, "synthetic_reach_check") == 0:
+        raise Exception(
+            "Could not create fallback reach from watershed axis; review outlet and watershed."
+        )
+    return clipped
 
 # --- read cell size + CRS from flow_dir.tif (spatial source of truth) -------
 for _required in (
@@ -340,6 +384,13 @@ if _stream_check.featureCount() == 0 and os.path.isfile(FLOWLINE_PATH):
         "OVERLAY": WATERSHED_CLIP_INPUT,
         "OUTPUT": "TEMPORARY_OUTPUT",
     })["OUTPUT"]
+
+if _feature_count(reaches_geom, "reach_fallback_check") == 0:
+    print(
+        "No raster or mapped reaches intersect the delineated watershed; "
+        "creating a single synthetic reach through the tiny watershed extent."
+    )
+    reaches_geom = _single_reach_from_watershed_axis(ws, crs)
 
 # --- attribute: length, endpoint Z (real DEM), slope -----------------------
 print("Computing length and sampling real endpoint elevations ...")

@@ -293,6 +293,8 @@ class LauncherState:
     target_crs: str | None = None
     lon: float | None = None
     lat: float | None = None
+    outlet_source: str | None = None
+    snap_outlet_to_documented_watershed: bool = False
     method: str | None = None
     flowline_path: Path | None = None
     tile_index: Path | None = None
@@ -426,9 +428,11 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             argv.extend(("--dem-manifest", str(state.manifest_path)))
         return WorkflowCommand("Materialize Inputs", tuple(argv))
     if step == "full-run":
-        if state.root is None or not state.site or state.lon is None or state.lat is None:
+        if state.root is None or not state.site:
+            raise LauncherError("Root and site are required for full-run.")
+        if not state.outlet_source and (state.lon is None or state.lat is None):
             raise LauncherError(
-                "Root, site, and verified outlet coordinates are required for full-run."
+                "Choose an outlet KML/KMZ or enter verified outlet coordinates for full-run."
             )
         argv = [
             "ohqbuild",
@@ -437,15 +441,17 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
             str(state.root),
             "--site",
             state.site,
-            "--lon",
-            str(state.lon),
-            "--lat",
-            str(state.lat),
             "--project-name",
             state.site,
             "--config",
             str(state.config_path),
         ]
+        if state.lon is not None and state.lat is not None:
+            argv.extend(("--lon", str(state.lon), "--lat", str(state.lat)))
+        if state.outlet_source:
+            argv.extend(("--outlet-source", state.outlet_source))
+        if state.snap_outlet_to_documented_watershed:
+            argv.append("--snap-outlet-to-documented-watershed")
         if state.target_crs:
             argv.extend(("--target-crs", state.target_crs))
         if state.source_dir is not None:
@@ -677,6 +683,10 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         except ValueError:
             return base / path
 
+    outlet = config.get("outlet") if isinstance(config.get("outlet"), dict) else {}
+    outlet_source_path = path_value(
+        outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
+    )
     reference_source_path = path_value(reference.get("source"))
 
     return LauncherState(
@@ -695,6 +705,10 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         if isinstance(config.get("outlet"), dict)
         and config.get("outlet", {}).get("latitude") is not None
         else None,
+        outlet_source=str(outlet_source_path) if outlet_source_path is not None else None,
+        snap_outlet_to_documented_watershed=bool(
+            outlet.get("snap_to_documented_watershed", False)
+        ),
         method=str(dem.get("method") or "") or None,
         flowline_path=path_value(dem.get("flowline_path")),
         tile_index=path_value(dem.get("tile_index")),
@@ -731,6 +745,14 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
         _set_nested(updated, "outlet", "longitude", state.lon)
     if state.lat is not None:
         _set_nested(updated, "outlet", "latitude", state.lat)
+    if state.outlet_source:
+        _set_nested(updated, "outlet", "source", state.outlet_source)
+    _set_nested(
+        updated,
+        "outlet",
+        "snap_to_documented_watershed",
+        state.snap_outlet_to_documented_watershed,
+    )
     if state.method:
         _set_nested(updated, "dem_acquisition", "method", state.method)
     if state.flowline_path is not None:
@@ -789,6 +811,11 @@ def state_with_config_defaults(form_state: LauncherState, config: dict[str, Any]
         overwrite_promoted_pour_points=form_state.overwrite_promoted_pour_points,
         use_existing_outlet=form_state.use_existing_outlet,
         reuse_downloads=form_state.reuse_downloads,
+        outlet_source=form_state.outlet_source or config_state.outlet_source,
+        snap_outlet_to_documented_watershed=(
+            form_state.snap_outlet_to_documented_watershed
+            or config_state.snap_outlet_to_documented_watershed
+        ),
         reference_source=form_state.reference_source or config_state.reference_source,
         reference_layer=form_state.reference_layer or config_state.reference_layer,
         reference_name_field=(
@@ -1313,6 +1340,8 @@ class LauncherApp:
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self.reuse_downloads_var = tk.BooleanVar(value=False)
+        self.outlet_source_var = tk.StringVar(value="")
+        self.snap_outlet_doc_var = tk.BooleanVar(value=False)
         self.reference_source_var = tk.StringVar(value="")
         self.reference_layer_var = tk.StringVar(value="")
         self.reference_name_field_var = tk.StringVar(value="")
@@ -1330,8 +1359,24 @@ class LauncherApp:
 
     def _build(self) -> None:
         tk = self.tk
-        frame = tk.Frame(self.root, padx=10, pady=10)
-        frame.pack(fill="both", expand=True)
+        container = tk.Frame(self.root)
+        container.pack(fill="both", expand=True)
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        frame = tk.Frame(canvas, padx=10, pady=10)
+        window_id = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def sync_scroll_region(_event=None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def sync_frame_width(event) -> None:
+            canvas.itemconfigure(window_id, width=event.width)
+
+        frame.bind("<Configure>", sync_scroll_region)
+        canvas.bind("<Configure>", sync_frame_width)
         rows = [
             ("Config", self.config_var),
             ("Manifest", self.manifest_var),
@@ -1342,16 +1387,22 @@ class LauncherApp:
             ("Target CRS", self.crs_var),
             ("Outlet lon", self.lon_var),
             ("Outlet lat", self.lat_var),
+            ("Outlet KML/KMZ", self.outlet_source_var),
             ("DEM method", self.method_var),
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
             ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
         ]
-        for row, (label, variable) in enumerate(rows):
-            tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
-            tk.Entry(frame, textvariable=variable, width=70).grid(row=row, column=1, sticky="ew")
+        form_rows = (len(rows) + 1) // 2
+        for index, (label, variable) in enumerate(rows):
+            row = index // 2
+            column = 0 if index % 2 == 0 else 3
+            tk.Label(frame, text=label).grid(row=row, column=column, sticky="w")
+            tk.Entry(frame, textvariable=variable, width=34).grid(
+                row=row, column=column + 1, sticky="ew"
+            )
             if label in {
-                "Config", "Manifest", "Flowlines", "Tile index",
+                "Config", "Manifest", "Flowlines", "Tile index", "Outlet KML/KMZ",
             }:
                 tk.Button(
                     frame,
@@ -1359,34 +1410,45 @@ class LauncherApp:
                     command=lambda value=variable, is_config=label == "Config": self.browse_file(
                         value, load_config=is_config
                     ),
-                ).grid(row=row, column=2, sticky="w")
+                ).grid(row=row, column=column + 2, sticky="w")
             elif label in {"Raw DEM dir", "Root", "Source dir"}:
                 tk.Button(
                     frame,
                     text="Browse…",
                     command=lambda value=variable: self.browse_directory(value),
-                ).grid(row=row, column=2, sticky="w")
-        project_buttons = tk.LabelFrame(frame, text="Project and map")
-        project_buttons.grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=4)
-        project_specs = (
+                ).grid(row=row, column=column + 2, sticky="w")
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(4, weight=1)
+        snap_doc = tk.Checkbutton(
+            frame,
+            text="Snap outside outlet to documented watershed boundary",
+            variable=self.snap_outlet_doc_var,
+        )
+        snap_doc.grid(row=form_rows, column=0, columnspan=6, sticky="w", pady=(2, 4))
+        project_buttons = tk.LabelFrame(frame, text="Project setup and controls")
+        project_buttons.grid(row=form_rows + 1, column=0, columnspan=6, sticky="ew", pady=4)
+        project_buttons.columnconfigure(0, weight=1)
+        project_buttons.columnconfigure(1, weight=1)
+        project_buttons.columnconfigure(2, weight=1)
+
+        config_group = tk.LabelFrame(project_buttons, text="Config")
+        config_group.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        map_group = tk.LabelFrame(project_buttons, text="Map / review")
+        map_group.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
+        run_group = tk.LabelFrame(project_buttons, text="Run controls")
+        run_group.grid(row=0, column=2, sticky="nsew", padx=2, pady=2)
+
+        config_specs = (
             ("Load config", self.load_config),
             ("Save config", self.save_config),
-            ("Preview acquisition", self.preview_acquisition),
-            ("Pick outlet", self.pick_outlet_map),
-            ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
-            ("Draw polygon", lambda: self.open_map_picker("Polygon")),
             ("Reset Sligo demo", self.reset_sligo_demo),
-            ("Documented watershed…", self.configure_documented_watershed),
         )
-        for index, (label, command) in enumerate(project_specs):
-            tk.Button(project_buttons, text=label, command=command).grid(
-                row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew"
+        for index, (label, command) in enumerate(config_specs):
+            tk.Button(config_group, text=label, command=command).grid(
+                row=index, column=0, padx=2, pady=2, sticky="ew"
             )
-        examples_button = tk.Menubutton(
-            project_buttons,
-            text="Examples ▾",
-            relief="raised",
-        )
+
+        examples_button = tk.Menubutton(config_group, text="Examples ▾", relief="raised")
         examples_menu = tk.Menu(examples_button, tearoff=False)
         examples_menu.add_command(
             label="Sligo Creek",
@@ -1401,47 +1463,57 @@ class LauncherApp:
             ),
         )
         examples_button.config(menu=examples_menu)
-        examples_button.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+        examples_button.grid(row=len(config_specs), column=0, padx=2, pady=2, sticky="ew")
+
+        map_specs = (
+            ("Preview acquisition", self.preview_acquisition),
+            ("Pick outlet", self.pick_outlet_map),
+            ("Draw rectangle", lambda: self.open_map_picker("Rectangle")),
+            ("Draw polygon", lambda: self.open_map_picker("Polygon")),
+            ("Documented watershed…", self.configure_documented_watershed),
+            ("Open generated layers in QGIS", self.open_generated_layers_in_qgis),
+        )
+        for index, (label, command) in enumerate(map_specs):
+            tk.Button(map_group, text=label, command=command).grid(
+                row=index, column=0, padx=2, pady=2, sticky="ew"
+            )
+
         recommended_button = tk.Button(
-            project_buttons,
+            run_group,
             text="▶ RUN RECOMMENDED NEXT STEP",
             command=self.run_recommended_step,
         )
-        recommended_button.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+        recommended_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
         self.workflow_buttons.append(recommended_button)
+        self.stop_button = tk.Button(
+            run_group, text="■ STOP", command=self.stop_workflow, state="disabled"
+        )
+        self.stop_button.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Use reviewed pour points",
             variable=self.reviewed_points_var,
-        ).grid(row=3, column=0, columnspan=2, sticky="w")
+        ).grid(row=2, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Overwrite existing promoted pour points",
             variable=self.overwrite_promoted_var,
-        ).grid(row=3, column=2, columnspan=2, sticky="w")
+        ).grid(row=3, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Use edited existing outlet.shp",
             variable=self.use_existing_outlet_var,
-        ).grid(row=4, column=0, columnspan=2, sticky="w")
+        ).grid(row=4, column=0, sticky="w")
         tk.Checkbutton(
-            project_buttons,
+            run_group,
             text="Offline: reuse existing downloads",
             variable=self.reuse_downloads_var,
-        ).grid(row=4, column=2, columnspan=2, sticky="w")
-        tk.Button(
-            project_buttons,
-            text="Open generated layers in QGIS",
-            command=self.open_generated_layers_in_qgis,
-        ).grid(row=2, column=2, padx=2, pady=2, sticky="ew")
-        self.stop_button = tk.Button(
-            project_buttons, text="■ STOP", command=self.stop_workflow, state="disabled"
-        )
-        self.stop_button.grid(row=2, column=3, padx=2, pady=2, sticky="ew")
-        for column in range(4):
-            project_buttons.columnconfigure(column, weight=1, uniform="project_buttons")
+        ).grid(row=5, column=0, sticky="w")
+        for group in (config_group, map_group, run_group):
+            group.columnconfigure(0, weight=1)
+
         dem_buttons = tk.LabelFrame(frame, text="1. DEM acquisition")
-        dem_buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="ew", pady=4)
+        dem_buttons.grid(row=form_rows + 2, column=0, columnspan=6, sticky="ew", pady=4)
         for index, step in enumerate((
             "init-dem-config",
             "prepare-dem",
@@ -1461,8 +1533,8 @@ class LauncherApp:
         )
         for column in range(4):
             dem_buttons.columnconfigure(column, weight=1, uniform="dem_buttons")
-        ohq_buttons = tk.LabelFrame(frame, text="2. Create final OHQ file")
-        ohq_buttons.grid(row=len(rows) + 2, column=0, columnspan=2, sticky="ew", pady=4)
+        output_buttons = tk.LabelFrame(frame, text="2. Model outputs (OHQ and HEC-HMS)")
+        output_buttons.grid(row=form_rows + 3, column=0, columnspan=6, sticky="ew", pady=4)
         for index, (label, step) in enumerate((
             ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
@@ -1470,37 +1542,25 @@ class LauncherApp:
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
             ("FULL RUN: download all data to OHQ", "full-run"),
+            ("Build HEC-HMS", "build-hms"),
+            ("Validate HEC-HMS", "validate-hms"),
             ("Promote reviewed pour points", "promote-pour-points"),
             ("Import documented watershed", "import-watershed-reference"),
         )):
             button = tk.Button(
-                ohq_buttons, text=label, command=lambda value=step: self.run_step(value)
+                output_buttons, text=label, command=lambda value=step: self.run_step(value)
             )
-            button.grid(row=index // 3, column=index % 3, padx=2, pady=2, sticky="ew")
+            button.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
             self.workflow_buttons.append(button)
             self.step_buttons[step] = button
-        for column in range(3):
-            ohq_buttons.columnconfigure(column, weight=1, uniform="ohq_buttons")
-        hms_buttons = tk.LabelFrame(frame, text="3. Native HEC-HMS project")
-        hms_buttons.grid(row=len(rows) + 3, column=0, columnspan=2, sticky="ew", pady=4)
-        for index, (label, step) in enumerate((
-            ("Build HEC-HMS", "build-hms"),
-            ("Validate HEC-HMS", "validate-hms"),
-        )):
-            button = tk.Button(
-                hms_buttons, text=label, command=lambda value=step: self.run_step(value)
-            )
-            button.grid(row=0, column=index, padx=2, pady=2, sticky="ew")
-            self.workflow_buttons.append(button)
-            self.step_buttons[step] = button
-            hms_buttons.columnconfigure(index, weight=1, uniform="hms_buttons")
+        for column in range(4):
+            output_buttons.columnconfigure(column, weight=1, uniform="output_buttons")
         self.log = tk.Text(frame, height=14, width=100)
-        self.log.grid(row=len(rows) + 4, column=0, columnspan=2, sticky="nsew")
+        self.log.grid(row=form_rows + 4, column=0, columnspan=6, sticky="nsew")
         tk.Button(frame, text="Clear log", command=self.clear_log).grid(
-            row=len(rows) + 5, column=0, columnspan=2, sticky="e", pady=(4, 0)
+            row=form_rows + 5, column=0, columnspan=6, sticky="e", pady=(4, 0)
         )
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(len(rows) + 4, weight=1)
+        frame.rowconfigure(form_rows + 4, weight=1)
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""
@@ -1708,6 +1768,8 @@ class LauncherApp:
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
             use_existing_outlet=self.use_existing_outlet_var.get(),
             reuse_downloads=self.reuse_downloads_var.get(),
+            outlet_source=self.outlet_source_var.get().strip() or None,
+            snap_outlet_to_documented_watershed=self.snap_outlet_doc_var.get(),
             reference_source=self.reference_source_var.get().strip() or None,
             reference_layer=self.reference_layer_var.get().strip() or None,
             reference_name_field=self.reference_name_field_var.get().strip() or None,
@@ -1736,6 +1798,8 @@ class LauncherApp:
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
         self.use_existing_outlet_var.set(state.use_existing_outlet)
         self.reuse_downloads_var.set(state.reuse_downloads)
+        self.outlet_source_var.set(state.outlet_source or "")
+        self.snap_outlet_doc_var.set(state.snap_outlet_to_documented_watershed)
         self.reference_source_var.set(state.reference_source or "")
         self.reference_layer_var.set(state.reference_layer or "")
         self.reference_name_field_var.set(state.reference_name_field or "")
