@@ -301,6 +301,10 @@ class LauncherState:
     acquisition_area: Path | None = None
     use_reviewed_pour_points: bool = False
     nhdplus_snap_distance_m: float = 50.0
+    minimum_watershed_area_km2: float = 0.05
+    minimum_subwatershed_area_km2: float = 0.0005
+    minimum_area_ratio: float = 0.75
+    maximum_area_ratio: float = 1.25
     overwrite_promoted_pour_points: bool = False
     use_existing_outlet: bool = False
     reuse_downloads: bool = False
@@ -457,6 +461,12 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         if state.source_dir is not None:
             argv.extend(("--download-dir", str(state.source_dir)))
         argv.extend(("--nhdplus-snap-distance-m", str(state.nhdplus_snap_distance_m)))
+        argv.extend((
+            "--minimum-watershed-area-km2", str(state.minimum_watershed_area_km2),
+            "--minimum-subwatershed-area-km2", str(state.minimum_subwatershed_area_km2),
+            "--minimum-area-ratio", str(state.minimum_area_ratio),
+            "--maximum-area-ratio", str(state.maximum_area_ratio),
+        ))
         if state.use_reviewed_pour_points:
             argv.append("--use-reviewed-pour-points")
         if state.use_existing_outlet:
@@ -576,12 +586,13 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         return WorkflowCommand(
             "Validate HEC-HMS Project", ("ohqbuild", "validate-hms", "--project", str(project))
         )
-    if step in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build-ohq", "run-to-ohq"}:
+    if step in {"prepare-hydrology", "prepare-inputs", "create-pour-points", "check-inputs", "build-ohq", "run-to-ohq"}:
         if state.root is None or not state.site:
             raise LauncherError("Root and site are required for OHQ workflow commands.")
         command = {
             "prepare-hydrology": "prepare-hydrology",
             "prepare-inputs": "prepare-inputs",
+            "create-pour-points": "create-pour-points",
             "check-inputs": "check-inputs",
             "build-ohq": "build",
             "run-to-ohq": "run",
@@ -589,6 +600,7 @@ def command_for_step(step: WorkflowStep, state: LauncherState) -> WorkflowComman
         label = {
             "prepare-hydrology": "Prepare Hydrology",
             "prepare-inputs": "Prepare OHQ Inputs",
+            "create-pour-points": "Generate Upstream Pour Points",
             "check-inputs": "Check OHQ Inputs",
             "build-ohq": "Build OHQ File",
             "run-to-ohq": "Continue to OHQ",
@@ -688,6 +700,11 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         outlet.get("source") or outlet.get("kmz") or outlet.get("kml")
     )
     reference_source_path = path_value(reference.get("source"))
+    subwatersheds = (
+        config.get("subwatersheds")
+        if isinstance(config.get("subwatersheds"), dict)
+        else {}
+    )
 
     return LauncherState(
         config_path=Path(config_path).expanduser(),
@@ -715,6 +732,12 @@ def state_from_config(config_path: str | Path, config: dict[str, Any]) -> Launch
         acquisition_area=path_value(dem.get("acquisition_area")),
         use_reviewed_pour_points=bool(config.get("use_reviewed_pour_points", False)),
         nhdplus_snap_distance_m=float(config.get("nhdplus_snap_distance_m", 50.0)),
+        minimum_watershed_area_km2=float(subwatersheds.get("minimum_area_km2", 0.05)),
+        minimum_subwatershed_area_km2=float(
+            subwatersheds.get("minimum_incremental_area_km2", 0.0005)
+        ),
+        minimum_area_ratio=float(subwatersheds.get("area_ratio_min", 0.75)),
+        maximum_area_ratio=float(subwatersheds.get("area_ratio_max", 1.25)),
         reuse_downloads=bool(config.get("reuse_downloads", False)),
         reference_source=str(reference_source_path) if reference_source_path is not None else None,
         reference_layer=str(reference.get("layer") or "") or None,
@@ -763,6 +786,10 @@ def update_config_from_state(config: dict[str, Any], state: LauncherState) -> di
     updated["download_dir"] = path_text(state.source_dir, "source_downloads")
     updated["use_reviewed_pour_points"] = state.use_reviewed_pour_points
     updated["nhdplus_snap_distance_m"] = state.nhdplus_snap_distance_m
+    _set_nested(updated, "subwatersheds", "minimum_area_km2", state.minimum_watershed_area_km2)
+    _set_nested(updated, "subwatersheds", "minimum_incremental_area_km2", state.minimum_subwatershed_area_km2)
+    _set_nested(updated, "subwatersheds", "area_ratio_min", state.minimum_area_ratio)
+    _set_nested(updated, "subwatersheds", "area_ratio_max", state.maximum_area_ratio)
     updated["reuse_downloads"] = state.reuse_downloads
     for key, value in (
         ("source", state.reference_source),
@@ -1337,6 +1364,10 @@ class LauncherApp:
         self.tile_index_var = tk.StringVar(value="")
         self.reviewed_points_var = tk.BooleanVar(value=False)
         self.nhdplus_snap_var = tk.StringVar(value="50")
+        self.minimum_watershed_area_var = tk.StringVar(value="0.05")
+        self.minimum_subwatershed_area_var = tk.StringVar(value="0.0005")
+        self.minimum_area_ratio_var = tk.StringVar(value="0.75")
+        self.maximum_area_ratio_var = tk.StringVar(value="1.25")
         self.overwrite_promoted_var = tk.BooleanVar(value=False)
         self.use_existing_outlet_var = tk.BooleanVar(value=False)
         self.reuse_downloads_var = tk.BooleanVar(value=False)
@@ -1392,6 +1423,10 @@ class LauncherApp:
             ("Flowlines", self.flowline_var),
             ("Tile index", self.tile_index_var),
             ("Outlet/NHDPlus snap max (m)", self.nhdplus_snap_var),
+            ("Minimum watershed area (km²)", self.minimum_watershed_area_var),
+            ("Minimum incremental subwatershed (km²)", self.minimum_subwatershed_area_var),
+            ("Area agreement ratio minimum", self.minimum_area_ratio_var),
+            ("Area agreement ratio maximum", self.maximum_area_ratio_var),
         ]
         form_rows = (len(rows) + 1) // 2
         for index, (label, variable) in enumerate(rows):
@@ -1538,6 +1573,7 @@ class LauncherApp:
         for index, (label, step) in enumerate((
             ("Prepare hydrology", "prepare-hydrology"),
             ("Prepare GIS inputs", "prepare-inputs"),
+            ("Generate upstream pour points", "create-pour-points"),
             ("Check inputs", "check-inputs"),
             ("Build OHQ", "build-ohq"),
             ("Continue automatically to OHQ", "run-to-ohq"),
@@ -1765,6 +1801,16 @@ class LauncherApp:
             tile_index=optional_path(self.tile_index_var.get()),
             use_reviewed_pour_points=self.reviewed_points_var.get(),
             nhdplus_snap_distance_m=optional_float(self.nhdplus_snap_var.get()) or 50.0,
+            minimum_watershed_area_km2=(
+                optional_float(self.minimum_watershed_area_var.get())
+                if self.minimum_watershed_area_var.get().strip() else 0.05
+            ),
+            minimum_subwatershed_area_km2=(
+                optional_float(self.minimum_subwatershed_area_var.get())
+                if self.minimum_subwatershed_area_var.get().strip() else 0.0005
+            ),
+            minimum_area_ratio=optional_float(self.minimum_area_ratio_var.get()) or 0.75,
+            maximum_area_ratio=optional_float(self.maximum_area_ratio_var.get()) or 1.25,
             overwrite_promoted_pour_points=self.overwrite_promoted_var.get(),
             use_existing_outlet=self.use_existing_outlet_var.get(),
             reuse_downloads=self.reuse_downloads_var.get(),
@@ -1795,6 +1841,10 @@ class LauncherApp:
         self.tile_index_var.set(str(state.tile_index or ""))
         self.reviewed_points_var.set(state.use_reviewed_pour_points)
         self.nhdplus_snap_var.set(str(state.nhdplus_snap_distance_m))
+        self.minimum_watershed_area_var.set(str(state.minimum_watershed_area_km2))
+        self.minimum_subwatershed_area_var.set(str(state.minimum_subwatershed_area_km2))
+        self.minimum_area_ratio_var.set(str(state.minimum_area_ratio))
+        self.maximum_area_ratio_var.set(str(state.maximum_area_ratio))
         self.overwrite_promoted_var.set(state.overwrite_promoted_pour_points)
         self.use_existing_outlet_var.set(state.use_existing_outlet)
         self.reuse_downloads_var.set(state.reuse_downloads)

@@ -147,6 +147,10 @@ def _command_for_workflow(
     *,
     use_reviewed_pour_points: bool | None = None,
     nhdplus_snap_distance_m: float | None = None,
+    minimum_watershed_area_km2: float | None = None,
+    minimum_subwatershed_area_km2: float | None = None,
+    minimum_area_ratio: float | None = None,
+    maximum_area_ratio: float | None = None,
     overwrite_promoted_pour_points: bool = False,
     use_existing_outlet: bool = False,
     reuse_downloads: bool = False,
@@ -193,6 +197,13 @@ def _command_for_workflow(
     if command in {"prepare-hydrology", "prepare-inputs", "check-inputs", "build"}:
         root = _relative_to_config(config_path, config.get("root") or ".")
         return ["ohqbuild", command, "--root", str(root), "--site", _site_name(config)]
+
+    if command == "create-pour-points":
+        root = _relative_to_config(config_path, config.get("root") or ".")
+        return [
+            "ohqbuild", "create-pour-points", "--root", str(root),
+            "--site", _site_name(config), "--overwrite",
+        ]
 
     if command == "promote-pour-points":
         root = _relative_to_config(config_path, config.get("root") or ".")
@@ -307,6 +318,26 @@ def _command_for_workflow(
             else config.get("nhdplus_snap_distance_m", 50.0)
         )
         argv.extend(["--nhdplus-snap-distance-m", str(snap_distance)])
+        thresholds = _as_mapping(config.get("subwatersheds"), "subwatersheds")
+        minimum_area = (minimum_watershed_area_km2 if minimum_watershed_area_km2 is not None
+                        else float(thresholds.get("minimum_area_km2", 0.05)))
+        ratio_min = (minimum_area_ratio if minimum_area_ratio is not None
+                     else float(thresholds.get("area_ratio_min", 0.75)))
+        ratio_max = (maximum_area_ratio if maximum_area_ratio is not None
+                     else float(thresholds.get("area_ratio_max", 1.25)))
+        minimum_subarea = (
+            minimum_subwatershed_area_km2
+            if minimum_subwatershed_area_km2 is not None
+            else float(thresholds.get("minimum_incremental_area_km2", 0.0005))
+        )
+        if minimum_area < 0 or minimum_subarea < 0 or ratio_min <= 0 or ratio_max < ratio_min:
+            raise QgisDockConfigError("Invalid subwatershed area thresholds.")
+        argv.extend([
+            "--minimum-watershed-area-km2", str(minimum_area),
+            "--minimum-subwatershed-area-km2", str(minimum_subarea),
+            "--minimum-area-ratio", str(ratio_min),
+            "--maximum-area-ratio", str(ratio_max),
+        ])
         use_reviewed = (
             use_reviewed_pour_points
             if use_reviewed_pour_points is not None
@@ -491,6 +522,27 @@ class DemWorkflowDock:
         controls.addWidget(self.use_existing_outlet, 1, 1)
         self.reuse_downloads = QCheckBox("Offline: reuse downloads")
         controls.addWidget(self.reuse_downloads, 1, 2)
+        controls.addWidget(QLabel("Min watershed (km²)"), 2, 0)
+        self.minimum_watershed_area = QDoubleSpinBox()
+        self.minimum_watershed_area.setRange(0.0, 100000.0)
+        self.minimum_watershed_area.setDecimals(4)
+        self.minimum_watershed_area.setValue(0.05)
+        controls.addWidget(self.minimum_watershed_area, 2, 1)
+        self.minimum_subwatershed_area = QDoubleSpinBox()
+        self.minimum_subwatershed_area.setRange(0.0, 100000.0)
+        self.minimum_subwatershed_area.setDecimals(4)
+        self.minimum_subwatershed_area.setValue(0.0005)
+        controls.addWidget(QLabel("Min subwatershed (km²)"), 2, 2)
+        controls.addWidget(self.minimum_subwatershed_area, 2, 3)
+        controls.addWidget(QLabel("Area ratio min/max"), 3, 0)
+        self.minimum_area_ratio = QDoubleSpinBox()
+        self.minimum_area_ratio.setRange(0.01, 100.0)
+        self.minimum_area_ratio.setValue(0.75)
+        controls.addWidget(self.minimum_area_ratio, 3, 1)
+        self.maximum_area_ratio = QDoubleSpinBox()
+        self.maximum_area_ratio.setRange(0.01, 100.0)
+        self.maximum_area_ratio.setValue(1.25)
+        controls.addWidget(self.maximum_area_ratio, 3, 2)
         layout.addWidget(options_box)
 
         tabs = QTabWidget()
@@ -521,6 +573,7 @@ class DemWorkflowDock:
                 ("Validate DEM", "validate-dem"),
                 ("Prepare hydrology", "prepare-hydrology"),
                 ("Prepare GIS inputs", "prepare-inputs"),
+                ("Generate Upstream Pour Points", "create-pour-points"),
                 ("Check inputs", "check-inputs"),
                 ("FULL RUN: Download All Data to OHQ", "full-run"),
             )),
@@ -920,6 +973,10 @@ class DemWorkflowDock:
                 self.config.text(),
                 use_reviewed_pour_points=self.reviewed_points.isChecked(),
                 nhdplus_snap_distance_m=self.nhdplus_snap_distance.value(),
+                minimum_watershed_area_km2=self.minimum_watershed_area.value(),
+                minimum_subwatershed_area_km2=self.minimum_subwatershed_area.value(),
+                minimum_area_ratio=self.minimum_area_ratio.value(),
+                maximum_area_ratio=self.maximum_area_ratio.value(),
                 overwrite_promoted_pour_points=self.overwrite_promoted.isChecked(),
                 use_existing_outlet=self.use_existing_outlet.isChecked(),
                 reuse_downloads=self.reuse_downloads.isChecked(),
