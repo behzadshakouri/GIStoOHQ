@@ -149,8 +149,10 @@ def test_full_run_cli_accepts_preserve_existing_outlet_alias(monkeypatch, tmp_pa
 def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys):
     calls = []
 
-    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
-        calls.append((junctions, output, fallback_outlet_path, overwrite))
+    def fake_generate(junctions, output, flow_accumulation_path=None,
+                      fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, flow_accumulation_path,
+                      fallback_outlet_path, overwrite))
         return PourPointResult(Path(output).resolve(), 3)
 
     monkeypatch.setattr("ohqbuilder.cli.generate_pour_points", fake_generate)
@@ -168,6 +170,7 @@ def test_create_pour_points_cli_uses_site_defaults(monkeypatch, tmp_path, capsys
     assert calls == [(
         outputs / "junctions.gpkg",
         outputs / "pour_points.shp",
+        outputs / "flow_acc.tif",
         outputs / "outlet.shp",
         True,
     )]

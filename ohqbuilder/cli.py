@@ -194,12 +194,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     pour = sub.add_parser(
         "create-pour-points",
-        help="Create Phase 2 pour_points.shp automatically from Phase 1 junctions.",
+        help=("Create Phase 2 pour_points.shp from flow-accumulation ranks around "
+              "Phase 1 junctions."),
     )
     pour.add_argument("--root", required=True)
     pour.add_argument("--site", required=True)
     pour.add_argument(
         "--junctions", default=None, help="Defaults to <root>/<site>/outputs/junctions.gpkg."
+    )
+    pour.add_argument(
+        "--flow-acc", default=None, help="Defaults to <root>/<site>/outputs/flow_acc.tif."
     )
     pour.add_argument(
         "--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp."
@@ -1087,6 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
             result = generate_pour_points(
                 junctions,
                 output,
+                flow_accumulation_path=(Path(args.flow_acc).expanduser() if args.flow_acc else outputs / "flow_acc.tif"),
                 fallback_outlet_path=fallback_outlet,
                 overwrite=args.overwrite,
             )

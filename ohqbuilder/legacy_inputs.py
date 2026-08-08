@@ -360,6 +360,7 @@ def run_legacy_input_workflow(
                     result = generate_pour_points(
                         paths["junctions_path"],
                         paths["pour_points_path"],
+                        flow_accumulation_path=paths["flowacc_path"],
                         fallback_outlet_path=fallback_outlet,
                         overwrite=workflow_options.refresh_auto_pour_points,
                     )
