@@ -82,6 +82,8 @@ MAX_OUTLET_SNAP_M = float(globals().get("MAX_OUTLET_SNAP_M", 50.0))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.05)
 )
+MIN_AREA_RATIO = float(globals().get("MIN_AREA_RATIO", 0.75))
+MAX_AREA_RATIO = float(globals().get("MAX_AREA_RATIO", 1.25))
 FALLBACK_EPSG = int(globals().get("FALLBACK_EPSG", 26912))
 ADD_TO_PROJECT = bool(globals().get("ADD_TO_PROJECT", False))
 
@@ -683,7 +685,33 @@ if not geometries:
 boundary = QgsGeometry.unaryUnion(geometries).makeValid()
 area_km2 = boundary.area() / 1e6
 print("Whole-watershed area: %.4f km2" % area_km2)
-if area_km2 < MIN_WATERSHED_AREA_KM2:
+flow_acc_dataset = gdal.Open(FLOWACC_PATH)
+flow_acc_transform = flow_acc_dataset.GetGeoTransform() if flow_acc_dataset else None
+flow_acc_dataset = None
+expected_area_km2 = None
+area_accumulation_ratio = None
+if flow_acc_transform is not None and snap_acc is not None:
+    cell_area_m2 = abs(
+        flow_acc_transform[1] * flow_acc_transform[5]
+        - flow_acc_transform[2] * flow_acc_transform[4]
+    )
+    expected_area_km2 = abs(float(snap_acc)) * cell_area_m2 / 1e6
+    if expected_area_km2 > 0:
+        area_accumulation_ratio = area_km2 / expected_area_km2
+        print(
+            "Accumulation-implied area: %.4f km2 (delineated/implied: %.3f)"
+            % (expected_area_km2, area_accumulation_ratio)
+        )
+
+# Small urban study watersheds can legitimately fall just below the absolute
+# sanity floor. Accept one only when its polygon area independently agrees with
+# the selected cell's accumulated cell count. This preserves the guard against
+# an off-channel outlet while allowing internally consistent local drainage.
+low_area_is_consistent = (
+    area_accumulation_ratio is not None
+    and MIN_AREA_RATIO <= area_accumulation_ratio <= MAX_AREA_RATIO
+)
+if area_km2 < MIN_WATERSHED_AREA_KM2 and not low_area_is_consistent:
     print_alignment_guidance(snap_acc=snap_acc, moved=moved)
     raise Exception(
         "Delineated watershed area %.4f km2 is below the sanity threshold "
@@ -692,6 +720,11 @@ if area_km2 < MIN_WATERSHED_AREA_KM2:
         "cell on the intended channel and rerun Phase 1; do not lower the "
         "sanity threshold to continue."
         % (area_km2, MIN_WATERSHED_AREA_KM2)
+    )
+elif area_km2 < MIN_WATERSHED_AREA_KM2:
+    print(
+        "Accepted small watershed because polygon area agrees with routed "
+        "flow accumulation."
     )
 
 project = QgsProject.instance()

@@ -716,6 +716,10 @@ def test_full_run_command_downloads_and_builds_from_verified_outlet(tmp_path):
     )
     assert "--use-reviewed-pour-points" in full_run
     assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50.0"
+    assert full_run[full_run.index("--minimum-watershed-area-km2") + 1] == "0.05"
+    assert full_run[full_run.index("--minimum-subwatershed-area-km2") + 1] == "0.0005"
+    assert full_run[full_run.index("--minimum-area-ratio") + 1] == "0.75"
+    assert full_run[full_run.index("--maximum-area-ratio") + 1] == "1.25"
     assert "--use-existing-outlet" in full_run
     assert "--reuse-downloads" in full_run
 

@@ -373,7 +373,13 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     assert result.hms_project_path == tmp_path / "SITE_A.hms"
     assert result.report_path == tmp_path / "watershed_report.html"
     assert phase_options["options"].refresh_auto_pour_points is True
-    assert phase_options["options"].child_options == {"MAX_OUTLET_SNAP_M": 50.0}
+    assert phase_options["options"].child_options == {
+        "MAX_OUTLET_SNAP_M": 50.0,
+        "MIN_WATERSHED_AREA_KM2": 0.05,
+        "MIN_SUBWATERSHED_AREA_KM2": 0.0005,
+        "MIN_AREA_RATIO": 0.75,
+        "MAX_AREA_RATIO": 1.25,
+    }
 
 
 def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path):

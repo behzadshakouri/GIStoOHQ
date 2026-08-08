@@ -589,6 +589,10 @@ def run_full_pipeline(
     acquisition_area: str | Path | None = None,
     use_reviewed_pour_points: bool = False,
     nhdplus_snap_distance_m: float = 50.0,
+    minimum_watershed_area_km2: float = 0.05,
+    minimum_subwatershed_area_km2: float = 0.0005,
+    minimum_area_ratio: float = 0.75,
+    maximum_area_ratio: float = 1.25,
     use_existing_outlet: bool = False,
     reuse_downloads: bool = False,
     outlet_source: str | Path | None = None,
@@ -614,6 +618,10 @@ def run_full_pipeline(
             print(message, flush=True)
 
     try:
+        if minimum_watershed_area_km2 < 0 or minimum_subwatershed_area_km2 < 0:
+            raise FullRunError("Watershed area thresholds cannot be negative.")
+        if minimum_area_ratio <= 0 or maximum_area_ratio < minimum_area_ratio:
+            raise FullRunError("Invalid watershed area-agreement ratio range.")
         emit("Starting full-run pipeline.")
         if use_existing_outlet:
             lon, lat = existing_outlet_lonlat(root, site)
@@ -848,7 +856,13 @@ def run_full_pipeline(
             auto_outlet=True,
             auto_pour_points=not use_reviewed_pour_points,
             refresh_auto_pour_points=not use_reviewed_pour_points,
-            child_options={"MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m},
+            child_options={
+                "MAX_OUTLET_SNAP_M": nhdplus_snap_distance_m,
+                "MIN_WATERSHED_AREA_KM2": minimum_watershed_area_km2,
+                "MIN_SUBWATERSHED_AREA_KM2": minimum_subwatershed_area_km2,
+                "MIN_AREA_RATIO": minimum_area_ratio,
+                "MAX_AREA_RATIO": maximum_area_ratio,
+            },
         )
         reach_script = verify_reach_writer_revision(script_dir)
         emit(
