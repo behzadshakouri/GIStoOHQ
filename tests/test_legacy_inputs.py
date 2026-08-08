@@ -230,8 +230,10 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
 
     calls = []
 
-    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
-        calls.append((junctions, output, fallback_outlet_path, overwrite))
+    def fake_generate(junctions, output, flow_accumulation_path=None,
+                      fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, flow_accumulation_path,
+                      fallback_outlet_path, overwrite))
         for suffix in (".shp", ".shx", ".dbf"):
             output.with_suffix(suffix).write_text("", encoding="utf-8")
         return types.SimpleNamespace(count=2, output_path=output)
@@ -249,6 +251,7 @@ def test_phase2_automatically_generates_missing_pour_points(tmp_path, monkeypatc
     assert calls == [(
         outputs / "junctions.gpkg",
         outputs / "pour_points.shp",
+        outputs / "flow_acc.tif",
         outputs / "outlet.shp",
         False,
     )]
@@ -273,8 +276,10 @@ def test_phase2_refreshes_stale_auto_pour_point_from_snapped_outlet(tmp_path, mo
             (outputs / f"{stem}{suffix}").touch()
     calls = []
 
-    def fake_generate(junctions, output, fallback_outlet_path=None, overwrite=False):
-        calls.append((junctions, output, fallback_outlet_path, overwrite))
+    def fake_generate(junctions, output, flow_accumulation_path=None,
+                      fallback_outlet_path=None, overwrite=False):
+        calls.append((junctions, output, flow_accumulation_path,
+                      fallback_outlet_path, overwrite))
         return types.SimpleNamespace(count=1, output_path=output)
 
     monkeypatch.setattr("ohqbuilder.legacy_inputs.generate_pour_points", fake_generate)
@@ -294,6 +299,7 @@ def test_phase2_refreshes_stale_auto_pour_point_from_snapped_outlet(tmp_path, mo
         (
             outputs / "junctions.gpkg",
             outputs / "pour_points.shp",
+            outputs / "flow_acc.tif",
             outputs / "outlet_snapped.gpkg",
             True,
         )

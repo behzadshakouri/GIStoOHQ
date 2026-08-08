@@ -256,6 +256,16 @@ def test_outlet_snap_prioritizes_cells_inside_maximum_accepted_move():
     assert "score[~selection_mask] = -np.inf" in source
 
 
+def test_small_watershed_requires_flow_accumulation_area_agreement():
+    source = Path("scripts/legacy_gis/delineate_whole_watershed.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "expected_area_km2 = abs(float(snap_acc)) * cell_area_m2 / 1e6" in source
+    assert "0.50 <= area_accumulation_ratio <= 2.00" in source
+    assert "and not low_area_is_consistent" in source
+
+
 def test_longest_flow_path_ranks_outlet_candidates_and_rejects_tiny_traversals():
     source = Path("scripts/legacy_gis/longestflowpath.py").read_text(encoding="utf-8")
 
