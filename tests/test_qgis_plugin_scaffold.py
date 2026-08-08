@@ -165,6 +165,11 @@ def test_qgis_plugin_builds_command_specific_args(tmp_path):
     assert "--download-dir" in full_run
     assert "--use-reviewed-pour-points" in full_run
     assert full_run[full_run.index("--nhdplus-snap-distance-m") + 1] == "50"
+    assert full_run[full_run.index("--minimum-watershed-area-km2") + 1] == "0.05"
+    assert full_run[full_run.index("--minimum-subwatershed-area-km2") + 1] == "0.0005"
+    assert full_run[full_run.index("--minimum-area-ratio") + 1] == "0.75"
+    assert full_run[full_run.index("--maximum-area-ratio") + 1] == "1.25"
+    assert _command_for_workflow("create-pour-points", str(config))[-1] == "--overwrite"
     assert full_run[full_run.index("--acquisition-area") + 1] == str(
         tmp_path / "intermediate/area.geojson"
     )

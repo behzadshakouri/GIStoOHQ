@@ -6,6 +6,11 @@ application. Full-run honors the project-config keys `nhdplus_snap_distance_m`
 and `use_reviewed_pour_points`; dock controls can override them for the current
 run. Promotion only overwrites an existing point dataset when **Overwrite promoted
 points** is checked. QGIS 3.28 or newer is required.
+The **Generate Upstream Pour Points** action ranks the eight flow-accumulation
+cells around every junction and writes exactly ranks two and three as upstream
+points; it does not place an automatic point on the junction. Run options expose
+the whole-watershed and incremental-subwatershed minimum areas and the acceptable
+accumulation-area ratio range.
 Choose the outlet with **Pick Outlet on Map** or enter EPSG:4326 longitude and
 latitude with **Set Outlet Coordinates**. Use **Use edited outlet.shp** after
 manually correcting the outlet layer on the QGIS canvas; the full run will

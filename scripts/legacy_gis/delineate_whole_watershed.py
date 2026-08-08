@@ -82,6 +82,8 @@ MAX_OUTLET_SNAP_M = float(globals().get("MAX_OUTLET_SNAP_M", 50.0))
 MIN_WATERSHED_AREA_KM2 = float(
     globals().get("MIN_WATERSHED_AREA_KM2", 0.05)
 )
+MIN_AREA_RATIO = float(globals().get("MIN_AREA_RATIO", 0.75))
+MAX_AREA_RATIO = float(globals().get("MAX_AREA_RATIO", 1.25))
 FALLBACK_EPSG = int(globals().get("FALLBACK_EPSG", 26912))
 ADD_TO_PROJECT = bool(globals().get("ADD_TO_PROJECT", False))
 
@@ -707,7 +709,7 @@ if flow_acc_transform is not None and snap_acc is not None:
 # an off-channel outlet while allowing internally consistent local drainage.
 low_area_is_consistent = (
     area_accumulation_ratio is not None
-    and 0.50 <= area_accumulation_ratio <= 2.00
+    and MIN_AREA_RATIO <= area_accumulation_ratio <= MAX_AREA_RATIO
 )
 if area_km2 < MIN_WATERSHED_AREA_KM2 and not low_area_is_consistent:
     print_alignment_guidance(snap_acc=snap_acc, moved=moved)

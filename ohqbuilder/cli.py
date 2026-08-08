@@ -829,6 +829,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=50.0,
         help="Maximum outlet movement for NHDPlus and DEM routing snaps (default: 50 m).",
     )
+    full.add_argument("--minimum-watershed-area-km2", type=float, default=0.05)
+    full.add_argument("--minimum-subwatershed-area-km2", type=float, default=0.0005)
+    full.add_argument("--minimum-area-ratio", type=float, default=0.75)
+    full.add_argument("--maximum-area-ratio", type=float, default=1.25)
     full.add_argument(
         "--use-existing-outlet",
         "--preserve-existing-outlet",
@@ -1214,6 +1218,10 @@ def main(argv: list[str] | None = None) -> int:
                 acquisition_area=args.acquisition_area,
                 use_reviewed_pour_points=args.use_reviewed_pour_points,
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
+                minimum_watershed_area_km2=args.minimum_watershed_area_km2,
+                minimum_subwatershed_area_km2=args.minimum_subwatershed_area_km2,
+                minimum_area_ratio=args.minimum_area_ratio,
+                maximum_area_ratio=args.maximum_area_ratio,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
                 outlet_source=outlet_source,

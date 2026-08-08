@@ -47,7 +47,7 @@ POURPTS_NAME = "pour_points_snapped.gpkg"   # id-keyed, from delineatewatershed
 DEM_REL      = "demlr/cliped_utm.tif"
 
 # --- sliver cleanup (cell size ~9.34 m here, so 1 cell ~= 87 m2) -----------
-MIN_AREA_M2  = 500.0         # drop stray fragments smaller than this (~6 cells)
+MIN_AREA_M2 = 1e6 * float(globals().get("MIN_SUBWATERSHED_AREA_KM2", 0.0005))
 SNAP_GRID    = 9.336         # snap vertices to this grid (= DEM cell size);
                              # set to 0 to disable
 OVERLAP_TOL_M2 = 250.0       # fail above roughly three 9.34 m raster cells
