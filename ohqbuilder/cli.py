@@ -1188,6 +1188,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "full-run":
         try:
+            if args.config:
+                config_path = Path(args.config).expanduser().resolve()
+                config_data = _load_cli_config(str(config_path))
+                dem_section = config_data.get("dem_acquisition")
+                if (
+                    isinstance(dem_section, dict)
+                    and dem_section.get("method")
+                    and dem_section.get("acquisition_area")
+                ):
+                    refreshed = prepare_dem_from_config(config_path)
+                    if not args.acquisition_area:
+                        acquisition_path = Path(str(dem_section["acquisition_area"])).expanduser()
+                        if not acquisition_path.is_absolute():
+                            acquisition_path = config_path.parent / acquisition_path
+                        args.acquisition_area = str(acquisition_path.resolve())
+                    print(
+                        "Refreshed config-driven outlet/acquisition inputs before full-run: "
+                        f"{refreshed.summary_path}"
+                    )
             reference_defaults = _documented_watershed_defaults(args.config)
             documented_source = (
                 args.documented_watershed_source or reference_defaults.get("source")

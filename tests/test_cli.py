@@ -119,6 +119,41 @@ def test_full_run_cli_uses_documented_watershed_config_defaults(monkeypatch, tmp
     assert calls[0]["documented_watershed_allow_outlet_outside"] is False
 
 
+def test_full_run_refreshes_configured_spatial_sources(monkeypatch, tmp_path, capsys):
+    calls = []
+    full_run_options = []
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "dem_acquisition:\n"
+        "  method: documented_watershed\n"
+        "  acquisition_area: intermediate/area.geojson\n",
+        encoding="utf-8",
+    )
+    summary = tmp_path / "intermediate" / "summary.json"
+    monkeypatch.setattr(
+        "ohqbuilder.cli.prepare_dem_from_config",
+        lambda path: calls.append(Path(path))
+        or type("Plan", (), {"summary_path": summary})(),
+    )
+    monkeypatch.setattr(
+        "ohqbuilder.cli.run_full_pipeline",
+        lambda *args, **kwargs: full_run_options.append(kwargs)
+        or FullRunResult(tmp_path / "final.ohq"),
+    )
+
+    status = main([
+        "full-run", "--root", str(tmp_path), "--site", "SITE_A",
+        "--lat", "38.9", "--lon", "-77.0", "--config", str(config),
+    ])
+
+    assert status == 0
+    assert calls == [config.resolve()]
+    assert full_run_options[0]["acquisition_area"] == str(
+        (tmp_path / "intermediate" / "area.geojson").resolve()
+    )
+    assert "Refreshed config-driven outlet/acquisition inputs" in capsys.readouterr().out
+
+
 def test_full_run_cli_reports_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "ohqbuilder.cli.run_full_pipeline",

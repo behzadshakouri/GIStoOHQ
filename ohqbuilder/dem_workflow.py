@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -277,6 +278,22 @@ def prepare_dem_from_config(config_path: str | Path) -> DemWorkflowPlanResult:
         if boundary_snapped
         else None,
     }
+    spatial_sources = {}
+    for name, value in (
+        ("outlet", outlet_source_value),
+        ("acquisition", boundary_source_value),
+    ):
+        if not value:
+            continue
+        source_path = _resolve(value, base)
+        if source_path.is_file():
+            payload = source_path.read_bytes()
+            spatial_sources[name] = {
+                "path": _relativize(source_path, base),
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+    summary["spatial_sources"] = spatial_sources
     if acquisition_result:
         summary["acquisition_bounds"] = acquisition_result.bounds
         summary["acquisition_area_km2"] = acquisition_result.area_km2
