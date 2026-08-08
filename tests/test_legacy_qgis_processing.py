@@ -264,6 +264,8 @@ def test_small_watershed_requires_flow_accumulation_area_agreement():
     assert "expected_area_km2 = abs(float(snap_acc)) * cell_area_m2 / 1e6" in source
     assert "MIN_AREA_RATIO <= area_accumulation_ratio <= MAX_AREA_RATIO" in source
     assert "and not low_area_is_consistent" in source
+    assert "gdal.Open(FLOWACC_PATH)" in source
+    assert "FLOW_ACC_PATH" not in source
     subtract_source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
         encoding="utf-8"
     )

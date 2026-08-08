@@ -685,7 +685,7 @@ if not geometries:
 boundary = QgsGeometry.unaryUnion(geometries).makeValid()
 area_km2 = boundary.area() / 1e6
 print("Whole-watershed area: %.4f km2" % area_km2)
-flow_acc_dataset = gdal.Open(FLOW_ACC_PATH)
+flow_acc_dataset = gdal.Open(FLOWACC_PATH)
 flow_acc_transform = flow_acc_dataset.GetGeoTransform() if flow_acc_dataset else None
 flow_acc_dataset = None
 expected_area_km2 = None
