@@ -167,6 +167,10 @@ documented_watershed:
     props = area["features"][0]["properties"]
     assert props["source_boundary_point_count"] == 5
     assert props["uncertainty_margin_km"] == 1
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert summary["spatial_sources"]["acquisition"]["path"] == "estimated.kmz"
+    assert summary["spatial_sources"]["acquisition"]["size_bytes"] == kmz.stat().st_size
+    assert len(summary["spatial_sources"]["acquisition"]["sha256"]) == 64
 
 
 

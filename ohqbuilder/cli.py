@@ -194,12 +194,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     pour = sub.add_parser(
         "create-pour-points",
-        help="Create Phase 2 pour_points.shp automatically from Phase 1 junctions.",
+        help=("Create Phase 2 pour_points.shp from flow-accumulation ranks around "
+              "Phase 1 junctions."),
     )
     pour.add_argument("--root", required=True)
     pour.add_argument("--site", required=True)
     pour.add_argument(
         "--junctions", default=None, help="Defaults to <root>/<site>/outputs/junctions.gpkg."
+    )
+    pour.add_argument(
+        "--flow-acc", default=None, help="Defaults to <root>/<site>/outputs/flow_acc.tif."
     )
     pour.add_argument(
         "--out", default=None, help="Defaults to <root>/<site>/outputs/pour_points.shp."
@@ -825,6 +829,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=50.0,
         help="Maximum outlet movement for NHDPlus and DEM routing snaps (default: 50 m).",
     )
+    full.add_argument("--minimum-watershed-area-km2", type=float, default=0.05)
+    full.add_argument("--minimum-subwatershed-area-km2", type=float, default=0.0005)
+    full.add_argument("--minimum-area-ratio", type=float, default=0.75)
+    full.add_argument("--maximum-area-ratio", type=float, default=1.25)
     full.add_argument(
         "--use-existing-outlet",
         "--preserve-existing-outlet",
@@ -1087,6 +1095,7 @@ def main(argv: list[str] | None = None) -> int:
             result = generate_pour_points(
                 junctions,
                 output,
+                flow_accumulation_path=(Path(args.flow_acc).expanduser() if args.flow_acc else outputs / "flow_acc.tif"),
                 fallback_outlet_path=fallback_outlet,
                 overwrite=args.overwrite,
             )
@@ -1179,6 +1188,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "full-run":
         try:
+            if args.config:
+                config_path = Path(args.config).expanduser().resolve()
+                config_data = _load_cli_config(str(config_path))
+                dem_section = config_data.get("dem_acquisition")
+                if (
+                    isinstance(dem_section, dict)
+                    and dem_section.get("method")
+                    and dem_section.get("acquisition_area")
+                ):
+                    refreshed = prepare_dem_from_config(config_path)
+                    if not args.acquisition_area:
+                        acquisition_path = Path(str(dem_section["acquisition_area"])).expanduser()
+                        if not acquisition_path.is_absolute():
+                            acquisition_path = config_path.parent / acquisition_path
+                        args.acquisition_area = str(acquisition_path.resolve())
+                    print(
+                        "Refreshed config-driven outlet/acquisition inputs before full-run: "
+                        f"{refreshed.summary_path}"
+                    )
             reference_defaults = _documented_watershed_defaults(args.config)
             documented_source = (
                 args.documented_watershed_source or reference_defaults.get("source")
@@ -1209,6 +1237,10 @@ def main(argv: list[str] | None = None) -> int:
                 acquisition_area=args.acquisition_area,
                 use_reviewed_pour_points=args.use_reviewed_pour_points,
                 nhdplus_snap_distance_m=args.nhdplus_snap_distance_m,
+                minimum_watershed_area_km2=args.minimum_watershed_area_km2,
+                minimum_subwatershed_area_km2=args.minimum_subwatershed_area_km2,
+                minimum_area_ratio=args.minimum_area_ratio,
+                maximum_area_ratio=args.maximum_area_ratio,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
                 outlet_source=outlet_source,
