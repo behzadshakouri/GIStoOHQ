@@ -19,6 +19,21 @@ def _impervious_fraction(row):
     return None
 
 
+def _surface_elevation(row):
+    """Read a representative subbasin surface elevation in metres."""
+    for name in (
+        "surface_elevation_m",
+        "mean_elevation_m",
+        "elevation_m",
+        "mean_elev_m",
+        "elev_mean",
+    ):
+        value = safe_float(row_get(row, name))
+        if value is not None:
+            return value
+    return None
+
+
 def _crs_text(df):
     if getattr(df, "crs", None) is None:
         return None
@@ -49,6 +64,7 @@ class SubbasinReader:
                     area_km2=safe_float(row_get(row, "area_km2")),
                     curve_number=safe_float(row_get(row, "CN")),
                     impervious_fraction=_impervious_fraction(row),
+                    surface_elevation_m=_surface_elevation(row),
                     slope_pct=safe_float(row_get(row, "slope_pct")),
                     flow_len_ft=safe_float(row_get(row, "flow_len_ft")),
                     tc_min=safe_float(row_get(row, "tc_min")),

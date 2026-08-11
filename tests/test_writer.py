@@ -65,6 +65,7 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
                 name="Subbasin_1",
                 area_km2=1.0,
                 impervious_fraction=0.27,
+                surface_elevation_m=84.2,
                 centroid_x=100.0,
                 centroid_y=200.0,
             )
@@ -83,6 +84,7 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     assert "mixed_hydrologic_response_unit_final_v2.json" not in text
     assert "type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
     assert "impervious_fraction=0.27" in text
+    assert "surface_elevation=84.2[m]" in text
     assert "Runoff_coeff=" not in text
     assert text.count(
         "from=Subbasin_1,to=Reach_1,type=Trapezoidal_Channel_link"

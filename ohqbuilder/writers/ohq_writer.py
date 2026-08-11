@@ -636,8 +636,11 @@ class OHQWriter:
             impervious_fraction = min(max(impervious_fraction, 1.0e-6), 1.0 - 1.0e-6)
             width = max(math.sqrt(area_m2), 1.0)
             elevation = _finite(
-                getattr(subbasin, "elevation_m", None),
-                _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+                getattr(subbasin, "surface_elevation_m", None),
+                _finite(
+                    getattr(subbasin, "elevation_m", None),
+                    _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+                ),
             )
             x, y = catchment_positions[name]
 

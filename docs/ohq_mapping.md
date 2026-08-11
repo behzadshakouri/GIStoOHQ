@@ -12,6 +12,9 @@ legacy model retains the curve-number-derived runoff coefficient. The mixed
 HRU model reads a GIS impervious fraction (or percent) when available and
 partitions the subbasin between infiltrating and impervious catchments; when
 the input has no impervious field, the composite's 0.2 default is used.
+The GIS preparation phase writes `surface_elevation_m` as the subbasin mean DEM
+elevation and estimates `impervious_fraction` as the area-weighted midpoint of
+the NLCD developed-class impervious ranges (classes 21 through 24).
 Its `Reach_link` and `Impervious_Reach_link` interface labels expose the two
 encapsulated routing members, which use registered `Trapezoidal_Channel_link`
 connectors to the separately generated GIS stream reach. The registered
