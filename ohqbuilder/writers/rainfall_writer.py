@@ -5,34 +5,27 @@ import os
 from ..model.watershed import Watershed
 
 
-def _safe_model_name(value: str) -> str:
-    text = str(value or "Watershed").replace(";", "_").replace(",", "_").strip()
-    return text or "Watershed"
+def rainfall_filename(_watershed: Watershed) -> str | None:
+    """Return an explicitly configured OHQ precipitation file, if any.
 
-
-def rainfall_filename(watershed: Watershed) -> str:
-    """Return the rainfall time-series filename referenced by the OHQ model.
-
-    ``OHQ_RAINFALL_FILE`` may be exported by a project runner.  Otherwise the
-    writer references ``<watershed>_rainfall.txt`` beside the generated model.
-    The file must use a format accepted by OpenHydroQual's Precipitation source.
+    GIStoOHQ must not invent a filename: doing so makes OpenHydroQual try to
+    parse a file that the builder did not create.  ``OHQ_RAINFALL_FILE`` must
+    therefore name a real file in OpenHydroQual's Precipitation-source format.
+    Without it, the source is created unassigned so the model remains loadable
+    and precipitation can be selected in OpenHydroQual later.
     """
 
     configured = os.environ.get("OHQ_RAINFALL_FILE", "").strip()
     if configured:
         return configured
-    return f"{_safe_model_name(watershed.name)}_rainfall.txt"
+    return None
 
 
 def rainfall_lines(watershed: Watershed) -> list[str]:
     """Return native OpenHydroQual precipitation-source command lines."""
 
     filename = rainfall_filename(watershed)
-    return [
-        (
-            "create source;"
-            "type=Precipitation,"
-            "name=Rain,"
-            f"timeseries={filename}"
-        )
-    ]
+    command = "create source;type=Precipitation,name=Rain"
+    if filename:
+        command += f",timeseries={filename}"
+    return [command]

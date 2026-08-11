@@ -1,8 +1,8 @@
 # =============================================================================
 # extract_slope.py   (QGIS Python Console)
 #
-# Adds AVERAGE BASIN SLOPE to each subwatershed in subwatershed_params.gpkg,
-# and the CENTROID COORDINATES (UTM easting/northing) of each subwatershed.
+# Adds average slope, representative DEM elevation, NLCD-derived impervious
+# fraction, and centroid coordinates to subwatershed_params.gpkg.
 #
 # This is the first script that APPENDS to the parameters file rather than
 # recreating it: it reads the existing subwatershed_params.gpkg (which already
@@ -48,10 +48,13 @@ try:
 except NameError:
     SITE_DIR = "WS3_GIS/AZ12-100"
 DEM_REL    = "clipped/cliped_utm_wsclip.tif"
+LANDCOVER_REL = "clipped/landcover_aligned.tif"
 PARAMS_NAME = "subwatershed_params.gpkg"
 PARAMS_LAYER = "subwatershed_params"
 
 SLOPE_FIELD = "slope_pct"          # average basin slope, percent
+ELEV_FIELD  = "surface_elevation_m" # mean DEM elevation, metres
+IMP_FIELD   = "impervious_fraction" # area-weighted NLCD impervious fraction
 CX_FIELD    = "centroid_x"         # point-on-surface easting  (layer CRS, m)
 CY_FIELD    = "centroid_y"         # point-on-surface northing (layer CRS, m)
 RELOAD_IN_PROJECT = True
@@ -99,12 +102,14 @@ def format_number(value, pattern, null_text="-"):
 site_path = os.path.join(ROOT, SITE_DIR)
 OUT_DIR   = os.path.join(site_path, "outputs")
 dem       = os.path.join(OUT_DIR, DEM_REL)
+landcover = os.path.join(OUT_DIR, LANDCOVER_REL)
 params    = os.path.join(OUT_DIR, PARAMS_NAME)
 slope_tif = os.path.join(OUT_DIR, "clipped", "slope_pct.tif")
 
 print("Site   :", site_path)
 print("DEM    :", dem)
 print("Params :", params)
+print("Land cover:", landcover)
 
 for p in (dem, params):
     if not os.path.isfile(p):
@@ -183,10 +188,61 @@ if not any(value is not None for value in slope_by_id.values()):
         "grid and overlaps subwatershed_params.gpkg before computing Tc."
     )
 
+# --- representative surface elevation from the same DEM -------------------
+elev_res = processing.run("native:zonalstatisticsfb", {
+    "INPUT": layer,
+    "INPUT_RASTER": dem,
+    "RASTER_BAND": 1,
+    "COLUMN_PREFIX": "dem_",
+    "STATISTICS": [2],
+    "OUTPUT": "memory:elevation",
+})
+elevation_by_id = {
+    id_key(ft["id"]): as_float(ft["dem_mean"])
+    for ft in elev_res["OUTPUT"].getFeatures()
+}
+if not any(value is not None for value in elevation_by_id.values()):
+    raise Exception("DEM elevation is NULL for every subwatershed.")
+
+# NLCD developed classes describe ranges of impervious cover. Use the class
+# midpoints to calculate a spatially varying, area-weighted fraction. This is
+# preferable to a basin-wide constant and remains explicit about the source.
+NLCD_IMPERVIOUS_FRACTION = {21: 0.10, 22: 0.35, 23: 0.65, 24: 0.90}
+impervious_by_id = {}
+if os.path.isfile(landcover):
+    lc_res = processing.run("native:zonalhistogram", {
+        "INPUT_RASTER": landcover,
+        "RASTER_BAND": 1,
+        "INPUT_VECTOR": layer,
+        "COLUMN_PREFIX": "lc_",
+        "OUTPUT": "memory:landcover_histogram",
+    })
+    lc_layer = lc_res["OUTPUT"]
+    lc_fields = set(lc_layer.fields().names())
+    for ft in lc_layer.getFeatures():
+        counts = {}
+        total = 0.0
+        for code in range(1, 100):
+            field = "lc_%d" % code
+            if field not in lc_fields:
+                continue
+            count = as_float(ft[field]) or 0.0
+            counts[code] = count
+            total += count
+        if total > 0:
+            impervious_by_id[id_key(ft["id"])] = sum(
+                counts.get(code, 0.0) * fraction
+                for code, fraction in NLCD_IMPERVIOUS_FRACTION.items()
+            ) / total
+else:
+    print("WARNING: landcover_aligned.tif not found; impervious_fraction unchanged")
+
 # --- write slope_pct + centroid coords back into the gpkg in place ---------
 layer.startEditing()
 existing = [f.name() for f in layer.fields()]
 to_add = [(SLOPE_FIELD, QVariant.Double),
+          (ELEV_FIELD,  QVariant.Double),
+          (IMP_FIELD,   QVariant.Double),
           (CX_FIELD,    QVariant.Double),
           (CY_FIELD,    QVariant.Double)]
 new = [QgsField(n, t) for (n, t) in to_add if n not in existing]
@@ -195,6 +251,8 @@ if new:
     layer.updateFields()
 
 idx_slope = layer.fields().indexFromName(SLOPE_FIELD)
+idx_elev  = layer.fields().indexFromName(ELEV_FIELD)
+idx_imp   = layer.fields().indexFromName(IMP_FIELD)
 idx_cx    = layer.fields().indexFromName(CX_FIELD)
 idx_cy    = layer.fields().indexFromName(CY_FIELD)
 
@@ -203,6 +261,12 @@ for ft in layer.getFeatures():
     val = slope_by_id.get(id_key(ft["id"]))
     layer.changeAttributeValue(ft.id(), idx_slope,
                                round(float(val), 3) if val is not None else None)
+    elev = elevation_by_id.get(id_key(ft["id"]))
+    layer.changeAttributeValue(ft.id(), idx_elev,
+                               round(float(elev), 3) if elev is not None else None)
+    imp = impervious_by_id.get(id_key(ft["id"]))
+    if imp is not None:
+        layer.changeAttributeValue(ft.id(), idx_imp, round(float(imp), 6))
     # centroid (point-on-surface, guaranteed inside the polygon)
     geom = ft.geometry()
     pos = geom.pointOnSurface()        # QgsGeometry (point)
@@ -216,19 +280,23 @@ for ft in layer.getFeatures():
 layer.commitChanges()
 
 # --- report ----------------------------------------------------------------
-print("\nUpdated %s with %s, %s, %s:" % (PARAMS_NAME, SLOPE_FIELD, CX_FIELD, CY_FIELD))
-print("\n  id    area_km2     CN   slope_pct      centroid_x     centroid_y")
+print("\nUpdated %s with slope, elevation, impervious fraction, and centroids:" % PARAMS_NAME)
+print("\n  id    area_km2     CN   slope_pct  elevation_m  impervious   centroid_x   centroid_y")
 layer2 = QgsVectorLayer(params + "|layername=" + PARAMS_LAYER, PARAMS_LAYER, "ogr")
 for ft in sorted(layer2.getFeatures(), key=lambda f: (f["id"] is None, f["id"])):
     cn = ft["CN"] if "CN" in layer2.fields().names() else None
     sp = ft[SLOPE_FIELD]
     cx = ft[CX_FIELD]
     cy = ft[CY_FIELD]
-    print("  %-4s  %9s  %5s   %7s   %12s  %12s" % (
+    elev = ft[ELEV_FIELD]
+    imp = ft[IMP_FIELD]
+    print("  %-4s  %9s  %5s   %7s   %11s  %10s  %12s  %12s" % (
         ft["id"],
         format_number(ft["area_km2"], "%.4f"),
         format_number(cn, "%.1f"),
         format_number(sp, "%.3f", "NULL"),
+        format_number(elev, "%.3f", "NULL"),
+        format_number(imp, "%.6f", "NULL"),
         format_number(cx, "%.2f", "NULL"),
         format_number(cy, "%.2f", "NULL")))
 

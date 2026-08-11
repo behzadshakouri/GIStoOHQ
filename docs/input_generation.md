@@ -240,6 +240,8 @@ Additional columns are preserved as attributes where applicable.
 | `area_km2` | Drainage area. |
 | `CN` | Curve number. |
 | `slope_pct` | Average basin slope. |
+| `surface_elevation_m` | Mean DEM elevation used as the mixed-HRU vertical datum. |
+| `impervious_fraction` | NLCD-derived unitless impervious area fraction for the mixed HRU. |
 | `flow_len_ft` | Longest/representative flow length. |
 | `tc_min` | Time of concentration. |
 | `lag_min` | SCS lag. |

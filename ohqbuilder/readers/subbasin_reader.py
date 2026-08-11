@@ -5,11 +5,41 @@ from ..utils.naming import subbasin_name
 from ..utils.units import safe_float, safe_int
 from .gpkg_utils import read_layer, row_get
 
+
+def _impervious_fraction(row):
+    """Read a unitless impervious fraction from common GIS field names."""
+    for name in ("impervious_fraction", "impervious_frac", "imp_fraction", "frac_imp"):
+        value = safe_float(row_get(row, name))
+        if value is not None:
+            return value
+    for name in ("impervious_percent", "impervious_pct", "pct_impervious", "pct_imp"):
+        value = safe_float(row_get(row, name))
+        if value is not None:
+            return value / 100.0
+    return None
+
+
+def _surface_elevation(row):
+    """Read a representative subbasin surface elevation in metres."""
+    for name in (
+        "surface_elevation_m",
+        "mean_elevation_m",
+        "elevation_m",
+        "mean_elev_m",
+        "elev_mean",
+    ):
+        value = safe_float(row_get(row, name))
+        if value is not None:
+            return value
+    return None
+
+
 def _crs_text(df):
     if getattr(df, "crs", None) is None:
         return None
     authority = df.crs.to_authority()
     return f"{authority[0]}:{authority[1]}" if authority else str(df.crs)
+
 
 class SubbasinReader:
     def __init__(self, layer: str = "subwatershed_params"):
@@ -27,21 +57,29 @@ class SubbasinReader:
             if (x is None or y is None) and geom is not None and not geom.is_empty:
                 point = geom.representative_point()
                 x, y = float(point.x), float(point.y)
-            out.append(Subbasin(
-                id=sid,
-                name=subbasin_name(sid),
-                area_km2=safe_float(row_get(row, "area_km2")),
-                curve_number=safe_float(row_get(row, "CN")),
-                slope_pct=safe_float(row_get(row, "slope_pct")),
-                flow_len_ft=safe_float(row_get(row, "flow_len_ft")),
-                tc_min=safe_float(row_get(row, "tc_min")),
-                lag_min=safe_float(row_get(row, "lag_min")),
-                centroid_x=x,
-                centroid_y=y,
-                x_act=x,
-                y_act=y,
-                crs_authid=crs_authid,
-                layout_source="subbasin_centroid",
-                attributes={k: row_get(row, k) for k in getattr(df, "columns", []) if k != "geometry"},
-            ))
+            out.append(
+                Subbasin(
+                    id=sid,
+                    name=subbasin_name(sid),
+                    area_km2=safe_float(row_get(row, "area_km2")),
+                    curve_number=safe_float(row_get(row, "CN")),
+                    impervious_fraction=_impervious_fraction(row),
+                    surface_elevation_m=_surface_elevation(row),
+                    slope_pct=safe_float(row_get(row, "slope_pct")),
+                    flow_len_ft=safe_float(row_get(row, "flow_len_ft")),
+                    tc_min=safe_float(row_get(row, "tc_min")),
+                    lag_min=safe_float(row_get(row, "lag_min")),
+                    centroid_x=x,
+                    centroid_y=y,
+                    x_act=x,
+                    y_act=y,
+                    crs_authid=crs_authid,
+                    layout_source="subbasin_centroid",
+                    attributes={
+                        k: row_get(row, k)
+                        for k in getattr(df, "columns", [])
+                        if k != "geometry"
+                    },
+                )
+            )
         return out

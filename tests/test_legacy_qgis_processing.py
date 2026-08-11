@@ -156,6 +156,16 @@ def test_zonal_parameters_fail_early_when_cn_or_slope_has_no_coverage():
     assert 'slope_by_id[id_key(ft["id"])] = as_float' in slope
 
 
+def test_hru_properties_are_derived_from_dem_and_landcover():
+    source = Path("scripts/legacy_gis/extract_slope.py").read_text(encoding="utf-8")
+
+    assert 'ELEV_FIELD  = "surface_elevation_m"' in source
+    assert 'IMP_FIELD   = "impervious_fraction"' in source
+    assert '"INPUT_RASTER": dem' in source
+    assert 'processing.run("native:zonalhistogram"' in source
+    assert "NLCD_IMPERVIOUS_FRACTION" in source
+
+
 def test_subwatersheds_use_a_strict_incremental_partition():
     source = Path("scripts/legacy_gis/subtractsubwatershed.py").read_text(
         encoding="utf-8"

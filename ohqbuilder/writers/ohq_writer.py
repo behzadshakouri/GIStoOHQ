@@ -183,9 +183,7 @@ def _scale_layout_positions(
     available_width = max(target_width - 2.0 * margin, 1.0)
     available_height = max(target_height - 2.0 * margin, 1.0)
 
-    width_scale = (
-        available_width / source_width if source_width > 0.0 else float("inf")
-    )
+    width_scale = available_width / source_width if source_width > 0.0 else float("inf")
     height_scale = (
         available_height / source_height if source_height > 0.0 else float("inf")
     )
@@ -195,9 +193,12 @@ def _scale_layout_positions(
 
     # This affects only the OHQ display coordinates. It does not modify
     # x_act/y_act or any authoritative GIS coordinate stored in the model.
-    flip_y = str(
-        os.environ.get("OHQ_LAYOUT_FLIP_Y", "1")
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    flip_y = str(os.environ.get("OHQ_LAYOUT_FLIP_Y", "1")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     fitted_width = source_width * scale
     fitted_height = source_height * scale
@@ -308,8 +309,11 @@ class OHQWriter:
         watershed -> stream reach -> downstream stream reach -> outlet
     """
 
-    def __init__(self, include_comments: bool = True):
+    def __init__(self, include_comments: bool = True, formulation: str = "legacy"):
+        if formulation not in {"legacy", "mixed_hru"}:
+            raise ValueError(f"Unsupported OHQ formulation: {formulation}")
         self.include_comments = include_comments
+        self.formulation = formulation
 
     def write(self, watershed: Watershed, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -370,7 +374,9 @@ class OHQWriter:
                 )
                 continue
             if source == target:
-                skipped_comments.append(f"Skipped invalid self-link: {source} -> {target}")
+                skipped_comments.append(
+                    f"Skipped invalid self-link: {source} -> {target}"
+                )
                 continue
             if source not in known_names or target not in known_names:
                 skipped_comments.append(
@@ -433,9 +439,7 @@ class OHQWriter:
         # A reach is active when it occurs in explicit topology or receives a
         # catchment that resolves to it.
         active_reach_names: set[str] = {
-            name
-            for name in reach_names
-            if name in downstream or name in upstream
+            name for name in reach_names if name in downstream or name in upstream
         }
 
         catchment_targets: dict[str, str] = {}
@@ -489,9 +493,7 @@ class OHQWriter:
                 active_reach_names.add(target)
                 pending.append(target)
 
-        active_reaches = [
-            name for name in reach_by_name if name in active_reach_names
-        ]
+        active_reaches = [name for name in reach_by_name if name in active_reach_names]
 
         # Real projected GIS coordinates are authoritative. No synthetic
         # topological grid is generated here.
@@ -518,9 +520,7 @@ class OHQWriter:
                 reach_positions[name] = (x_act, y_act)
 
         terminal_reaches = [
-            source
-            for source, target in reach_targets.items()
-            if target == outlet_name
+            source for source, target in reach_targets.items() if target == outlet_name
         ]
 
         outlet_x, outlet_y = _actual_xy(outlet_obj)
@@ -536,8 +536,12 @@ class OHQWriter:
                 if point[0] is not None and point[1] is not None
             ]
             if terminal_points:
-                outlet_x = sum(point[0] for point in terminal_points) / len(terminal_points)
-                outlet_y = sum(point[1] for point in terminal_points) / len(terminal_points)
+                outlet_x = sum(point[0] for point in terminal_points) / len(
+                    terminal_points
+                )
+                outlet_y = sum(point[1] for point in terminal_points) / len(
+                    terminal_points
+                )
 
         if outlet_x is None or outlet_y is None:
             missing_coordinates.append(
@@ -589,8 +593,7 @@ class OHQWriter:
             )
             writer.comment(
                 "Layout scale={scale:.12g}; source span={width:.12g} x {height:.12g}; "
-                "target canvas={target_width:.12g} x {target_height:.12g}; margin={margin:.12g}."
-                .format(
+                "target canvas={target_width:.12g} x {target_height:.12g}; margin={margin:.12g}.".format(
                     scale=layout_info["scale"],
                     width=layout_info["source_width"],
                     height=layout_info["source_height"],
@@ -606,6 +609,8 @@ class OHQWriter:
         writer.loadtemplate(_resource_path("main_components.json"))
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
         writer.addtemplate(_resource_path("open_channel.json"))
+        if self.formulation == "mixed_hru":
+            writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
         writer.line()
 
         if self.include_comments:
@@ -624,17 +629,41 @@ class OHQWriter:
             slope = max(slope_pct / 100.0, 1.0e-6)
             curve_number = _finite(getattr(subbasin, "curve_number", None), 75.0)
             runoff_coeff = min(max(curve_number / 100.0, 0.01), 1.0)
+            impervious_fraction = _finite(
+                getattr(subbasin, "impervious_fraction", None), 0.2
+            )
+            # The mixed composite deliberately excludes zero-area members.
+            impervious_fraction = min(max(impervious_fraction, 1.0e-6), 1.0 - 1.0e-6)
             width = max(math.sqrt(area_m2), 1.0)
             elevation = _finite(
-                getattr(subbasin, "elevation_m", None),
-                _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+                getattr(subbasin, "surface_elevation_m", None),
+                _finite(
+                    getattr(subbasin, "elevation_m", None),
+                    _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+                ),
             )
             x, y = catchment_positions[name]
 
-            writer.create_block(
-                "Catchment",
-                name=name,
-                properties=[
+            block_type = (
+                "Mixed_Hydrologic_Response_Unit"
+                if self.formulation == "mixed_hru"
+                else "Catchment"
+            )
+            properties = (
+                [
+                    ("area", f"{area_m2:.12g}[m~^2]"),
+                    ("impervious_fraction", f"{impervious_fraction:.12g}"),
+                    ("catchment_slope", f"{slope:.12g}"),
+                    ("catchment_width", f"{width:.12g}[m]"),
+                    ("Precipitation", "Rain"),
+                    ("surface_elevation", f"{elevation:.12g}[m]"),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", block_width),
+                    ("_height", block_height),
+                ]
+                if self.formulation == "mixed_hru"
+                else [
                     ("area", f"{area_m2:.12g}[m~^2]"),
                     ("Slope", f"{slope:.12g}"),
                     ("Width", f"{width:.12g}[m]"),
@@ -651,7 +680,12 @@ class OHQWriter:
                     ("y", y),
                     ("_width", block_width),
                     ("_height", block_height),
-                ],
+                ]
+            )
+            writer.create_block(
+                block_type,
+                name=name,
+                properties=properties,
             )
 
         writer.line()
@@ -694,22 +728,34 @@ class OHQWriter:
             writer.comment("Watershed runoff discharging into stream reaches")
 
         for source, target in catchment_targets.items():
-            key = (source, target, "Catchment_link")
-            if key in emitted_links:
-                continue
-            emitted_links.add(key)
-
             first_step = downstream.get(source, [target])[0]
             link_name = link_name_by_pair.get(
                 (source, first_step),
                 f"{source} to {target}",
             )
-            writer.create_link(
-                "Catchment_link",
-                name=link_name,
-                source=source,
-                target=target,
+            link_types = (
+                (
+                    ("Trapezoidal_Channel_link", "surface"),
+                    ("Trapezoidal_Channel_link", "impervious surface"),
+                    ("groundwater_to_stream", "baseflow"),
+                )
+                if self.formulation == "mixed_hru"
+                else (("Catchment_link", ""),)
             )
+            for link_type, suffix in link_types:
+                # Reach_link and Impervious_Reach_link are composite interface
+                # labels, not registered connector types. Both interfaces use
+                # Trapezoidal_Channel_link; retain the two distinct exits.
+                key = (source, target, f"{link_type}:{suffix}")
+                if key in emitted_links:
+                    continue
+                emitted_links.add(key)
+                writer.create_link(
+                    link_type,
+                    name=f"{link_name} {suffix}".strip(),
+                    source=source,
+                    target=target,
+                )
 
         if self.include_comments:
             writer.comment("Stream-reach routing links")
@@ -751,9 +797,7 @@ class OHQWriter:
                     )
 
             for name in junction_by_name:
-                writer.comment(
-                    f"GIS junction used as topology-only node: {name}"
-                )
+                writer.comment(f"GIS junction used as topology-only node: {name}")
 
         if self.include_comments:
             crs_values = _ordered_unique(
@@ -761,7 +805,9 @@ class OHQWriter:
                 for item in [*subbasins, *reaches, *junctions]
             )
             if crs_values:
-                writer.comment("Projected coordinate reference: " + ", ".join(crs_values))
+                writer.comment(
+                    "Projected coordinate reference: " + ", ".join(crs_values)
+                )
 
         writer.line()
         writer.setvalue("system", "simulation_start_time", "0")
