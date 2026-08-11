@@ -4,6 +4,7 @@ from ohqbuilder.model.watershed import Watershed
 from ohqbuilder.model.subbasin import Subbasin
 from ohqbuilder.model.topology import TopologyLink
 from ohqbuilder.writers.ohq_writer import OHQWriter
+from ohqbuilder.writers.rainfall_writer import rainfall_lines
 
 
 def test_writer_renders_subbasin():
@@ -38,6 +39,23 @@ def test_writer_can_omit_comments():
     assert "create block;type=fixed_head,name=Outlet" in txt
 
 
+def test_rainfall_source_does_not_reference_an_invented_file(monkeypatch):
+    monkeypatch.delenv("OHQ_RAINFALL_FILE", raising=False)
+
+    assert rainfall_lines(Watershed(name="NoRainfallFile")) == [
+        "create source;type=Precipitation,name=Rain"
+    ]
+
+
+def test_rainfall_source_uses_explicitly_configured_file(monkeypatch):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/valid_rainfall.txt")
+
+    assert rainfall_lines(Watershed(name="Configured")) == [
+        "create source;type=Precipitation,name=Rain,"
+        "timeseries=/data/valid_rainfall.txt"
+    ]
+
+
 def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     ws = Watershed(
         name="Mixed",
@@ -61,12 +79,14 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
 
     text = OHQWriter(formulation="mixed_hru").render(ws)
 
-    assert "mixed_hydrologic_response_unit_final_v2.json" in text
+    assert "mixed_hydrologic_response_unit.json" in text
+    assert "mixed_hydrologic_response_unit_final_v2.json" not in text
     assert "type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
     assert "impervious_fraction=0.27" in text
     assert "Runoff_coeff=" not in text
-    assert "from=Subbasin_1,to=Reach_1,type=Reach_link" in text
-    assert "from=Subbasin_1,to=Reach_1,type=Impervious_Reach_link" in text
+    assert text.count(
+        "from=Subbasin_1,to=Reach_1,type=Trapezoidal_Channel_link"
+    ) == 2
     assert "from=Subbasin_1,to=Reach_1,type=groundwater_to_stream" in text
 
 

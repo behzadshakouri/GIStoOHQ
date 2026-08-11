@@ -12,3 +12,7 @@ legacy model retains the curve-number-derived runoff coefficient. The mixed
 HRU model reads a GIS impervious fraction (or percent) when available and
 partitions the subbasin between infiltrating and impervious catchments; when
 the input has no impervious field, the composite's 0.2 default is used.
+
+Set `OHQ_RAINFALL_FILE` to a real file in OpenHydroQual's precipitation format
+when building a model with assigned rainfall. If it is unset, GIStoOHQ creates
+an unassigned `Rain` source instead of referencing a nonexistent default file.

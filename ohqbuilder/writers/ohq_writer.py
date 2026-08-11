@@ -610,9 +610,7 @@ class OHQWriter:
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
         writer.addtemplate(_resource_path("open_channel.json"))
         if self.formulation == "mixed_hru":
-            writer.addtemplate(
-                _resource_path("mixed_hydrologic_response_unit_final_v2.json")
-            )
+            writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
         writer.line()
 
         if self.include_comments:
@@ -734,15 +732,18 @@ class OHQWriter:
             )
             link_types = (
                 (
-                    ("Reach_link", "surface"),
-                    ("Impervious_Reach_link", "impervious surface"),
+                    ("Trapezoidal_Channel_link", "surface"),
+                    ("Trapezoidal_Channel_link", "impervious surface"),
                     ("groundwater_to_stream", "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
                 else (("Catchment_link", ""),)
             )
             for link_type, suffix in link_types:
-                key = (source, target, link_type)
+                # A mixed HRU intentionally exposes two channel connections of
+                # the same registered type, so include the interface suffix in
+                # the de-duplication key.
+                key = (source, target, f"{link_type}:{suffix}")
                 if key in emitted_links:
                     continue
                 emitted_links.add(key)
