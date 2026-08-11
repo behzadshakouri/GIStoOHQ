@@ -732,17 +732,18 @@ class OHQWriter:
             )
             link_types = (
                 (
-                    ("Reach_link", "surface"),
-                    ("Impervious_Reach_link", "impervious surface"),
+                    ("Trapezoidal_Channel_link", "surface"),
+                    ("Trapezoidal_Channel_link", "impervious surface"),
                     ("groundwater_to_stream", "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
                 else (("Catchment_link", ""),)
             )
             for link_type, suffix in link_types:
-                # These are the composite's named external interfaces, not the
-                # connector types used by its encapsulated member blocks.
-                key = (source, target, link_type)
+                # Reach_link and Impervious_Reach_link are composite interface
+                # labels, not registered connector types. Both interfaces use
+                # Trapezoidal_Channel_link; retain the two distinct exits.
+                key = (source, target, f"{link_type}:{suffix}")
                 if key in emitted_links:
                     continue
                 emitted_links.add(key)
