@@ -84,9 +84,9 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     assert "type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
     assert "impervious_fraction=0.27" in text
     assert "Runoff_coeff=" not in text
-    assert text.count(
-        "from=Subbasin_1,to=Reach_1,type=Trapezoidal_Channel_link"
-    ) == 2
+    assert "from=Subbasin_1,to=Reach_1,type=Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Impervious_Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Trapezoidal_Channel_link" not in text
     assert "from=Subbasin_1,to=Reach_1,type=groundwater_to_stream" in text
 
 

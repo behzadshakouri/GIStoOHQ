@@ -732,18 +732,17 @@ class OHQWriter:
             )
             link_types = (
                 (
-                    ("Trapezoidal_Channel_link", "surface"),
-                    ("Trapezoidal_Channel_link", "impervious surface"),
+                    ("Reach_link", "surface"),
+                    ("Impervious_Reach_link", "impervious surface"),
                     ("groundwater_to_stream", "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
                 else (("Catchment_link", ""),)
             )
             for link_type, suffix in link_types:
-                # A mixed HRU intentionally exposes two channel connections of
-                # the same registered type, so include the interface suffix in
-                # the de-duplication key.
-                key = (source, target, f"{link_type}:{suffix}")
+                # These are the composite's named external interfaces, not the
+                # connector types used by its encapsulated member blocks.
+                key = (source, target, link_type)
                 if key in emitted_links:
                     continue
                 emitted_links.add(key)
