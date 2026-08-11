@@ -38,6 +38,38 @@ def test_writer_can_omit_comments():
     assert "create block;type=fixed_head,name=Outlet" in txt
 
 
+def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
+    ws = Watershed(
+        name="Mixed",
+        subbasins=[
+            Subbasin(
+                id=1,
+                name="Subbasin_1",
+                area_km2=1.0,
+                impervious_fraction=0.27,
+                centroid_x=100.0,
+                centroid_y=200.0,
+            )
+        ],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="mixed_hru").render(ws)
+
+    assert "mixed_hydrologic_response_unit_final_v2.json" in text
+    assert "type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
+    assert "impervious_fraction=0.27" in text
+    assert "Runoff_coeff=" not in text
+    assert "from=Subbasin_1,to=Reach_1,type=Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Impervious_Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=groundwater_to_stream" in text
+
+
 def test_writer_parameterizes_reach_as_trapezoidal_channel_connected_to_catchment():
     ws = Watershed(
         name="Parameterized",
