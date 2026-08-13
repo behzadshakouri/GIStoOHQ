@@ -168,6 +168,8 @@ def _command_for_watershed_data(
     provenance_output: str = "watershed_package/provenance/temporal.json",
     hydropinn_output: str = "outputs/hydropinn",
     workspace: str = "watershed_data_run",
+    forecast_url: str = "", forecast_provider: str = "",
+    forecast_product: str = "forecast", prediction_time: str = "",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -270,6 +272,18 @@ def _command_for_watershed_data(
             "--station-id", station_id, "--workspace", workspace,
             "--export-hydropinn",
         ]
+    if action == "download-forecast":
+        if not forecast_url or not forecast_provider:
+            raise QgisDockConfigError("Forecast URL and provider are required.")
+        return ["ohqbuild", "data", "download-forecast", "--url", forecast_url,
+                "--provider", forecast_provider, "--product", forecast_product,
+                "--cache", cache, "--catalog", catalog]
+    if action == "forecast-view":
+        if not asset_id or not prediction_time:
+            raise QgisDockConfigError("Forecast asset ID and prediction time are required.")
+        return ["ohqbuild", "data", "forecast-view", "--asset-id", asset_id,
+                "--prediction-time", prediction_time, "--object-store", cache,
+                "--catalog", catalog]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
@@ -790,6 +804,8 @@ class DemWorkflowDock:
             "Provenance output": "watershed_package/provenance/temporal.json",
             "HydroPINN output": "outputs/hydropinn",
             "All-data workspace": "watershed_data_run",
+            "Forecast URL": "", "Forecast provider": "", "Forecast product": "forecast",
+            "Prediction time (UTC)": "",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -831,6 +847,10 @@ class DemWorkflowDock:
                     provenance_output=fields["Provenance output"].text(),
                     hydropinn_output=fields["HydroPINN output"].text(),
                     workspace=fields["All-data workspace"].text(),
+                    forecast_url=fields["Forecast URL"].text(),
+                    forecast_provider=fields["Forecast provider"].text(),
+                    forecast_product=fields["Forecast product"].text(),
+                    prediction_time=fields["Prediction time (UTC)"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -849,6 +869,8 @@ class DemWorkflowDock:
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
+            ("Download Forecast Archive", "download-forecast"),
+            ("Create Forecast View", "forecast-view"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=action: run(value))

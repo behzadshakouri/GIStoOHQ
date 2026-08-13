@@ -335,3 +335,7 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     assert _command_for_watershed_data(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
     )[-3:] == ["--workspace", "run", "--export-hydropinn"]
+    assert _command_for_watershed_data(
+        "forecast-view", site_spec="site.yaml", asset_id="sha256:x",
+        prediction_time="2025-01-01T00:00:00Z", cache="cache", catalog="catalog.json",
+    )[2] == "forecast-view"

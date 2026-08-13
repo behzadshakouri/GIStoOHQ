@@ -134,6 +134,25 @@ Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
 interfaces. Gauge selection remains explicit; this command never silently picks
 an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
 
+## Archived forecasts
+
+Forecast archives must be JSON records containing `issue_time`, `valid_time`,
+`lead_time_hours`, `member`, `variable`, `location_or_grid_id`, `value`, and
+`units`. Acquire a provider archive and create a prediction-time view with:
+
+```bash
+ohqbuild data download-forecast --url https://provider/archive.json \
+  --provider provider --product forecast --cache .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+ohqbuild data forecast-view --asset-id sha256:... \
+  --prediction-time 2025-01-01T03:00:00Z --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+```
+
+The view enforces `issue_time <= prediction_time`, preserves issue and valid
+times, and rejects inconsistent lead times. It never collapses forecasts to valid
+time alone.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

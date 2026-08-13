@@ -293,6 +293,10 @@ def watershed_data_command(
     package: str = "watershed_package",
     hydropinn_output: str = "outputs/hydropinn",
     workspace: str = "watershed_data_run",
+    forecast_url: str = "",
+    forecast_provider: str = "",
+    forecast_product: str = "forecast",
+    prediction_time: str = "",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -373,6 +377,22 @@ def watershed_data_command(
                 "--export-hydropinn",
             ),
         )
+    if action == "download-forecast":
+        if not forecast_url or not forecast_provider:
+            raise LauncherError("Forecast URL and provider are required.")
+        return WorkflowCommand("Download Forecast Archive", (
+            "ohqbuild", "data", "download-forecast", "--url", forecast_url,
+            "--provider", forecast_provider, "--product", forecast_product,
+            "--cache", cache, "--catalog", catalog,
+        ))
+    if action == "forecast-view":
+        if not asset_id or not prediction_time:
+            raise LauncherError("Forecast asset ID and prediction time are required.")
+        return WorkflowCommand("Create Forecast View", (
+            "ohqbuild", "data", "forecast-view", "--asset-id", asset_id,
+            "--prediction-time", prediction_time, "--object-store", cache,
+            "--catalog", catalog,
+        ))
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
 
@@ -1720,6 +1740,10 @@ class LauncherApp:
             "Package": tk.StringVar(value="watershed_package"),
             "HydroPINN output": tk.StringVar(value="outputs/hydropinn"),
             "All-data workspace": tk.StringVar(value="watershed_data_run"),
+            "Forecast URL": tk.StringVar(value=""),
+            "Forecast provider": tk.StringVar(value=""),
+            "Forecast product": tk.StringVar(value="forecast"),
+            "Prediction time (UTC)": tk.StringVar(value=""),
         }
         tk.Label(
             dialog,
@@ -1747,6 +1771,10 @@ class LauncherApp:
                     package=variables["Package"].get(),
                     hydropinn_output=variables["HydroPINN output"].get(),
                     workspace=variables["All-data workspace"].get(),
+                    forecast_url=variables["Forecast URL"].get(),
+                    forecast_provider=variables["Forecast provider"].get(),
+                    forecast_product=variables["Forecast product"].get(),
+                    prediction_time=variables["Prediction time (UTC)"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1766,6 +1794,8 @@ class LauncherApp:
             ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
+            ("Download Forecast Archive", "download-forecast"),
+            ("Create Forecast View", "forecast-view"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

@@ -71,6 +71,11 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "run", site_spec="site.yaml", station_id="01649500", workspace="run"
     )
     assert run.argv[-3:] == ("--workspace", "run", "--export-hydropinn")
+    forecast = watershed_data_command(
+        "download-forecast", site_spec="site.yaml", forecast_url="https://example.test/a.json",
+        forecast_provider="example",
+    )
+    assert forecast.argv[2] == "download-forecast"
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():

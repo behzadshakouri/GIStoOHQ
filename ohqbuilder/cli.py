@@ -71,6 +71,7 @@ from .watershed_data.nasa_power import (
 )
 from .watershed_data.temporal import harmonize_asset
 from .watershed_data.pipeline import run_watershed_data_pipeline
+from .watershed_data.forecast import acquire_forecast_archive, materialize_available_forecasts
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -165,6 +166,19 @@ def build_parser() -> argparse.ArgumentParser:
     data_run.add_argument("--no-weather", action="store_true")
     data_run.add_argument("--no-pet", action="store_true")
     data_run.add_argument("--export-hydropinn", action="store_true")
+    forecast = data_sub.add_parser("download-forecast", help="Acquire a versioned forecast archive.")
+    forecast.add_argument("--url", required=True)
+    forecast.add_argument("--provider", required=True)
+    forecast.add_argument("--product", required=True)
+    forecast.add_argument("--cache", required=True)
+    forecast.add_argument("--catalog", required=True)
+    forecast_view = data_sub.add_parser(
+        "forecast-view", help="Create a leakage-safe forecast view at a prediction time."
+    )
+    forecast_view.add_argument("--asset-id", required=True)
+    forecast_view.add_argument("--prediction-time", required=True)
+    forecast_view.add_argument("--object-store", required=True)
+    forecast_view.add_argument("--catalog", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1202,6 +1216,18 @@ def main(argv: list[str] | None = None) -> int:
                     export_hydropinn_profile=args.export_hydropinn,
                 )
                 print(f"Watershed data pipeline complete: {result['package_manifest']}")
+            elif args.data_command == "download-forecast":
+                asset = acquire_forecast_archive(
+                    url=args.url, provider=args.provider, product=args.product,
+                    cache=args.cache, catalog=args.catalog,
+                )
+                print(f"Cataloged forecast archive: {asset['asset_id']}")
+            elif args.data_command == "forecast-view":
+                asset = materialize_available_forecasts(
+                    asset_id=args.asset_id, prediction_time=args.prediction_time,
+                    object_store=args.object_store, catalog=args.catalog,
+                )
+                print(f"Cataloged leakage-safe forecast view: {asset['asset_id']}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2
