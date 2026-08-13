@@ -46,6 +46,10 @@ The optional **Data** tab creates and validates generic watershed SiteSpecs and
 can download an explicitly declared HTTPS discharge, weather, PET/ET, or other
 provider product into the immutable cache and asset catalog. It does not add any
 requirements to **Full Run** or change the GIS-to-OHQ pipeline.
+Use **Discover Discharge Gauges**, review the generated reconnaissance report,
+enter the selected USGS station ID, and then use **Download Selected Discharge**.
+The standalone `ohqbuild ui` launcher provides the same optional sequence under
+**Watershed data…**.
 
 ## Install from a source checkout
 

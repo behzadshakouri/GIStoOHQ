@@ -277,6 +277,131 @@ class WorkflowCommand:
     followup_argv: tuple[tuple[str, ...], ...] = ()
 
 
+def watershed_data_command(
+    action: str,
+    *,
+    site_spec: str,
+    cache: str = ".gistoohq-cache",
+    catalog: str = "watershed_package/catalog.json",
+    reconnaissance_output: str = "reconnaissance",
+    radius_km: float = 50.0,
+    station_id: str = "",
+    weather_variables: str = "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
+    asset_id: str = "",
+    qc_output: str = "watershed_package/quality_control/temporal.json",
+    provenance_output: str = "watershed_package/provenance/temporal.json",
+    package: str = "watershed_package",
+    hydropinn_output: str = "outputs/hydropinn",
+    workspace: str = "watershed_data_run",
+    forecast_url: str = "",
+    forecast_provider: str = "",
+    forecast_product: str = "forecast",
+    prediction_time: str = "",
+    status_output: str = "watershed_package/status",
+) -> WorkflowCommand:
+    """Build standalone-launcher commands for the optional watershed-data workflow."""
+    if not site_spec:
+        raise LauncherError("A SiteSpec path is required for watershed data.")
+    if action == "reconnaissance":
+        return WorkflowCommand(
+            "Discover Discharge Gauges",
+            (
+                "ohqbuild", "data", "reconnaissance", "--site-spec", site_spec,
+                "--output", reconnaissance_output, "--radius-km", str(radius_km),
+            ),
+        )
+    if action == "download-discharge":
+        if not station_id:
+            raise LauncherError("Enter the selected USGS station ID after reconnaissance.")
+        return WorkflowCommand(
+            "Download Selected Discharge",
+            (
+                "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
+                "--station-id", station_id, "--cache", cache, "--catalog", catalog,
+            ),
+        )
+    if action == "validate-site":
+        return WorkflowCommand(
+            "Validate SiteSpec", ("ohqbuild", "data", "validate-site", "--site-spec", site_spec)
+        )
+    if action == "download-weather":
+        return WorkflowCommand(
+            "Download Historical Weather",
+            (
+                "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
+                "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
+            ),
+        )
+    if action == "harmonize":
+        if not asset_id:
+            raise LauncherError("Enter a native catalog asset ID to harmonize.")
+        return WorkflowCommand(
+            "Harmonize and QC",
+            (
+                "ohqbuild", "data", "harmonize", "--asset-id", asset_id,
+                "--catalog", catalog, "--object-store", cache,
+                "--qc-output", qc_output, "--provenance-output", provenance_output,
+            ),
+        )
+    if action == "download-pet":
+        return WorkflowCommand(
+            "Download PET/ET",
+            (
+                "ohqbuild", "data", "download-pet", "--site-spec", site_spec,
+                "--cache", cache, "--catalog", catalog, "--variables", "EVPTRNS",
+            ),
+        )
+    if action == "freeze":
+        return WorkflowCommand(
+            "Freeze Package", ("ohqbuild", "data", "freeze", "--site-spec", site_spec,
+                               "--catalog", catalog, "--output", package,
+                               "--include-raw", "referenced")
+        )
+    if action == "validate-package":
+        return WorkflowCommand(
+            "Validate Package", ("ohqbuild", "data", "validate-package", "--package", package)
+        )
+    if action == "export-hydropinn":
+        return WorkflowCommand(
+            "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
+                                  "--package", package, "--object-store", cache,
+                                  "--output", hydropinn_output)
+        )
+    if action == "run":
+        if not station_id:
+            raise LauncherError("Select an explicit USGS station ID before running all data steps.")
+        return WorkflowCommand(
+            "Run Watershed Data Pipeline",
+            (
+                "ohqbuild", "data", "run", "--site-spec", site_spec,
+                "--station-id", station_id, "--workspace", workspace,
+                "--export-hydropinn",
+            ),
+        )
+    if action == "download-forecast":
+        if not forecast_url or not forecast_provider:
+            raise LauncherError("Forecast URL and provider are required.")
+        return WorkflowCommand("Download Forecast Archive", (
+            "ohqbuild", "data", "download-forecast", "--url", forecast_url,
+            "--provider", forecast_provider, "--product", forecast_product,
+            "--cache", cache, "--catalog", catalog,
+        ))
+    if action == "forecast-view":
+        if not asset_id or not prediction_time:
+            raise LauncherError("Forecast asset ID and prediction time are required.")
+        return WorkflowCommand("Create Forecast View", (
+            "ohqbuild", "data", "forecast-view", "--asset-id", asset_id,
+            "--prediction-time", prediction_time, "--object-store", cache,
+            "--catalog", catalog,
+        ))
+    if action == "status":
+        return WorkflowCommand("Inspect Data Status", (
+            "ohqbuild", "data", "status", "--catalog", catalog,
+            "--object-store", cache, "--output", status_output,
+        ))
+    raise LauncherError(f"Unknown watershed-data action: {action}")
+
+
 @dataclass(frozen=True)
 class RunnerFinished:
     status: int
@@ -1477,6 +1602,7 @@ class LauncherApp:
             ("Load config", self.load_config),
             ("Save config", self.save_config),
             ("Reset Sligo demo", self.reset_sligo_demo),
+            ("Watershed data…", self.configure_watershed_data),
         )
         for index, (label, command) in enumerate(config_specs):
             tk.Button(config_group, text=label, command=command).grid(
@@ -1597,6 +1723,110 @@ class LauncherApp:
             row=form_rows + 5, column=0, columnspan=6, sticky="e", pady=(4, 0)
         )
         frame.rowconfigure(form_rows + 4, weight=1)
+
+    def configure_watershed_data(self) -> None:
+        """Open discharge discovery/download controls in the standalone UI."""
+        tk = self.tk
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Optional Watershed Data")
+        dialog.transient(self.root)
+        dialog.geometry("760x700")
+        canvas = tk.Canvas(dialog, highlightthickness=0)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        content = tk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        variables = {
+            "SiteSpec": tk.StringVar(value="sites/watershed.yaml"),
+            "Reconnaissance output": tk.StringVar(value="reconnaissance"),
+            "Gauge radius (km)": tk.StringVar(value="50"),
+            "Selected USGS station ID": tk.StringVar(value=""),
+            "Cache": tk.StringVar(value=".gistoohq-cache"),
+            "Catalog": tk.StringVar(value="watershed_package/catalog.json"),
+            "Weather variables": tk.StringVar(
+                value="PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
+            ),
+            "Native asset ID": tk.StringVar(value=""),
+            "QC output": tk.StringVar(value="watershed_package/quality_control/temporal.json"),
+            "Provenance output": tk.StringVar(value="watershed_package/provenance/temporal.json"),
+            "Package": tk.StringVar(value="watershed_package"),
+            "HydroPINN output": tk.StringVar(value="outputs/hydropinn"),
+            "All-data workspace": tk.StringVar(value="watershed_data_run"),
+            "Forecast URL": tk.StringVar(value=""),
+            "Forecast provider": tk.StringVar(value=""),
+            "Forecast product": tk.StringVar(value="forecast"),
+            "Prediction time (UTC)": tk.StringVar(value=""),
+            "Status output": tk.StringVar(value="watershed_package/status"),
+        }
+        tk.Label(
+            content,
+            text="Optional watershed observations; Full Run to OHQ remains unchanged.",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=8)
+        for index, (label, variable) in enumerate(variables.items(), start=1):
+            tk.Label(content, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
+            tk.Entry(content, textvariable=variable, width=52).grid(
+                row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
+            )
+
+        def run(action: str) -> None:
+            try:
+                command = watershed_data_command(
+                    action,
+                    site_spec=variables["SiteSpec"].get(),
+                    reconnaissance_output=variables["Reconnaissance output"].get(),
+                    radius_km=float(variables["Gauge radius (km)"].get()),
+                    station_id=variables["Selected USGS station ID"].get(),
+                    cache=variables["Cache"].get(), catalog=variables["Catalog"].get(),
+                    weather_variables=variables["Weather variables"].get(),
+                    asset_id=variables["Native asset ID"].get(),
+                    qc_output=variables["QC output"].get(),
+                    provenance_output=variables["Provenance output"].get(),
+                    package=variables["Package"].get(),
+                    hydropinn_output=variables["HydroPINN output"].get(),
+                    workspace=variables["All-data workspace"].get(),
+                    forecast_url=variables["Forecast URL"].get(),
+                    forecast_provider=variables["Forecast provider"].get(),
+                    forecast_product=variables["Forecast product"].get(),
+                    prediction_time=variables["Prediction time (UTC)"].get(),
+                    status_output=variables["Status output"].get(),
+                )
+            except (LauncherError, ValueError) as exc:
+                self.messages.put(f"ERROR: {exc}\n")
+                return
+            dialog.destroy()
+            self.start_workflow_command(command)
+
+        actions = (
+            ("Validate SiteSpec", "validate-site"),
+            ("Discover Gauges", "reconnaissance"),
+            ("Download Selected Discharge", "download-discharge"),
+            ("Download Weather", "download-weather"),
+            ("Harmonize + QC", "harmonize"),
+            ("Download PET/ET", "download-pet"),
+            ("Freeze Package", "freeze"),
+            ("Validate Package", "validate-package"),
+            ("Export HydroPINN", "export-hydropinn"),
+            ("RUN ALL DATA STEPS", "run"),
+            ("Download Forecast Archive", "download-forecast"),
+            ("Create Forecast View", "forecast-view"),
+            ("Inspect Data Status", "status"),
+        )
+        row = len(variables) + 1
+        action_frame = tk.LabelFrame(content, text="Actions")
+        action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
+        for index, (label, action) in enumerate(actions):
+            tk.Button(action_frame, text=label, command=lambda value=action: run(value)).grid(
+                row=index // 3, column=index % 3, padx=5, pady=5, sticky="ew"
+            )
+        for column in range(3):
+            action_frame.columnconfigure(column, weight=1)
+        content.columnconfigure(1, weight=1)
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""
@@ -1947,6 +2177,15 @@ class LauncherApp:
             command = command_for_step(step, state)
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
+            return
+        self.start_workflow_command(command)
+
+    def start_workflow_command(self, command: WorkflowCommand) -> None:
+        """Run any validated backend command through the shared non-blocking runner."""
+        if self.command_running:
+            self.messages.put(
+                "A workflow command is already running. Wait for it to finish before starting the next step.\n"
+            )
             return
         self.command_running = True
         for button in self.workflow_buttons:

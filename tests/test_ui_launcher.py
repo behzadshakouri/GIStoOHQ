@@ -36,7 +36,60 @@ from ohqbuilder.ui.launcher import (
     use_expanded_acquisition,
     workflow_prerequisite_error,
     write_drawn_acquisition,
+    watershed_data_command,
 )
+
+
+def test_standalone_launcher_builds_optional_watershed_data_commands():
+    discovery = watershed_data_command(
+        "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25
+    )
+    assert discovery.argv == (
+        "ohqbuild", "data", "reconnaissance", "--site-spec", "site.yaml",
+        "--output", "recon", "--radius-km", "25",
+    )
+    discharge = watershed_data_command(
+        "download-discharge", site_spec="site.yaml", station_id="01649500",
+        cache="cache", catalog="catalog.json",
+    )
+    assert discharge.argv[-6:] == (
+        "--station-id", "01649500", "--cache", "cache", "--catalog", "catalog.json"
+    )
+    weather = watershed_data_command(
+        "download-weather", site_spec="site.yaml", cache="cache", catalog="catalog.json",
+        weather_variables="PRECTOTCORR,T2M",
+    )
+    assert weather.argv[-2:] == ("--variables", "PRECTOTCORR,T2M")
+    assert watershed_data_command("download-pet", site_spec="site.yaml").argv[2:4] == (
+        "download-pet", "--site-spec"
+    )
+    assert watershed_data_command(
+        "export-hydropinn", site_spec="site.yaml", package="package",
+        cache="cache", hydropinn_output="export",
+    ).argv[-2:] == ("--output", "export")
+    run = watershed_data_command(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run"
+    )
+    assert run.argv[-3:] == ("--workspace", "run", "--export-hydropinn")
+    forecast = watershed_data_command(
+        "download-forecast", site_spec="site.yaml", forecast_url="https://example.test/a.json",
+        forecast_provider="example",
+    )
+    assert forecast.argv[2] == "download-forecast"
+    assert watershed_data_command(
+        "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
+        status_output="status",
+    ).argv[-2:] == ("--output", "status")
+
+
+def test_standalone_launcher_exposes_watershed_data_dialog():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+    assert '("Watershed data…", self.configure_watershed_data)' in source
+    assert 'dialog.title("Optional Watershed Data")' in source
+    assert "Download Selected Discharge" in source
+    assert "Download Weather" in source
+    assert 'dialog.geometry("760x700")' in source
+    assert 'tk.LabelFrame(content, text="Actions")' in source
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):
