@@ -290,6 +290,8 @@ def watershed_data_command(
     asset_id: str = "",
     qc_output: str = "watershed_package/quality_control/temporal.json",
     provenance_output: str = "watershed_package/provenance/temporal.json",
+    package: str = "watershed_package",
+    hydropinn_output: str = "outputs/hydropinn",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -334,6 +336,30 @@ def watershed_data_command(
                 "--catalog", catalog, "--object-store", cache,
                 "--qc-output", qc_output, "--provenance-output", provenance_output,
             ),
+        )
+    if action == "download-pet":
+        return WorkflowCommand(
+            "Download PET/ET",
+            (
+                "ohqbuild", "data", "download-pet", "--site-spec", site_spec,
+                "--cache", cache, "--catalog", catalog, "--variables", "EVPTRNS",
+            ),
+        )
+    if action == "freeze":
+        return WorkflowCommand(
+            "Freeze Package", ("ohqbuild", "data", "freeze", "--site-spec", site_spec,
+                               "--catalog", catalog, "--output", package,
+                               "--include-raw", "referenced")
+        )
+    if action == "validate-package":
+        return WorkflowCommand(
+            "Validate Package", ("ohqbuild", "data", "validate-package", "--package", package)
+        )
+    if action == "export-hydropinn":
+        return WorkflowCommand(
+            "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
+                                  "--package", package, "--object-store", cache,
+                                  "--output", hydropinn_output)
         )
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
@@ -1679,6 +1705,8 @@ class LauncherApp:
             "Native asset ID": tk.StringVar(value=""),
             "QC output": tk.StringVar(value="watershed_package/quality_control/temporal.json"),
             "Provenance output": tk.StringVar(value="watershed_package/provenance/temporal.json"),
+            "Package": tk.StringVar(value="watershed_package"),
+            "HydroPINN output": tk.StringVar(value="outputs/hydropinn"),
         }
         tk.Label(
             dialog,
@@ -1703,6 +1731,8 @@ class LauncherApp:
                     asset_id=variables["Native asset ID"].get(),
                     qc_output=variables["QC output"].get(),
                     provenance_output=variables["Provenance output"].get(),
+                    package=variables["Package"].get(),
+                    hydropinn_output=variables["HydroPINN output"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1717,6 +1747,10 @@ class LauncherApp:
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
+            ("Download PET/ET", "download-pet"),
+            ("Freeze Package", "freeze"),
+            ("Validate Package", "validate-package"),
+            ("Export HydroPINN", "export-hydropinn"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

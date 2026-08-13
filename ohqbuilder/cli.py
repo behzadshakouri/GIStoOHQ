@@ -62,7 +62,13 @@ from .watershed_data.schemas import SiteSpec, WatershedDataError
 from .watershed_data.package import freeze_package, validate_package
 from .watershed_data.reconnaissance import run_reconnaissance
 from .watershed_data.usgs import acquire_observed_discharge
-from .watershed_data.nasa_power import DEFAULT_PARAMETERS, acquire_historical_meteorology
+from .watershed_data.hydropinn import export_hydropinn
+from .watershed_data.nasa_power import (
+    DEFAULT_PARAMETERS,
+    DEFAULT_PET_PARAMETERS,
+    acquire_historical_meteorology,
+    acquire_pet_et,
+)
 from .watershed_data.temporal import harmonize_asset
 from .watershed_data.workflow import acquire_url, write_site_spec
 
@@ -138,6 +144,16 @@ def build_parser() -> argparse.ArgumentParser:
     data_harmonize.add_argument("--object-store", required=True)
     data_harmonize.add_argument("--qc-output", required=True)
     data_harmonize.add_argument("--provenance-output", required=True)
+    data_pet = data_sub.add_parser("download-pet", help="Download native NASA POWER ET/PET data.")
+    data_pet.add_argument("--site-spec", required=True)
+    data_pet.add_argument("--cache", required=True)
+    data_pet.add_argument("--catalog", required=True)
+    data_pet.add_argument("--variables", default=",".join(DEFAULT_PET_PARAMETERS))
+    data_export = data_sub.add_parser("export-hydropinn", help="Export a HydroPINN profile.")
+    data_export.add_argument("--package", required=True)
+    data_export.add_argument("--object-store", default=None)
+    data_export.add_argument("--output", required=True)
+    data_export.add_argument("--profile", default="water-balance-v1")
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1154,6 +1170,19 @@ def main(argv: list[str] | None = None) -> int:
                     qc_output=args.qc_output, provenance_output=args.provenance_output,
                 )
                 print(f"Cataloged harmonized temporal asset: {asset['asset_id']}")
+            elif args.data_command == "download-pet":
+                spec = SiteSpec.from_file(args.site_spec)
+                variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
+                asset = acquire_pet_et(
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                )
+                print(f"Cataloged native PET/ET: {asset['asset_id']}")
+            elif args.data_command == "export-hydropinn":
+                manifest = export_hydropinn(
+                    package=args.package, object_store=args.object_store,
+                    output=args.output, profile=args.profile,
+                )
+                print(f"Exported HydroPINN profile: {manifest}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

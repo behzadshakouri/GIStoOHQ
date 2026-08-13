@@ -93,6 +93,30 @@ parameters, software version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
 
+## PET/ET and HydroPINN export
+
+Download the provider's native evapotranspiration parameter separately so its
+semantics cannot be confused with observed ET or locally calculated reference ET:
+
+```bash
+ohqbuild data download-pet --site-spec sites/hickey_run.yaml \
+  --cache .gistoohq-cache --catalog watershed_package/catalog.json
+```
+
+After harmonizing desired assets and freezing the generic package, create the
+thin consumer export:
+
+```bash
+ohqbuild data export-hydropinn --package watershed_package \
+  --object-store .gistoohq-cache --output outputs/hydropinn
+```
+
+The export contains a manifest, `variables.json`, and named observation tables.
+It records the source package and checksums. It deliberately performs no
+normalization, imputation, feature selection, lag construction, or experimental
+partitioning. **Download PET/ET**, **Freeze Package**, **Validate Package**, and
+**Export HydroPINN** are available in both graphical data dialogs.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

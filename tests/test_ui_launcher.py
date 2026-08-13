@@ -60,6 +60,13 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         weather_variables="PRECTOTCORR,T2M",
     )
     assert weather.argv[-2:] == ("--variables", "PRECTOTCORR,T2M")
+    assert watershed_data_command("download-pet", site_spec="site.yaml").argv[2:4] == (
+        "download-pet", "--site-spec"
+    )
+    assert watershed_data_command(
+        "export-hydropinn", site_spec="site.yaml", package="package",
+        cache="cache", hydropinn_output="export",
+    ).argv[-2:] == ("--output", "export")
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():

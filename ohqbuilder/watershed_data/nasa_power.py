@@ -12,6 +12,7 @@ from .schemas import SiteSpec, WatershedDataError, canonical_request_key
 
 POWER_HOURLY_POINT = "https://power.larc.nasa.gov/api/temporal/hourly/point"
 DEFAULT_PARAMETERS = ("PRECTOTCORR", "T2M", "RH2M", "WS2M", "ALLSKY_SFC_SW_DWN")
+DEFAULT_PET_PARAMETERS = ("EVPTRNS",)
 
 
 def build_meteorology_query(
@@ -65,6 +66,8 @@ def acquire_historical_meteorology(
     catalog: str | Path,
     parameters: tuple[str, ...] = DEFAULT_PARAMETERS,
     opener: Callable[..., object] = urllib.request.urlopen,
+    product: str = "historical-meteorology",
+    semantics: str = "meteorological_forcing",
 ) -> dict[str, object]:
     endpoint, request_parameters = build_meteorology_query(spec, parameters)
     url = endpoint + "?" + urllib.parse.urlencode(request_parameters)
@@ -76,7 +79,7 @@ def acquire_historical_meteorology(
     summary = summarize_meteorology_json(raw, parameters)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
     return AssetCatalog(catalog).register({
-        "provider": "nasa-power", "product": "historical-meteorology",
+        "provider": "nasa-power", "product": product,
         "product_version": "hourly-point-v1", "request_parameters": request_parameters,
         "request_key": canonical_request_key(
             "nasa-power", endpoint, request_parameters, "hourly-point-v1"
@@ -84,5 +87,16 @@ def acquire_historical_meteorology(
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json", "source_url": url,
         "processing_status": "native", "longitude": spec.longitude,
-        "latitude": spec.latitude, **summary,
+        "latitude": spec.latitude, "variable_semantics": semantics, **summary,
     })
+
+
+def acquire_pet_et(
+    spec: SiteSpec, *, cache: str | Path, catalog: str | Path,
+    parameters: tuple[str, ...] = DEFAULT_PET_PARAMETERS,
+    opener: Callable[..., object] = urllib.request.urlopen,
+) -> dict[str, object]:
+    return acquire_historical_meteorology(
+        spec, cache=cache, catalog=catalog, parameters=parameters, opener=opener,
+        product="pet-et", semantics="provider_evapotranspiration_parameter",
+    )

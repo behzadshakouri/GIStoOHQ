@@ -166,6 +166,7 @@ def _command_for_watershed_data(
     asset_id: str = "",
     qc_output: str = "watershed_package/quality_control/temporal.json",
     provenance_output: str = "watershed_package/provenance/temporal.json",
+    hydropinn_output: str = "outputs/hydropinn",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -249,6 +250,16 @@ def _command_for_watershed_data(
             "ohqbuild", "data", "harmonize", "--asset-id", asset_id,
             "--catalog", catalog, "--object-store", cache,
             "--qc-output", qc_output, "--provenance-output", provenance_output,
+        ]
+    if action == "download-pet":
+        return [
+            "ohqbuild", "data", "download-pet", "--site-spec", site_spec,
+            "--cache", cache, "--catalog", catalog, "--variables", "EVPTRNS",
+        ]
+    if action == "export-hydropinn":
+        return [
+            "ohqbuild", "data", "export-hydropinn", "--package", package,
+            "--object-store", cache, "--output", hydropinn_output,
         ]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
@@ -768,6 +779,7 @@ class DemWorkflowDock:
             "Native asset ID": "",
             "QC output": "watershed_package/quality_control/temporal.json",
             "Provenance output": "watershed_package/provenance/temporal.json",
+            "HydroPINN output": "outputs/hydropinn",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -807,6 +819,7 @@ class DemWorkflowDock:
                     asset_id=fields["Native asset ID"].text(),
                     qc_output=fields["QC output"].text(),
                     provenance_output=fields["Provenance output"].text(),
+                    hydropinn_output=fields["HydroPINN output"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -821,7 +834,9 @@ class DemWorkflowDock:
             ("Download Selected Discharge", "download-discharge"),
             ("Download Historical Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
+            ("Download PET/ET", "download-pet"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
+            ("Export HydroPINN", "export-hydropinn"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=action: run(value))

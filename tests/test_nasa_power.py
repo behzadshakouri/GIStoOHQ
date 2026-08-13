@@ -5,6 +5,7 @@ import pytest
 
 from ohqbuilder.watershed_data.catalog import ObjectStore
 from ohqbuilder.watershed_data.nasa_power import (
+    acquire_pet_et,
     acquire_historical_meteorology,
     build_meteorology_query,
     summarize_meteorology_json,
@@ -68,3 +69,15 @@ def test_power_acquisition_stores_exact_native_response(tmp_path):
     assert asset["time_standard"] == "UTC"
     with ObjectStore(tmp_path / "cache").open(asset["content_digest"]) as stored:
         assert stored.read() == raw
+
+
+def test_pet_et_acquisition_declares_provider_semantics(tmp_path):
+    document = Path("tests/fixtures/nasa_power_hourly.json").read_text().replace(
+        '"PRECTOTCORR"', '"EVPTRNS"'
+    ).encode()
+    asset = acquire_pet_et(
+        _spec(), cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        opener=lambda *args, **kwargs: _Response(document),
+    )
+    assert asset["product"] == "pet-et"
+    assert asset["variable_semantics"] == "provider_evapotranspiration_parameter"
