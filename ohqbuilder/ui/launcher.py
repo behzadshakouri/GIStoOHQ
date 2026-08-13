@@ -286,6 +286,7 @@ def watershed_data_command(
     reconnaissance_output: str = "reconnaissance",
     radius_km: float = 50.0,
     station_id: str = "",
+    weather_variables: str = "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -311,6 +312,14 @@ def watershed_data_command(
     if action == "validate-site":
         return WorkflowCommand(
             "Validate SiteSpec", ("ohqbuild", "data", "validate-site", "--site-spec", site_spec)
+        )
+    if action == "download-weather":
+        return WorkflowCommand(
+            "Download Historical Weather",
+            (
+                "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
+                "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
+            ),
         )
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
@@ -1650,6 +1659,9 @@ class LauncherApp:
             "Selected USGS station ID": tk.StringVar(value=""),
             "Cache": tk.StringVar(value=".gistoohq-cache"),
             "Catalog": tk.StringVar(value="watershed_package/catalog.json"),
+            "Weather variables": tk.StringVar(
+                value="PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
+            ),
         }
         tk.Label(
             dialog,
@@ -1670,6 +1682,7 @@ class LauncherApp:
                     radius_km=float(variables["Gauge radius (km)"].get()),
                     station_id=variables["Selected USGS station ID"].get(),
                     cache=variables["Cache"].get(), catalog=variables["Catalog"].get(),
+                    weather_variables=variables["Weather variables"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1682,6 +1695,7 @@ class LauncherApp:
             ("Validate SiteSpec", "validate-site"),
             ("Discover Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
+            ("Download Weather", "download-weather"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

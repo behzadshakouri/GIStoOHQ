@@ -60,6 +60,20 @@ In either interface, run **Discover Gauges**, review `report.md`, enter the
 chosen station ID, and select **Download Selected Discharge**. These buttons run
 the same backend commands documented above and do not modify Full Run to OHQ.
 
+## Download native historical weather
+
+```bash
+ohqbuild data download-weather --site-spec sites/hickey_run.yaml \
+  --cache .gistoohq-cache --catalog watershed_package/catalog.json \
+  --variables PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN
+```
+
+The NASA POWER adapter downloads hourly point precipitation, temperature,
+humidity, wind, and surface solar radiation in UTC. The raw response, native
+variable names and units, point coordinates, coverage, counts, and missing-value
+counts are cataloged without resampling or filling gaps. Both graphical data
+dialogs expose this as **Download Weather**.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

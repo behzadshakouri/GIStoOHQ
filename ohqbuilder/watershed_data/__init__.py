@@ -2,6 +2,7 @@
 
 from .catalog import AssetCatalog, ObjectStore
 from .package import freeze_package, validate_package
+from .nasa_power import acquire_historical_meteorology
 from .reconnaissance import run_reconnaissance
 from .usgs import acquire_observed_discharge
 from .schemas import (
@@ -23,6 +24,7 @@ __all__ = [
     "WatershedDataError",
     "canonical_request_key",
     "acquire_observed_discharge",
+    "acquire_historical_meteorology",
     "freeze_package",
     "run_reconnaissance",
     "validate_package",

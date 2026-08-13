@@ -162,6 +162,7 @@ def _command_for_watershed_data(
     reconnaissance_output: str = "reconnaissance",
     radius_km: float = 50.0,
     station_id: str = "",
+    weather_variables: str = "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -230,6 +231,13 @@ def _command_for_watershed_data(
         return [
             "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
             "--station-id", station_id, "--cache", cache, "--catalog", catalog,
+        ]
+    if action == "download-weather":
+        if not site_spec or not cache or not catalog or not weather_variables:
+            raise QgisDockConfigError("SiteSpec, cache, catalog, and weather variables are required.")
+        return [
+            "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
+            "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
         ]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
@@ -745,6 +753,7 @@ class DemWorkflowDock:
             "Package": "watershed_package", "Raw inclusion": "referenced",
             "Reconnaissance output": "reconnaissance", "Gauge radius (km)": "50",
             "Selected USGS station ID": "",
+            "Weather variables": "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -780,6 +789,7 @@ class DemWorkflowDock:
                     reconnaissance_output=fields["Reconnaissance output"].text(),
                     radius_km=float(fields["Gauge radius (km)"].text()),
                     station_id=fields["Selected USGS station ID"].text(),
+                    weather_variables=fields["Weather variables"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -792,6 +802,7 @@ class DemWorkflowDock:
             ("Download Declared Product", "acquire-url"),
             ("Discover Discharge Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
+            ("Download Historical Weather", "download-weather"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
         ):
             button = QPushButton(label)

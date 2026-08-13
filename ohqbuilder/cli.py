@@ -62,6 +62,7 @@ from .watershed_data.schemas import SiteSpec, WatershedDataError
 from .watershed_data.package import freeze_package, validate_package
 from .watershed_data.reconnaissance import run_reconnaissance
 from .watershed_data.usgs import acquire_observed_discharge
+from .watershed_data.nasa_power import DEFAULT_PARAMETERS, acquire_historical_meteorology
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -121,6 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
     data_discharge.add_argument("--station-id", required=True)
     data_discharge.add_argument("--cache", required=True)
     data_discharge.add_argument("--catalog", required=True)
+    data_weather = data_sub.add_parser(
+        "download-weather", help="Download native NASA POWER hourly meteorology."
+    )
+    data_weather.add_argument("--site-spec", required=True)
+    data_weather.add_argument("--cache", required=True)
+    data_weather.add_argument("--catalog", required=True)
+    data_weather.add_argument("--variables", default=",".join(DEFAULT_PARAMETERS))
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1124,6 +1132,13 @@ def main(argv: list[str] | None = None) -> int:
                     f"Cataloged native discharge: {asset['asset_id']} "
                     f"({asset['observation_count']} observations)"
                 )
+            elif args.data_command == "download-weather":
+                spec = SiteSpec.from_file(args.site_spec)
+                variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
+                asset = acquire_historical_meteorology(
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                )
+                print(f"Cataloged native meteorology: {asset['asset_id']} ({len(variables)} variables)")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

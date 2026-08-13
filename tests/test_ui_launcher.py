@@ -55,6 +55,11 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
     assert discharge.argv[-6:] == (
         "--station-id", "01649500", "--cache", "cache", "--catalog", "catalog.json"
     )
+    weather = watershed_data_command(
+        "download-weather", site_spec="site.yaml", cache="cache", catalog="catalog.json",
+        weather_variables="PRECTOTCORR,T2M",
+    )
+    assert weather.argv[-2:] == ("--variables", "PRECTOTCORR,T2M")
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():
@@ -62,6 +67,7 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert '("Watershed data…", self.configure_watershed_data)' in source
     assert 'dialog.title("Optional Watershed Data")' in source
     assert "Download Selected Discharge" in source
+    assert "Download Weather" in source
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

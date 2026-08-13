@@ -328,3 +328,7 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "--station-id", "01649500", "--cache", "cache",
         "--catalog", "package/catalog.json",
     ]
+    assert _command_for_watershed_data(
+        "download-weather", site_spec="site.yaml", cache="cache",
+        catalog="package/catalog.json", weather_variables="PRECTOTCORR,T2M",
+    )[-2:] == ["--variables", "PRECTOTCORR,T2M"]
