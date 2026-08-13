@@ -141,6 +141,62 @@ def _target_crs(config: dict) -> str | None:
     return None
 
 
+def _command_for_watershed_data(
+    action: str,
+    *,
+    site_spec: str,
+    site_id: str = "",
+    name: str = "",
+    longitude: float | None = None,
+    latitude: float | None = None,
+    start: str = "",
+    end: str = "",
+    url: str = "",
+    provider: str = "",
+    product: str = "",
+    product_version: str = "unspecified",
+    cache: str = "",
+    catalog: str = "",
+) -> list[str]:
+    """Build optional data commands without coupling them to full-run."""
+    if action == "init-site":
+        required = {
+            "site specification": site_spec, "site ID": site_id, "start": start, "end": end,
+        }
+        missing = [label for label, value in required.items() if value in (None, "")]
+        if longitude is None or latitude is None:
+            missing.append("outlet coordinates")
+        if missing:
+            raise QgisDockConfigError("Missing watershed data fields: " + ", ".join(missing))
+        command = [
+            "ohqbuild", "data", "init-site", "--site-spec", site_spec,
+            "--site-id", site_id, "--lon", str(longitude), "--lat", str(latitude),
+            "--start", start, "--end", end,
+        ]
+        if name:
+            command.extend(["--name", name])
+        return command
+    if action == "validate-site":
+        if not site_spec:
+            raise QgisDockConfigError("A site specification path is required.")
+        return ["ohqbuild", "data", "validate-site", "--site-spec", site_spec]
+    if action == "acquire-url":
+        values = {
+            "URL": url, "provider": provider, "product": product,
+            "cache": cache, "catalog": catalog,
+        }
+        missing = [label for label, value in values.items() if not value]
+        if missing:
+            raise QgisDockConfigError("Missing watershed data fields: " + ", ".join(missing))
+        return [
+            "ohqbuild", "data", "acquire-url", "--url", url,
+            "--provider", provider, "--product", product,
+            "--product-version", product_version or "unspecified",
+            "--cache", cache, "--catalog", catalog,
+        ]
+    raise QgisDockConfigError(f"Unknown watershed data action: {action}")
+
+
 def _command_for_workflow(
     command: str,
     config_text: str,
@@ -602,6 +658,16 @@ class DemWorkflowDock:
                 reference_button.clicked.connect(self.configure_documented_watershed)
                 grid.addWidget(reference_button, 1, 0, 1, 2)
             tabs.addTab(tab, tab_name)
+        data_tab = QWidget()
+        data_grid = QGridLayout(data_tab)
+        data_grid.addWidget(QLabel(
+            "Optional discharge, weather, PET/ET, and future forecast data. "
+            "This workflow is independent of Full Run to OHQ."
+        ), 0, 0, 1, 2)
+        data_button = QPushButton("Open Watershed Data…")
+        data_button.clicked.connect(self.configure_watershed_data)
+        data_grid.addWidget(data_button, 1, 0, 1, 2)
+        tabs.insertTab(2, data_tab, "Data")
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setMinimumHeight(120)
@@ -616,6 +682,76 @@ class DemWorkflowDock:
     def pick_outlet(self) -> None:
         self.outlet_tool = OutletCaptureTool(self)
         self.outlet_tool.activate()
+
+    def configure_watershed_data(self) -> None:
+        """Open the optional data workflow without adding requirements to full-run."""
+        from qgis.PyQt.QtWidgets import (
+            QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+            QPushButton, QVBoxLayout,
+        )
+
+        dialog = QDialog(self.widget)
+        dialog.setWindowTitle("Watershed Data")
+        dialog.setMinimumWidth(680)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            "Create a SiteSpec, validate it, or download one explicitly declared HTTPS "
+            "provider product. Full Run to OHQ remains unchanged."
+        ))
+        form = QFormLayout()
+        defaults = {
+            "SiteSpec": "sites/watershed.yaml", "Site ID": "", "Name": "",
+            "Longitude": "", "Latitude": "", "Start (UTC)": "",
+            "End (UTC)": "", "Product URL": "", "Provider": "",
+            "Product": "", "Product version": "unspecified",
+            "Cache": ".gistoohq-cache", "Catalog": "watershed_package/catalog.json",
+        }
+        fields = {label: QLineEdit(value) for label, value in defaults.items()}
+        site_row = QHBoxLayout()
+        site_row.addWidget(fields["SiteSpec"])
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(lambda: fields["SiteSpec"].setText(
+            QFileDialog.getSaveFileName(dialog, "Site specification", fields["SiteSpec"].text(),
+                                        "YAML (*.yaml *.yml);;JSON (*.json)")[0]
+            or fields["SiteSpec"].text()
+        ))
+        site_row.addWidget(browse)
+        form.addRow("SiteSpec", site_row)
+        for label, field in fields.items():
+            if label != "SiteSpec":
+                form.addRow(label, field)
+        layout.addLayout(form)
+        buttons = QHBoxLayout()
+
+        def run(action: str) -> None:
+            try:
+                longitude = float(fields["Longitude"].text()) if fields["Longitude"].text() else None
+                latitude = float(fields["Latitude"].text()) if fields["Latitude"].text() else None
+                argv = _command_for_watershed_data(
+                    action, site_spec=fields["SiteSpec"].text(),
+                    site_id=fields["Site ID"].text(), name=fields["Name"].text(),
+                    longitude=longitude, latitude=latitude,
+                    start=fields["Start (UTC)"].text(), end=fields["End (UTC)"].text(),
+                    url=fields["Product URL"].text(), provider=fields["Provider"].text(),
+                    product=fields["Product"].text(),
+                    product_version=fields["Product version"].text(),
+                    cache=fields["Cache"].text(), catalog=fields["Catalog"].text(),
+                )
+            except (QgisDockConfigError, ValueError) as exc:
+                self.log.append(f"Cannot run watershed data action: {exc}")
+                return
+            dialog.accept()
+            self._start_argv(action, argv)
+
+        for label, action in (
+            ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
+            ("Download Declared Product", "acquire-url"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(lambda checked=False, value=action: run(value))
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+        dialog.exec_()
 
     def configure_documented_watershed(self) -> None:
         """Collect cited boundary settings without requiring manual YAML editing."""
@@ -983,6 +1119,14 @@ class DemWorkflowDock:
             )
         except (OSError, QgisDockConfigError, ValueError) as exc:
             self.log.append(f"Cannot run {command}: {exc}")
+            return
+        self._start_argv(command, argv)
+
+    def _start_argv(self, command: str, argv: list[str]) -> None:
+        from qgis.PyQt.QtCore import QProcess
+
+        if self.process is not None and self.process.state() != QProcess.NotRunning:
+            self.log.append("A workflow command is already running; wait for it to finish first.")
             return
         self.log.append("$ " + " ".join(argv))
         self.process = QProcess(self.widget)

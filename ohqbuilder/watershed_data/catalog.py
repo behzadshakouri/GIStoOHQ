@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,33 @@ def _atomic_json(path: Path, value: Any) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+class _CatalogLock:
+    """Small cross-platform lock based on exclusive lock-file creation."""
+
+    def __init__(self, path: Path, *, timeout: float = 10.0):
+        self.path = path.with_suffix(path.suffix + ".lock")
+        self.timeout = timeout
+        self.descriptor: int | None = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                self.descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(self.descriptor, str(os.getpid()).encode("ascii"))
+                return self
+            except FileExistsError:
+                if time.monotonic() >= deadline:
+                    raise WatershedDataError(f"timed out waiting for catalog lock: {self.path}")
+                time.sleep(0.05)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.descriptor is not None:
+            os.close(self.descriptor)
+        self.path.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -97,15 +125,21 @@ class AssetCatalog:
         missing = sorted(required - asset.keys())
         if missing:
             raise WatershedDataError(f"asset is missing required fields: {', '.join(missing)}")
-        data = self.read()
         record = dict(asset)
         identity = {
             key: record.get(key)
             for key in ("provider", "product", "product_version", "request_key", "content_digest")
         }
         record.setdefault("asset_id", "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest())
-        record.setdefault("registered_at", _now())
-        if not any(item.get("asset_id") == record["asset_id"] for item in data["assets"]):
+        with _CatalogLock(self.path):
+            data = self.read()
+            existing = next(
+                (item for item in data["assets"] if item.get("asset_id") == record["asset_id"]),
+                None,
+            )
+            if existing is not None:
+                return existing
+            record.setdefault("registered_at", _now())
             data["assets"].append(record)
             data["assets"].sort(key=lambda item: item["asset_id"])
             data["catalog_digest"] = hashlib.sha256(canonical_json(data["assets"])).hexdigest()

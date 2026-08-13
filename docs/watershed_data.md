@@ -37,17 +37,21 @@ This command is useful to adapter developers and advanced users. A provider
 adapter—not the UI—will eventually construct these requests for weather,
 discharge, PET/ET, and forecast selections.
 
-## Planned user interface
+## QGIS user interface
 
-The QGIS interface will expose an optional **Data** workflow containing:
+The QGIS dock exposes an optional **Data** tab. **Open Watershed Data…** can
+create or validate a SiteSpec and download an explicitly declared HTTPS product
+into the immutable cache and catalog. These controls call the same `ohqbuild
+data` backend used by the terminal; provider logic does not live in the UI.
 
-1. create/load SiteSpec;
-2. run reconnaissance;
-3. review ambiguous source candidates;
-4. select discharge, meteorology, PET/ET, and forecast products;
-5. download and inspect QC;
-6. freeze a generic package;
-7. export to HydroPINN or another consumer.
+Later provider adapters will extend this workflow to:
+
+1. run reconnaissance;
+2. review ambiguous source candidates;
+3. select discharge, meteorology, PET/ET, and forecast products;
+4. download and inspect QC;
+5. freeze a generic package;
+6. export to HydroPINN or another consumer.
 
 The existing **Full Run** button remains the default route to OHQ. A future
 unchecked **Also acquire watershed observations** option may orchestrate both

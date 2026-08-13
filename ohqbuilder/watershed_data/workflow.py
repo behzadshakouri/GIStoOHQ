@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,9 @@ def acquire_url(
 ) -> dict[str, Any]:
     """Acquire one explicitly declared URL into the generic immutable store."""
 
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise WatershedDataError("provider product URL must be an absolute HTTPS URL")
     request_key = canonical_request_key(provider, url, parameters or {}, product_version)
     request = urllib.request.Request(url, headers={"User-Agent": "GIStoOHQ/0.1"})
     try:

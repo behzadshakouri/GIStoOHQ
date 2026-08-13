@@ -1,5 +1,6 @@
 import io
 import json
+import threading
 
 import pytest
 
@@ -10,6 +11,7 @@ from ohqbuilder.watershed_data.schemas import (
     WatershedDataError,
     canonical_request_key,
 )
+from ohqbuilder.watershed_data.workflow import acquire_url
 
 
 def test_request_identity_is_canonical_and_separate_from_content():
@@ -51,6 +53,31 @@ def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     catalog.register(asset)
     catalog.register(asset)
     assert len(json.loads((tmp_path / "catalog.json").read_text())["assets"]) == 1
+
+
+def test_catalog_lock_prevents_lost_concurrent_registrations(tmp_path):
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+
+    def register(index):
+        catalog.register({
+            "provider": "example", "product": f"weather-{index}",
+            "content_digest": f"{index:064x}", "size": index, "media_type": "text/csv",
+        })
+
+    threads = [threading.Thread(target=register, args=(index,)) for index in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(catalog.read()["assets"]) == 8
+
+
+def test_acquire_url_rejects_insecure_or_local_paths_before_network(tmp_path):
+    with pytest.raises(WatershedDataError, match="HTTPS"):
+        acquire_url(
+            url="file:///etc/passwd", provider="local", product="unsafe",
+            product_version="1", cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        )
 
 
 def test_data_cli_creates_and_validates_site_without_affecting_full_run(tmp_path, capsys):
