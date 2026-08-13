@@ -277,6 +277,44 @@ class WorkflowCommand:
     followup_argv: tuple[tuple[str, ...], ...] = ()
 
 
+def watershed_data_command(
+    action: str,
+    *,
+    site_spec: str,
+    cache: str = ".gistoohq-cache",
+    catalog: str = "watershed_package/catalog.json",
+    reconnaissance_output: str = "reconnaissance",
+    radius_km: float = 50.0,
+    station_id: str = "",
+) -> WorkflowCommand:
+    """Build standalone-launcher commands for the optional watershed-data workflow."""
+    if not site_spec:
+        raise LauncherError("A SiteSpec path is required for watershed data.")
+    if action == "reconnaissance":
+        return WorkflowCommand(
+            "Discover Discharge Gauges",
+            (
+                "ohqbuild", "data", "reconnaissance", "--site-spec", site_spec,
+                "--output", reconnaissance_output, "--radius-km", str(radius_km),
+            ),
+        )
+    if action == "download-discharge":
+        if not station_id:
+            raise LauncherError("Enter the selected USGS station ID after reconnaissance.")
+        return WorkflowCommand(
+            "Download Selected Discharge",
+            (
+                "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
+                "--station-id", station_id, "--cache", cache, "--catalog", catalog,
+            ),
+        )
+    if action == "validate-site":
+        return WorkflowCommand(
+            "Validate SiteSpec", ("ohqbuild", "data", "validate-site", "--site-spec", site_spec)
+        )
+    raise LauncherError(f"Unknown watershed-data action: {action}")
+
+
 @dataclass(frozen=True)
 class RunnerFinished:
     status: int
@@ -1477,6 +1515,7 @@ class LauncherApp:
             ("Load config", self.load_config),
             ("Save config", self.save_config),
             ("Reset Sligo demo", self.reset_sligo_demo),
+            ("Watershed data…", self.configure_watershed_data),
         )
         for index, (label, command) in enumerate(config_specs):
             tk.Button(config_group, text=label, command=command).grid(
@@ -1597,6 +1636,57 @@ class LauncherApp:
             row=form_rows + 5, column=0, columnspan=6, sticky="e", pady=(4, 0)
         )
         frame.rowconfigure(form_rows + 4, weight=1)
+
+    def configure_watershed_data(self) -> None:
+        """Open discharge discovery/download controls in the standalone UI."""
+        tk = self.tk
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Optional Watershed Data")
+        dialog.transient(self.root)
+        variables = {
+            "SiteSpec": tk.StringVar(value="sites/watershed.yaml"),
+            "Reconnaissance output": tk.StringVar(value="reconnaissance"),
+            "Gauge radius (km)": tk.StringVar(value="50"),
+            "Selected USGS station ID": tk.StringVar(value=""),
+            "Cache": tk.StringVar(value=".gistoohq-cache"),
+            "Catalog": tk.StringVar(value="watershed_package/catalog.json"),
+        }
+        tk.Label(
+            dialog,
+            text="Optional discharge data; Full Run to OHQ remains unchanged.",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=8)
+        for index, (label, variable) in enumerate(variables.items(), start=1):
+            tk.Label(dialog, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
+            tk.Entry(dialog, textvariable=variable, width=52).grid(
+                row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
+            )
+
+        def run(action: str) -> None:
+            try:
+                command = watershed_data_command(
+                    action,
+                    site_spec=variables["SiteSpec"].get(),
+                    reconnaissance_output=variables["Reconnaissance output"].get(),
+                    radius_km=float(variables["Gauge radius (km)"].get()),
+                    station_id=variables["Selected USGS station ID"].get(),
+                    cache=variables["Cache"].get(), catalog=variables["Catalog"].get(),
+                )
+            except (LauncherError, ValueError) as exc:
+                self.messages.put(f"ERROR: {exc}\n")
+                return
+            dialog.destroy()
+            self.start_workflow_command(command)
+
+        row = len(variables) + 1
+        for column, (label, action) in enumerate((
+            ("Validate SiteSpec", "validate-site"),
+            ("Discover Gauges", "reconnaissance"),
+            ("Download Selected Discharge", "download-discharge"),
+        )):
+            tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
+                row=row, column=column, padx=5, pady=10, sticky="ew"
+            )
+        dialog.columnconfigure(1, weight=1)
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""
@@ -1947,6 +2037,15 @@ class LauncherApp:
             command = command_for_step(step, state)
         except (OSError, LauncherError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             self.messages.put(f"ERROR: {exc}\n")
+            return
+        self.start_workflow_command(command)
+
+    def start_workflow_command(self, command: WorkflowCommand) -> None:
+        """Run any validated backend command through the shared non-blocking runner."""
+        if self.command_running:
+            self.messages.put(
+                "A workflow command is already running. Wait for it to finish before starting the next step.\n"
+            )
             return
         self.command_running = True
         for button in self.workflow_buttons:

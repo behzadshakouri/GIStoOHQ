@@ -36,7 +36,32 @@ from ohqbuilder.ui.launcher import (
     use_expanded_acquisition,
     workflow_prerequisite_error,
     write_drawn_acquisition,
+    watershed_data_command,
 )
+
+
+def test_standalone_launcher_builds_optional_watershed_data_commands():
+    discovery = watershed_data_command(
+        "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25
+    )
+    assert discovery.argv == (
+        "ohqbuild", "data", "reconnaissance", "--site-spec", "site.yaml",
+        "--output", "recon", "--radius-km", "25",
+    )
+    discharge = watershed_data_command(
+        "download-discharge", site_spec="site.yaml", station_id="01649500",
+        cache="cache", catalog="catalog.json",
+    )
+    assert discharge.argv[-6:] == (
+        "--station-id", "01649500", "--cache", "cache", "--catalog", "catalog.json"
+    )
+
+
+def test_standalone_launcher_exposes_watershed_data_dialog():
+    source = Path("ohqbuilder/ui/launcher.py").read_text(encoding="utf-8")
+    assert '("Watershed data…", self.configure_watershed_data)' in source
+    assert 'dialog.title("Optional Watershed Data")' in source
+    assert "Download Selected Discharge" in source
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

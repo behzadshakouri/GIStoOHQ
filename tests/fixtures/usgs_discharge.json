@@ -1,0 +1,30 @@
+{
+  "name": "ns1:timeSeriesResponseType",
+  "value": {
+    "queryInfo": {"queryURL": "https://waterservices.usgs.gov/nwis/iv/"},
+    "timeSeries": [
+      {
+        "sourceInfo": {
+          "siteName": "NORTHEAST BRANCH ANACOSTIA RIVER",
+          "siteCode": [{"value": "01649500", "network": "NWIS", "agencyCode": "USGS"}]
+        },
+        "variable": {
+          "variableCode": [{"value": "00060", "network": "NWIS"}],
+          "variableDescription": "Discharge, cubic feet per second",
+          "unit": {"unitCode": "ft3/s"},
+          "noDataValue": -999999.0
+        },
+        "values": [{
+          "value": [
+            {"value": "10.2", "qualifiers": ["P"], "dateTime": "2025-01-01T00:00:00.000-05:00"},
+            {"value": "11.0", "qualifiers": ["A"], "dateTime": "2025-01-01T00:15:00.000-05:00"}
+          ],
+          "qualifier": [
+            {"qualifierCode": "P", "qualifierDescription": "Provisional data subject to revision."},
+            {"qualifierCode": "A", "qualifierDescription": "Approved for publication."}
+          ]
+        }]
+      }
+    ]
+  }
+}
