@@ -61,6 +61,7 @@ from .watershed_bounds import WatershedBoundsError, resolve_materialization_boun
 from .watershed_data.schemas import SiteSpec, WatershedDataError
 from .watershed_data.package import freeze_package, validate_package
 from .watershed_data.reconnaissance import run_reconnaissance
+from .watershed_data.usgs import acquire_observed_discharge
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -113,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
     data_recon.add_argument("--site-spec", required=True)
     data_recon.add_argument("--output", required=True)
     data_recon.add_argument("--radius-km", type=float, default=50.0)
+    data_discharge = data_sub.add_parser(
+        "download-discharge", help="Download native USGS discharge for an explicit gauge."
+    )
+    data_discharge.add_argument("--site-spec", required=True)
+    data_discharge.add_argument("--station-id", required=True)
+    data_discharge.add_argument("--cache", required=True)
+    data_discharge.add_argument("--catalog", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1107,6 +1115,15 @@ def main(argv: list[str] | None = None) -> int:
                     args.site_spec, args.output, radius_km=args.radius_km
                 )
                 print(f"Gauge reconnaissance: {report['decision']} ({len(report['candidates'])} candidates)")
+            elif args.data_command == "download-discharge":
+                spec = SiteSpec.from_file(args.site_spec)
+                asset = acquire_observed_discharge(
+                    spec, args.station_id, cache=args.cache, catalog=args.catalog
+                )
+                print(
+                    f"Cataloged native discharge: {asset['asset_id']} "
+                    f"({asset['observation_count']} observations)"
+                )
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

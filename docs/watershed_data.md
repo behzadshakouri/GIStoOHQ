@@ -34,6 +34,23 @@ record overlap, constraint result, score, rejection reason, and selection
 decision. A required topology check is never guessed: candidates remain
 unacceptable until a later spatial-topology adapter can establish compatibility.
 
+## Download native observed discharge
+
+After reviewing reconnaissance, record or enter an explicit gauge ID and run:
+
+```bash
+ohqbuild data download-discharge --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --cache .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+```
+
+GIStoOHQ stores the exact USGS WaterML JSON response in the immutable object
+store. Its catalog record preserves the station and parameter identifiers,
+native units, native timezone offsets, temporal coverage, observation count,
+provider qualifiers, missing-value sentinel, request parameters, request key,
+and content digest. It does not aggregate, interpolate, normalize, or convert
+units during native acquisition.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

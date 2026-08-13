@@ -320,3 +320,11 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "ohqbuild", "data", "reconnaissance", "--site-spec", "site.yaml",
         "--output", "recon", "--radius-km", "25",
     ]
+    assert _command_for_watershed_data(
+        "download-discharge", site_spec="site.yaml", station_id="01649500",
+        cache="cache", catalog="package/catalog.json",
+    ) == [
+        "ohqbuild", "data", "download-discharge", "--site-spec", "site.yaml",
+        "--station-id", "01649500", "--cache", "cache",
+        "--catalog", "package/catalog.json",
+    ]

@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from .schemas import SiteSpec, WatershedDataError
+from .catalog import AssetCatalog, ObjectStore
+from .schemas import canonical_request_key
 
 USGS_SITE_SERVICE = "https://waterservices.usgs.gov/nwis/site/"
+USGS_INSTANTANEOUS_VALUES_SERVICE = "https://waterservices.usgs.gov/nwis/iv/"
 
 
 @dataclass(frozen=True)
@@ -99,3 +104,89 @@ def discover_gauges(
     except OSError as exc:
         raise WatershedDataError(f"USGS gauge discovery failed: {exc}") from exc
     return url, parse_site_rdb(text, spec)
+
+
+def build_discharge_query(spec: SiteSpec, station_id: str) -> tuple[str, dict[str, str]]:
+    if not station_id.isdigit():
+        raise WatershedDataError("USGS station ID must contain digits only")
+    parameters = {
+        "format": "json", "sites": station_id, "parameterCd": "00060",
+        "startDT": spec.study_start, "endDT": spec.study_end, "siteStatus": "all",
+    }
+    return USGS_INSTANTANEOUS_VALUES_SERVICE, parameters
+
+
+def summarize_discharge_json(raw: bytes, station_id: str) -> dict[str, object]:
+    try:
+        document = json.loads(raw)
+        series = document["value"]["timeSeries"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise WatershedDataError("USGS discharge response is not valid WaterML JSON") from exc
+    matching = []
+    for item in series:
+        source = item.get("sourceInfo") or {}
+        codes = source.get("siteCode") or []
+        site_codes = {str(code.get("value")) for code in codes if isinstance(code, dict)}
+        variable = item.get("variable") or {}
+        variable_codes = variable.get("variableCode") or []
+        parameter_codes = {str(code.get("value")) for code in variable_codes if isinstance(code, dict)}
+        if station_id in site_codes and "00060" in parameter_codes:
+            matching.append(item)
+    if not matching:
+        raise WatershedDataError(f"USGS response has no discharge series for station {station_id}")
+    observations = []
+    unit_codes = set()
+    no_data_values = set()
+    for item in matching:
+        variable = item.get("variable") or {}
+        unit = variable.get("unit") or {}
+        if unit.get("unitCode"):
+            unit_codes.add(str(unit["unitCode"]))
+        if variable.get("noDataValue") is not None:
+            no_data_values.add(str(variable["noDataValue"]))
+        for block in item.get("values") or []:
+            observations.extend(block.get("value") or [])
+    timestamps = sorted(
+        str(item["dateTime"]) for item in observations if item.get("dateTime")
+    )
+    qualifiers = sorted({
+        str(qualifier)
+        for item in observations for qualifier in (item.get("qualifiers") or [])
+    })
+    if not timestamps:
+        raise WatershedDataError(f"USGS response has no observations for station {station_id}")
+    return {
+        "station_id": station_id, "variable": "discharge", "parameter_code": "00060",
+        "native_units": sorted(unit_codes), "observation_count": len(observations),
+        "temporal_coverage": {"start": timestamps[0], "end": timestamps[-1]},
+        "qualifiers": qualifiers, "no_data_values": sorted(no_data_values),
+        "timezone_semantics": "offset_preserved_in_native_timestamps",
+    }
+
+
+def acquire_observed_discharge(
+    spec: SiteSpec,
+    station_id: str,
+    *,
+    cache: str | Path,
+    catalog: str | Path,
+    opener: Callable[..., object] = urllib.request.urlopen,
+) -> dict[str, object]:
+    endpoint, parameters = build_discharge_query(spec, station_id)
+    url = endpoint + "?" + urllib.parse.urlencode(parameters)
+    try:
+        with opener(url, timeout=120.0) as response:
+            raw = response.read()
+    except OSError as exc:
+        raise WatershedDataError(f"USGS discharge acquisition failed: {exc}") from exc
+    summary = summarize_discharge_json(raw, station_id)
+    stored = ObjectStore(cache).put(io.BytesIO(raw))
+    request_key = canonical_request_key("usgs", endpoint, parameters, "nwis-iv-waterml-1.1")
+    return AssetCatalog(catalog).register({
+        "provider": "usgs", "product": "observed-discharge",
+        "product_version": "nwis-iv-waterml-1.1", "station_id": station_id,
+        "request_parameters": parameters, "request_key": request_key,
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "source_url": url,
+        "processing_status": "native", **summary,
+    })
