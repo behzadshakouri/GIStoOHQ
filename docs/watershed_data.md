@@ -37,6 +37,20 @@ This command is useful to adapter developers and advanced users. A provider
 adapter—not the UI—will eventually construct these requests for weather,
 discharge, PET/ET, and forecast selections.
 
+## Freeze and validate a package
+
+```bash
+ohqbuild data freeze --site-spec sites/hickey_run.yaml \
+  --catalog watershed_package/catalog.json --output watershed_package \
+  --include-raw referenced
+ohqbuild data validate-package --package watershed_package
+```
+
+Use `--include-raw none` for metadata-only publication, `referenced` for a
+package that depends on the local object store, or `all --object-store CACHE`
+for a self-contained package. `--redistributable` is never inferred; users must
+set it only after checking every provider license.
+
 ## QGIS user interface
 
 The QGIS dock exposes an optional **Data** tab. **Open Watershed Data…** can

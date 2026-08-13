@@ -12,6 +12,8 @@ from ohqbuilder.watershed_data.schemas import (
     canonical_request_key,
 )
 from ohqbuilder.watershed_data.workflow import acquire_url
+from ohqbuilder.watershed_data.package import freeze_package, validate_package
+from ohqbuilder.watershed_data.schemas import ProvenanceActivity, QCResult
 
 
 def test_request_identity_is_canonical_and_separate_from_content():
@@ -102,3 +104,55 @@ def test_existing_full_run_parser_does_not_require_data_options():
     )
     assert args.command == "full-run"
     assert not hasattr(args, "site_spec")
+
+
+def test_qc_and_provenance_contracts_reject_invalid_values():
+    result = QCResult("temporal.duplicate_timestamps", "warning", False, "duplicates")
+    assert result.to_dict()["severity"] == "warning"
+    with pytest.raises(WatershedDataError, match="severity"):
+        QCResult("temporal.range", "critical", False, "bad")
+    with pytest.raises(WatershedDataError, match="parent and output"):
+        ProvenanceActivity(
+            "activity:1", "resample", "1", (), (), {}, "gistoohq",
+            "2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z",
+        )
+
+
+def test_freeze_and_validate_self_contained_package(tmp_path):
+    site = tmp_path / "site.yaml"
+    assert main([
+        "data", "init-site", "--site-spec", str(site), "--site-id", "test",
+        "--lon", "-77", "--lat", "39", "--start", "2020-01-01T00:00:00Z",
+        "--end", "2021-01-01T00:00:00Z",
+    ]) == 0
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(b"native observations"))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    catalog.register({
+        "provider": "example", "product": "weather", "content_digest": stored.content_digest,
+        "size": stored.size, "media_type": "text/csv",
+    })
+    manifest_path = freeze_package(
+        site_spec=site, catalog=catalog.path, output=tmp_path / "package",
+        include_raw="all", object_store=store.root,
+    )
+    assert manifest_path.is_file()
+    manifest = validate_package(tmp_path / "package")
+    assert manifest.self_contained is True
+    assert manifest.raw_inclusion == "all"
+
+    document = json.loads(manifest_path.read_text())
+    original_id = document["package_id"]
+    document["package_id"] = "sha256:" + "0" * 64
+    manifest_path.write_text(json.dumps(document))
+    with pytest.raises(WatershedDataError, match="identity"):
+        validate_package(tmp_path / "package")
+    document["package_id"] = original_id
+    manifest_path.write_text(json.dumps(document))
+
+    raw = next((tmp_path / "package" / "raw").rglob("*"))
+    while raw.is_dir():
+        raw = next(raw.iterdir())
+    raw.write_bytes(b"corrupt")
+    with pytest.raises(WatershedDataError, match="corrupt"):
+        validate_package(tmp_path / "package")

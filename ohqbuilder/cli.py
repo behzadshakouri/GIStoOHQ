@@ -59,6 +59,7 @@ from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
 from .watershed_data.schemas import SiteSpec, WatershedDataError
+from .watershed_data.package import freeze_package, validate_package
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -94,6 +95,17 @@ def build_parser() -> argparse.ArgumentParser:
     data_acquire.add_argument("--product-version", default="unspecified")
     data_acquire.add_argument("--cache", required=True)
     data_acquire.add_argument("--catalog", required=True)
+    data_freeze = data_sub.add_parser("freeze", help="Freeze a generic watershed package.")
+    data_freeze.add_argument("--site-spec", required=True)
+    data_freeze.add_argument("--catalog", required=True)
+    data_freeze.add_argument("--output", required=True)
+    data_freeze.add_argument(
+        "--include-raw", choices=("none", "referenced", "all"), default="referenced"
+    )
+    data_freeze.add_argument("--object-store", default=None)
+    data_freeze.add_argument("--redistributable", action="store_true")
+    data_package = data_sub.add_parser("validate-package", help="Validate a frozen package.")
+    data_package.add_argument("--package", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1073,6 +1085,16 @@ def main(argv: list[str] | None = None) -> int:
                     catalog=args.catalog,
                 )
                 print(f"Cataloged asset: {asset['asset_id']}")
+            elif args.data_command == "freeze":
+                manifest = freeze_package(
+                    site_spec=args.site_spec, catalog=args.catalog, output=args.output,
+                    include_raw=args.include_raw, object_store=args.object_store,
+                    redistributable=args.redistributable,
+                )
+                print(f"Froze watershed package: {manifest}")
+            elif args.data_command == "validate-package":
+                manifest = validate_package(args.package)
+                print(f"Watershed package valid: {manifest.package_id}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

@@ -157,6 +157,8 @@ def _command_for_watershed_data(
     product_version: str = "unspecified",
     cache: str = "",
     catalog: str = "",
+    package: str = "",
+    include_raw: str = "referenced",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -194,6 +196,19 @@ def _command_for_watershed_data(
             "--product-version", product_version or "unspecified",
             "--cache", cache, "--catalog", catalog,
         ]
+    if action == "freeze":
+        values = {"SiteSpec": site_spec, "catalog": catalog, "package": package}
+        missing = [label for label, value in values.items() if not value]
+        if missing:
+            raise QgisDockConfigError("Missing watershed data fields: " + ", ".join(missing))
+        return [
+            "ohqbuild", "data", "freeze", "--site-spec", site_spec,
+            "--catalog", catalog, "--output", package, "--include-raw", include_raw,
+        ]
+    if action == "validate-package":
+        if not package:
+            raise QgisDockConfigError("A package directory is required.")
+        return ["ohqbuild", "data", "validate-package", "--package", package]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
@@ -705,6 +720,7 @@ class DemWorkflowDock:
             "End (UTC)": "", "Product URL": "", "Provider": "",
             "Product": "", "Product version": "unspecified",
             "Cache": ".gistoohq-cache", "Catalog": "watershed_package/catalog.json",
+            "Package": "watershed_package", "Raw inclusion": "referenced",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -736,6 +752,7 @@ class DemWorkflowDock:
                     product=fields["Product"].text(),
                     product_version=fields["Product version"].text(),
                     cache=fields["Cache"].text(), catalog=fields["Catalog"].text(),
+                    package=fields["Package"].text(), include_raw=fields["Raw inclusion"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -746,6 +763,7 @@ class DemWorkflowDock:
         for label, action in (
             ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
             ("Download Declared Product", "acquire-url"),
+            ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=action: run(value))

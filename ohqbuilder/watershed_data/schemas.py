@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -136,3 +136,122 @@ class SiteSpec:
     @property
     def digest(self) -> str:
         return hashlib.sha256(canonical_json(self.to_dict())).hexdigest()
+
+
+QCSeverity = Literal["error", "warning", "information"]
+
+
+@dataclass(frozen=True)
+class QCResult:
+    """One stable, machine-readable generic quality-control result."""
+
+    rule_id: str
+    severity: QCSeverity
+    passed: bool
+    message: str
+    asset_ids: tuple[str, ...] = ()
+    details: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.rule_id or "." not in self.rule_id:
+            raise WatershedDataError("QC rule_id must be a stable dotted identifier")
+        if self.severity not in {"error", "warning", "information"}:
+            raise WatershedDataError(f"invalid QC severity: {self.severity}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_id": self.rule_id,
+            "severity": self.severity,
+            "passed": self.passed,
+            "message": self.message,
+            "asset_ids": list(self.asset_ids),
+            "details": self.details or {},
+        }
+
+
+@dataclass(frozen=True)
+class ProvenanceActivity:
+    """Lineage for a derivation that creates new catalog assets."""
+
+    activity_id: str
+    transformation_name: str
+    transformation_version: str
+    parent_asset_ids: tuple[str, ...]
+    output_asset_ids: tuple[str, ...]
+    parameters: dict[str, Any]
+    software_version: str
+    started_at: str
+    completed_at: str
+
+    def __post_init__(self) -> None:
+        start = _utc_timestamp(self.started_at, "started_at")
+        end = _utc_timestamp(self.completed_at, "completed_at")
+        if start > end:
+            raise WatershedDataError("provenance started_at must not follow completed_at")
+        if not self.parent_asset_ids or not self.output_asset_ids:
+            raise WatershedDataError("provenance requires parent and output asset IDs")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "activity_id": self.activity_id,
+            "transformation_name": self.transformation_name,
+            "transformation_version": self.transformation_version,
+            "parent_asset_ids": list(self.parent_asset_ids),
+            "output_asset_ids": list(self.output_asset_ids),
+            "parameters": self.parameters,
+            "software_version": self.software_version,
+            "started_at": _utc_timestamp(self.started_at, "started_at"),
+            "completed_at": _utc_timestamp(self.completed_at, "completed_at"),
+        }
+
+
+@dataclass(frozen=True)
+class PackageManifest:
+    package_id: str
+    site_id: str
+    site_spec_digest: str
+    catalog_digest: str
+    included_asset_ids: tuple[str, ...]
+    producer: str
+    producer_version: str
+    generated_at: str
+    raw_inclusion: Literal["none", "referenced", "all"]
+    self_contained: bool
+    redistributable: bool
+    package_qc_status: Literal["pass", "warning", "fail", "not_run"] = "not_run"
+    schema_version: str = "1.0"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PackageManifest":
+        try:
+            manifest = cls(
+                package_id=str(data["package_id"]), site_id=str(data["site_id"]),
+                site_spec_digest=str(data["site_spec_digest"]),
+                catalog_digest=str(data["catalog_digest"]),
+                included_asset_ids=tuple(data["included_asset_ids"]),
+                producer=str(data["producer"]), producer_version=str(data["producer_version"]),
+                generated_at=_utc_timestamp(data["generated_at"], "generated_at"),
+                raw_inclusion=data["raw_inclusion"], self_contained=bool(data["self_contained"]),
+                redistributable=bool(data["redistributable"]),
+                package_qc_status=data.get("package_qc_status", "not_run"),
+                schema_version=str(data.get("schema_version", "1.0")),
+            )
+        except (KeyError, TypeError) as exc:
+            raise WatershedDataError(f"invalid PackageManifest: missing {exc}") from exc
+        if manifest.raw_inclusion not in {"none", "referenced", "all"}:
+            raise WatershedDataError("raw_inclusion must be none, referenced, or all")
+        if manifest.self_contained != (manifest.raw_inclusion == "all"):
+            raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
+        return manifest
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_name": "PackageManifest", "schema_version": self.schema_version,
+            "package_id": self.package_id, "site_id": self.site_id,
+            "site_spec_digest": self.site_spec_digest, "catalog_digest": self.catalog_digest,
+            "included_asset_ids": list(self.included_asset_ids), "producer": self.producer,
+            "producer_version": self.producer_version, "generated_at": self.generated_at,
+            "raw_inclusion": self.raw_inclusion, "self_contained": self.self_contained,
+            "redistributable": self.redistributable,
+            "package_qc_status": self.package_qc_status,
+        }
