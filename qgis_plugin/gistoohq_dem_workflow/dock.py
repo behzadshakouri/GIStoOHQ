@@ -159,6 +159,8 @@ def _command_for_watershed_data(
     catalog: str = "",
     package: str = "",
     include_raw: str = "referenced",
+    reconnaissance_output: str = "reconnaissance",
+    radius_km: float = 50.0,
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -209,6 +211,13 @@ def _command_for_watershed_data(
         if not package:
             raise QgisDockConfigError("A package directory is required.")
         return ["ohqbuild", "data", "validate-package", "--package", package]
+    if action == "reconnaissance":
+        if not site_spec or not reconnaissance_output:
+            raise QgisDockConfigError("SiteSpec and reconnaissance output are required.")
+        return [
+            "ohqbuild", "data", "reconnaissance", "--site-spec", site_spec,
+            "--output", reconnaissance_output, "--radius-km", str(radius_km),
+        ]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
@@ -721,6 +730,7 @@ class DemWorkflowDock:
             "Product": "", "Product version": "unspecified",
             "Cache": ".gistoohq-cache", "Catalog": "watershed_package/catalog.json",
             "Package": "watershed_package", "Raw inclusion": "referenced",
+            "Reconnaissance output": "reconnaissance", "Gauge radius (km)": "50",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -753,6 +763,8 @@ class DemWorkflowDock:
                     product_version=fields["Product version"].text(),
                     cache=fields["Cache"].text(), catalog=fields["Catalog"].text(),
                     package=fields["Package"].text(), include_raw=fields["Raw inclusion"].text(),
+                    reconnaissance_output=fields["Reconnaissance output"].text(),
+                    radius_km=float(fields["Gauge radius (km)"].text()),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -763,6 +775,7 @@ class DemWorkflowDock:
         for label, action in (
             ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
             ("Download Declared Product", "acquire-url"),
+            ("Discover Discharge Gauges", "reconnaissance"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
         ):
             button = QPushButton(label)

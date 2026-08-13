@@ -60,6 +60,7 @@ from .validation.input_validator import InputValidator
 from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
 from .watershed_data.schemas import SiteSpec, WatershedDataError
 from .watershed_data.package import freeze_package, validate_package
+from .watershed_data.reconnaissance import run_reconnaissance
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -106,6 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
     data_freeze.add_argument("--redistributable", action="store_true")
     data_package = data_sub.add_parser("validate-package", help="Validate a frozen package.")
     data_package.add_argument("--package", required=True)
+    data_recon = data_sub.add_parser(
+        "reconnaissance", help="Discover and assess candidate USGS discharge gauges."
+    )
+    data_recon.add_argument("--site-spec", required=True)
+    data_recon.add_argument("--output", required=True)
+    data_recon.add_argument("--radius-km", type=float, default=50.0)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1095,6 +1102,11 @@ def main(argv: list[str] | None = None) -> int:
             elif args.data_command == "validate-package":
                 manifest = validate_package(args.package)
                 print(f"Watershed package valid: {manifest.package_id}")
+            elif args.data_command == "reconnaissance":
+                report = run_reconnaissance(
+                    args.site_spec, args.output, radius_km=args.radius_km
+                )
+                print(f"Gauge reconnaissance: {report['decision']} ({len(report['candidates'])} candidates)")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

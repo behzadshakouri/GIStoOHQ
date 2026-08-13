@@ -314,3 +314,9 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "--product-version", "2026", "--cache", "cache",
         "--catalog", "package/catalog.json",
     ]
+    assert _command_for_watershed_data(
+        "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25,
+    ) == [
+        "ohqbuild", "data", "reconnaissance", "--site-spec", "site.yaml",
+        "--output", "recon", "--radius-km", "25",
+    ]

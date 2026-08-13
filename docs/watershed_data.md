@@ -21,6 +21,19 @@ The generated source entries are policies, not provider selections. Automatic
 reconnaissance will be added as a later provider adapter; it must record all
 candidates, constraint results, scores, rejection reasons, and its decision.
 
+## Discover discharge gauges before downloading
+
+```bash
+ohqbuild data reconnaissance --site-spec sites/hickey_run.yaml \
+  --output reconnaissance --radius-km 50
+```
+
+The command queries the USGS site service for stations that publish discharge,
+then writes `report.json` and `report.md`. It records every candidate, distance,
+record overlap, constraint result, score, rejection reason, and selection
+decision. A required topology check is never guessed: candidates remain
+unacceptable until a later spatial-topology adapter can establish compatibility.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once
