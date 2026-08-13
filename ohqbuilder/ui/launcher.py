@@ -297,6 +297,7 @@ def watershed_data_command(
     forecast_provider: str = "",
     forecast_product: str = "forecast",
     prediction_time: str = "",
+    status_output: str = "watershed_package/status",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -392,6 +393,11 @@ def watershed_data_command(
             "ohqbuild", "data", "forecast-view", "--asset-id", asset_id,
             "--prediction-time", prediction_time, "--object-store", cache,
             "--catalog", catalog,
+        ))
+    if action == "status":
+        return WorkflowCommand("Inspect Data Status", (
+            "ohqbuild", "data", "status", "--catalog", catalog,
+            "--object-store", cache, "--output", status_output,
         ))
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
@@ -1744,6 +1750,7 @@ class LauncherApp:
             "Forecast provider": tk.StringVar(value=""),
             "Forecast product": tk.StringVar(value="forecast"),
             "Prediction time (UTC)": tk.StringVar(value=""),
+            "Status output": tk.StringVar(value="watershed_package/status"),
         }
         tk.Label(
             dialog,
@@ -1775,6 +1782,7 @@ class LauncherApp:
                     forecast_provider=variables["Forecast provider"].get(),
                     forecast_product=variables["Forecast product"].get(),
                     prediction_time=variables["Prediction time (UTC)"].get(),
+                    status_output=variables["Status output"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1796,6 +1804,7 @@ class LauncherApp:
             ("RUN ALL DATA STEPS", "run"),
             ("Download Forecast Archive", "download-forecast"),
             ("Create Forecast View", "forecast-view"),
+            ("Inspect Data Status", "status"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

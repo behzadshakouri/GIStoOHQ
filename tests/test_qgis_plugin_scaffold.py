@@ -339,3 +339,7 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "forecast-view", site_spec="site.yaml", asset_id="sha256:x",
         prediction_time="2025-01-01T00:00:00Z", cache="cache", catalog="catalog.json",
     )[2] == "forecast-view"
+    assert _command_for_watershed_data(
+        "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
+        status_output="status",
+    )[-2:] == ["--output", "status"]

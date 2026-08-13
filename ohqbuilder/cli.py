@@ -72,6 +72,7 @@ from .watershed_data.nasa_power import (
 from .watershed_data.temporal import harmonize_asset
 from .watershed_data.pipeline import run_watershed_data_pipeline
 from .watershed_data.forecast import acquire_forecast_archive, materialize_available_forecasts
+from .watershed_data.status import write_data_status
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -179,6 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
     forecast_view.add_argument("--prediction-time", required=True)
     forecast_view.add_argument("--object-store", required=True)
     forecast_view.add_argument("--catalog", required=True)
+    data_status = data_sub.add_parser("status", help="List catalog assets and object availability.")
+    data_status.add_argument("--catalog", required=True)
+    data_status.add_argument("--object-store", default=None)
+    data_status.add_argument("--output", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1228,6 +1233,11 @@ def main(argv: list[str] | None = None) -> int:
                     object_store=args.object_store, catalog=args.catalog,
                 )
                 print(f"Cataloged leakage-safe forecast view: {asset['asset_id']}")
+            elif args.data_command == "status":
+                report = write_data_status(
+                    catalog=args.catalog, object_store=args.object_store, output=args.output
+                )
+                print(f"Wrote watershed data status: {report}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

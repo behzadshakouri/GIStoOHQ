@@ -153,6 +153,18 @@ The view enforces `issue_time <= prediction_time`, preserves issue and valid
 times, and rejects inconsistent lead times. It never collapses forecasts to valid
 time alone.
 
+## Inspect downloaded and derived assets
+
+```bash
+ohqbuild data status --catalog watershed_package/catalog.json \
+  --object-store .gistoohq-cache --output watershed_package/status
+```
+
+This writes `status.json` and `status.md` with every asset ID, provider, product,
+native/derived status, parent IDs, coverage, record counts, and object-store
+availability. Use **Inspect Data Status** in either graphical dialog to obtain the
+same report instead of copying opaque IDs directly from console output.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

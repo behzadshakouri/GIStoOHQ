@@ -9,6 +9,7 @@ from .nasa_power import acquire_historical_meteorology, acquire_pet_et
 from .reconnaissance import run_reconnaissance
 from .usgs import acquire_observed_discharge
 from .temporal import harmonize_asset, temporal_qc
+from .status import build_data_status, write_data_status
 from .schemas import (
     PackageManifest,
     ProvenanceActivity,
@@ -39,4 +40,6 @@ __all__ = [
     "validate_package",
     "harmonize_asset",
     "temporal_qc",
+    "build_data_status",
+    "write_data_status",
 ]

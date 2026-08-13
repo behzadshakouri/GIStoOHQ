@@ -76,6 +76,10 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         forecast_provider="example",
     )
     assert forecast.argv[2] == "download-forecast"
+    assert watershed_data_command(
+        "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
+        status_output="status",
+    ).argv[-2:] == ("--output", "status")
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():
