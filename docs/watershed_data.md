@@ -1,8 +1,9 @@
 # Optional watershed data
 
-The watershed-data commands are an additive foundation for discharge, weather,
-PET/ET, forecasts, and future provider products. They are not required by
-`ohqbuild full-run` and currently do not perform automatic provider discovery.
+The watershed-data commands are an additive workflow for discharge, weather,
+PET/ET, normalized forecast archives, and future provider products. They are not
+required by `ohqbuild full-run`. Start with the ready-to-copy configuration in
+`examples/watershed_data/site.example.yaml`.
 
 ## Create and validate a site specification
 
@@ -17,9 +18,9 @@ ohqbuild data init-site \
 ohqbuild data validate-site --site-spec sites/hickey_run.yaml
 ```
 
-The generated source entries are policies, not provider selections. Automatic
-reconnaissance will be added as a later provider adapter; it must record all
-candidates, constraint results, scores, rejection reasons, and its decision.
+The generated source entries are policies, not provider selections. USGS gauge
+reconnaissance records all candidates, constraint results, scores, rejection
+reasons, and its decision before discharge acquisition.
 
 ## Discover discharge gauges before downloading
 
@@ -195,22 +196,15 @@ package that depends on the local object store, or `all --object-store CACHE`
 for a self-contained package. `--redistributable` is never inferred; users must
 set it only after checking every provider license.
 
-## QGIS user interface
+## Graphical interfaces
 
-The QGIS dock exposes an optional **Data** tab. **Open Watershed Data…** can
-create or validate a SiteSpec and download an explicitly declared HTTPS product
-into the immutable cache and catalog. These controls call the same `ohqbuild
-data` backend used by the terminal; provider logic does not live in the UI.
+The QGIS dock exposes **Data** → **Open Watershed Data…**. The standalone launcher
+exposes **Watershed data…**. Both dialogs are scrollable, group actions in a
+three-column grid, and call the same `ohqbuild data` backend used by the terminal.
+They support SiteSpec creation/validation, reconnaissance, discharge, weather,
+PET/ET, normalized forecast archives, QC/harmonization, status reporting,
+package freeze/validation, HydroPINN export, and the post-reconnaissance
+**RUN ALL DATA STEPS** action.
 
-Later provider adapters will extend this workflow to:
-
-1. run reconnaissance;
-2. review ambiguous source candidates;
-3. select discharge, meteorology, PET/ET, and forecast products;
-4. download and inspect QC;
-5. freeze a generic package;
-6. export to HydroPINN or another consumer.
-
-The existing **Full Run** button remains the default route to OHQ. A future
-unchecked **Also acquire watershed observations** option may orchestrate both
-workflows, but temporal data must not become a prerequisite for an OHQ run.
+The existing **Full Run** button remains the default route to OHQ. Watershed
+observations remain optional and are never a prerequisite for an OHQ run.

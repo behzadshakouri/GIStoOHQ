@@ -782,16 +782,22 @@ class DemWorkflowDock:
         from qgis.PyQt.QtWidgets import (
             QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
             QPushButton, QVBoxLayout,
+            QScrollArea, QWidget,
         )
 
         dialog = QDialog(self.widget)
         dialog.setWindowTitle("Watershed Data")
         dialog.setMinimumWidth(680)
+        dialog.resize(760, 720)
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel(
             "Create a SiteSpec, validate it, or download one explicitly declared HTTPS "
             "provider product. Full Run to OHQ remains unchanged."
         ))
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        form_widget = QWidget(scroll)
+        form_layout = QVBoxLayout(form_widget)
         form = QFormLayout()
         defaults = {
             "SiteSpec": "sites/watershed.yaml", "Site ID": "", "Name": "",
@@ -826,8 +832,10 @@ class DemWorkflowDock:
         for label, field in fields.items():
             if label != "SiteSpec":
                 form.addRow(label, field)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
+        form_layout.addLayout(form)
+        buttons_widget = QWidget(form_widget)
+        from qgis.PyQt.QtWidgets import QGridLayout
+        buttons = QGridLayout(buttons_widget)
 
         def run(action: str) -> None:
             try:
@@ -864,7 +872,7 @@ class DemWorkflowDock:
             dialog.accept()
             self._start_argv(action, argv)
 
-        for label, action in (
+        actions = (
             ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
             ("Download Declared Product", "acquire-url"),
             ("Discover Discharge Gauges", "reconnaissance"),
@@ -878,11 +886,14 @@ class DemWorkflowDock:
             ("Download Forecast Archive", "download-forecast"),
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
-        ):
+        )
+        for index, (label, action) in enumerate(actions):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=action: run(value))
-            buttons.addWidget(button)
-        layout.addLayout(buttons)
+            buttons.addWidget(button, index // 3, index % 3)
+        form_layout.addWidget(buttons_widget)
+        scroll.setWidget(form_widget)
+        layout.addWidget(scroll)
         dialog.exec_()
 
     def configure_documented_watershed(self) -> None:

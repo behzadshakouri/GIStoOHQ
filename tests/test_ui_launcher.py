@@ -88,6 +88,8 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.title("Optional Watershed Data")' in source
     assert "Download Selected Discharge" in source
     assert "Download Weather" in source
+    assert 'dialog.geometry("760x700")' in source
+    assert 'tk.LabelFrame(content, text="Actions")' in source
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

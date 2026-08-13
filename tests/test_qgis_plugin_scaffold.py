@@ -302,6 +302,8 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     assert 'tabs.insertTab(2, data_tab, "Data")' in dock
     assert "Open Watershed Data…" in dock
     assert "Download Declared Product" in dock
+    assert "QScrollArea" in dock
+    assert "buttons.addWidget(button, index // 3, index % 3)" in dock
 
     command = _command_for_watershed_data(
         "acquire-url", site_spec="site.yaml", url="https://example.gov/weather.csv",

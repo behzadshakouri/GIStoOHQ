@@ -1730,6 +1730,18 @@ class LauncherApp:
         dialog = tk.Toplevel(self.root)
         dialog.title("Optional Watershed Data")
         dialog.transient(self.root)
+        dialog.geometry("760x700")
+        canvas = tk.Canvas(dialog, highlightthickness=0)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        content = tk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
         variables = {
             "SiteSpec": tk.StringVar(value="sites/watershed.yaml"),
             "Reconnaissance output": tk.StringVar(value="reconnaissance"),
@@ -1753,12 +1765,12 @@ class LauncherApp:
             "Status output": tk.StringVar(value="watershed_package/status"),
         }
         tk.Label(
-            dialog,
-            text="Optional discharge data; Full Run to OHQ remains unchanged.",
+            content,
+            text="Optional watershed observations; Full Run to OHQ remains unchanged.",
         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=8)
         for index, (label, variable) in enumerate(variables.items(), start=1):
-            tk.Label(dialog, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
-            tk.Entry(dialog, textvariable=variable, width=52).grid(
+            tk.Label(content, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
+            tk.Entry(content, textvariable=variable, width=52).grid(
                 row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
             )
 
@@ -1790,8 +1802,7 @@ class LauncherApp:
             dialog.destroy()
             self.start_workflow_command(command)
 
-        row = len(variables) + 1
-        for column, (label, action) in enumerate((
+        actions = (
             ("Validate SiteSpec", "validate-site"),
             ("Discover Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
@@ -1805,11 +1816,17 @@ class LauncherApp:
             ("Download Forecast Archive", "download-forecast"),
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
-        )):
-            tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
-                row=row, column=column, padx=5, pady=10, sticky="ew"
+        )
+        row = len(variables) + 1
+        action_frame = tk.LabelFrame(content, text="Actions")
+        action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
+        for index, (label, action) in enumerate(actions):
+            tk.Button(action_frame, text=label, command=lambda value=action: run(value)).grid(
+                row=index // 3, column=index % 3, padx=5, pady=5, sticky="ew"
             )
-        dialog.columnconfigure(1, weight=1)
+        for column in range(3):
+            action_frame.columnconfigure(column, weight=1)
+        content.columnconfigure(1, weight=1)
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""
