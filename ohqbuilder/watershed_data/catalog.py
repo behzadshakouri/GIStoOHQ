@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, BinaryIO
+
+from .schemas import WatershedDataError, canonical_json
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _atomic_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    content_digest: str
+    path: Path
+    size: int
+
+
+class ObjectStore:
+    """Immutable SHA-256 object store with atomic publication."""
+
+    def __init__(self, root: str | Path):
+        self.root = Path(root).expanduser().resolve()
+
+    def put(self, source: BinaryIO) -> StoredObject:
+        staging = self.root / "staging"
+        staging.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix="object.", dir=staging)
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+                    output.write(chunk)
+                    size += len(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            content_digest = digest.hexdigest()
+            destination = self.root / "objects" / "sha256" / content_digest[:2] / content_digest[2:]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                os.unlink(temporary)
+            else:
+                os.replace(temporary, destination)
+            return StoredObject(content_digest, destination, size)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def open(self, digest: str) -> BinaryIO:
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise WatershedDataError("content digest must be a lowercase SHA-256 value")
+        return (self.root / "objects" / "sha256" / digest[:2] / digest[2:]).open("rb")
+
+
+class AssetCatalog:
+    """Append-only catalog snapshot for native and derived assets."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path).expanduser().resolve()
+
+    def read(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {"schema_name": "AssetCatalog", "schema_version": "1.0", "assets": []}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise WatershedDataError(f"could not read asset catalog: {exc}") from exc
+        if not isinstance(data.get("assets"), list):
+            raise WatershedDataError("asset catalog assets must be an array")
+        return data
+
+    def register(self, asset: dict[str, Any]) -> dict[str, Any]:
+        required = {"provider", "product", "content_digest", "size", "media_type"}
+        missing = sorted(required - asset.keys())
+        if missing:
+            raise WatershedDataError(f"asset is missing required fields: {', '.join(missing)}")
+        data = self.read()
+        record = dict(asset)
+        identity = {
+            key: record.get(key)
+            for key in ("provider", "product", "product_version", "request_key", "content_digest")
+        }
+        record.setdefault("asset_id", "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest())
+        record.setdefault("registered_at", _now())
+        if not any(item.get("asset_id") == record["asset_id"] for item in data["assets"]):
+            data["assets"].append(record)
+            data["assets"].sort(key=lambda item: item["asset_id"])
+            data["catalog_digest"] = hashlib.sha256(canonical_json(data["assets"])).hexdigest()
+            _atomic_json(self.path, data)
+        return record

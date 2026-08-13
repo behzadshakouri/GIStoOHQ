@@ -58,6 +58,8 @@ from .soil_retrieval import (
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
+from .watershed_data.schemas import SiteSpec, WatershedDataError
+from .watershed_data.workflow import acquire_url, write_site_spec
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +67,33 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ohqbuild", description="Build OpenHydroQual OHQ files from GIS outputs."
     )
     sub = p.add_subparsers(dest="command", required=True)
+
+    data = sub.add_parser(
+        "data",
+        help="Acquire and catalog optional provider-neutral watershed observations.",
+    )
+    data_sub = data.add_subparsers(dest="data_command", required=True)
+    data_init = data_sub.add_parser("init-site", help="Create a generic watershed SiteSpec.")
+    data_init.add_argument("--site-spec", required=True)
+    data_init.add_argument("--site-id", required=True)
+    data_init.add_argument("--name", default=None)
+    data_init.add_argument("--lon", required=True, type=float)
+    data_init.add_argument("--lat", required=True, type=float)
+    data_init.add_argument("--start", required=True)
+    data_init.add_argument("--end", required=True)
+    data_init.add_argument("--force", action="store_true")
+    data_validate = data_sub.add_parser("validate-site", help="Validate a watershed SiteSpec.")
+    data_validate.add_argument("--site-spec", required=True)
+    data_acquire = data_sub.add_parser(
+        "acquire-url",
+        help="Download one explicitly declared provider product into the immutable catalog.",
+    )
+    data_acquire.add_argument("--url", required=True)
+    data_acquire.add_argument("--provider", required=True)
+    data_acquire.add_argument("--product", required=True)
+    data_acquire.add_argument("--product-version", default="unspecified")
+    data_acquire.add_argument("--cache", required=True)
+    data_acquire.add_argument("--catalog", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1017,6 +1046,37 @@ def _resolve_cli_path(config_path: str, value, default: str | None = None) -> st
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "data":
+        try:
+            if args.data_command == "init-site":
+                result = write_site_spec(
+                    args.site_spec,
+                    site_id=args.site_id,
+                    name=args.name,
+                    longitude=args.lon,
+                    latitude=args.lat,
+                    start=args.start,
+                    end=args.end,
+                    overwrite=args.force,
+                )
+                print(f"Wrote watershed SiteSpec: {result}")
+            elif args.data_command == "validate-site":
+                spec = SiteSpec.from_file(args.site_spec)
+                print(f"SiteSpec valid: {spec.site_id} ({spec.digest})")
+            elif args.data_command == "acquire-url":
+                asset = acquire_url(
+                    url=args.url,
+                    provider=args.provider,
+                    product=args.product,
+                    product_version=args.product_version,
+                    cache=args.cache,
+                    catalog=args.catalog,
+                )
+                print(f"Cataloged asset: {asset['asset_id']}")
+        except WatershedDataError as exc:
+            print(f"data {args.data_command} failed: {exc}")
+            return 2
+        return 0
     if args.command == "build":
         settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
         input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
