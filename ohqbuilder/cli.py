@@ -70,6 +70,7 @@ from .watershed_data.nasa_power import (
     acquire_pet_et,
 )
 from .watershed_data.temporal import harmonize_asset
+from .watershed_data.pipeline import run_watershed_data_pipeline
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -154,6 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
     data_export.add_argument("--object-store", default=None)
     data_export.add_argument("--output", required=True)
     data_export.add_argument("--profile", default="water-balance-v1")
+    data_run = data_sub.add_parser(
+        "run", help="Download selected products, harmonize/QC, and freeze a package."
+    )
+    data_run.add_argument("--site-spec", required=True)
+    data_run.add_argument("--station-id", default="")
+    data_run.add_argument("--workspace", required=True)
+    data_run.add_argument("--no-discharge", action="store_true")
+    data_run.add_argument("--no-weather", action="store_true")
+    data_run.add_argument("--no-pet", action="store_true")
+    data_run.add_argument("--export-hydropinn", action="store_true")
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1183,6 +1194,14 @@ def main(argv: list[str] | None = None) -> int:
                     output=args.output, profile=args.profile,
                 )
                 print(f"Exported HydroPINN profile: {manifest}")
+            elif args.data_command == "run":
+                result = run_watershed_data_pipeline(
+                    site_spec=args.site_spec, station_id=args.station_id,
+                    workspace=args.workspace, include_discharge=not args.no_discharge,
+                    include_weather=not args.no_weather, include_pet=not args.no_pet,
+                    export_hydropinn_profile=args.export_hydropinn,
+                )
+                print(f"Watershed data pipeline complete: {result['package_manifest']}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

@@ -167,6 +167,7 @@ def _command_for_watershed_data(
     qc_output: str = "watershed_package/quality_control/temporal.json",
     provenance_output: str = "watershed_package/provenance/temporal.json",
     hydropinn_output: str = "outputs/hydropinn",
+    workspace: str = "watershed_data_run",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -260,6 +261,14 @@ def _command_for_watershed_data(
         return [
             "ohqbuild", "data", "export-hydropinn", "--package", package,
             "--object-store", cache, "--output", hydropinn_output,
+        ]
+    if action == "run":
+        if not station_id:
+            raise QgisDockConfigError("Select an explicit USGS station ID before running all steps.")
+        return [
+            "ohqbuild", "data", "run", "--site-spec", site_spec,
+            "--station-id", station_id, "--workspace", workspace,
+            "--export-hydropinn",
         ]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
@@ -780,6 +789,7 @@ class DemWorkflowDock:
             "QC output": "watershed_package/quality_control/temporal.json",
             "Provenance output": "watershed_package/provenance/temporal.json",
             "HydroPINN output": "outputs/hydropinn",
+            "All-data workspace": "watershed_data_run",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -820,6 +830,7 @@ class DemWorkflowDock:
                     qc_output=fields["QC output"].text(),
                     provenance_output=fields["Provenance output"].text(),
                     hydropinn_output=fields["HydroPINN output"].text(),
+                    workspace=fields["All-data workspace"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -837,6 +848,7 @@ class DemWorkflowDock:
             ("Download PET/ET", "download-pet"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
+            ("RUN ALL DATA STEPS", "run"),
         ):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, value=action: run(value))

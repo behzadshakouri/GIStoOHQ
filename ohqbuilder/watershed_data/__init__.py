@@ -2,6 +2,7 @@
 
 from .catalog import AssetCatalog, ObjectStore
 from .package import freeze_package, validate_package
+from .pipeline import run_watershed_data_pipeline
 from .hydropinn import export_hydropinn
 from .nasa_power import acquire_historical_meteorology, acquire_pet_et
 from .reconnaissance import run_reconnaissance
@@ -31,6 +32,7 @@ __all__ = [
     "export_hydropinn",
     "freeze_package",
     "run_reconnaissance",
+    "run_watershed_data_pipeline",
     "validate_package",
     "harmonize_asset",
     "temporal_qc",

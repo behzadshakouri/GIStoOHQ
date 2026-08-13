@@ -117,6 +117,23 @@ normalization, imputation, feature selection, lag construction, or experimental
 partitioning. **Download PET/ET**, **Freeze Package**, **Validate Package**, and
 **Export HydroPINN** are available in both graphical data dialogs.
 
+## Run the complete optional data workflow
+
+After reconnaissance and explicit gauge selection, the CLI and both graphical
+dialogs can download discharge, weather, and PET/ET; harmonize and QC each native
+asset; freeze and validate the generic package; and optionally export HydroPINN:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --workspace outputs/hickey_run_data \
+  --export-hydropinn
+```
+
+Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
+**RUN ALL DATA STEPS** button performs this orchestration in both graphical
+interfaces. Gauge selection remains explicit; this command never silently picks
+an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once

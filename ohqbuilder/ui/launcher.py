@@ -292,6 +292,7 @@ def watershed_data_command(
     provenance_output: str = "watershed_package/provenance/temporal.json",
     package: str = "watershed_package",
     hydropinn_output: str = "outputs/hydropinn",
+    workspace: str = "watershed_data_run",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -360,6 +361,17 @@ def watershed_data_command(
             "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
                                   "--package", package, "--object-store", cache,
                                   "--output", hydropinn_output)
+        )
+    if action == "run":
+        if not station_id:
+            raise LauncherError("Select an explicit USGS station ID before running all data steps.")
+        return WorkflowCommand(
+            "Run Watershed Data Pipeline",
+            (
+                "ohqbuild", "data", "run", "--site-spec", site_spec,
+                "--station-id", station_id, "--workspace", workspace,
+                "--export-hydropinn",
+            ),
         )
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
@@ -1707,6 +1719,7 @@ class LauncherApp:
             "Provenance output": tk.StringVar(value="watershed_package/provenance/temporal.json"),
             "Package": tk.StringVar(value="watershed_package"),
             "HydroPINN output": tk.StringVar(value="outputs/hydropinn"),
+            "All-data workspace": tk.StringVar(value="watershed_data_run"),
         }
         tk.Label(
             dialog,
@@ -1733,6 +1746,7 @@ class LauncherApp:
                     provenance_output=variables["Provenance output"].get(),
                     package=variables["Package"].get(),
                     hydropinn_output=variables["HydroPINN output"].get(),
+                    workspace=variables["All-data workspace"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1751,6 +1765,7 @@ class LauncherApp:
             ("Freeze Package", "freeze"),
             ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
+            ("RUN ALL DATA STEPS", "run"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

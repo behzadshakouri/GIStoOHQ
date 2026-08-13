@@ -332,3 +332,6 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "download-weather", site_spec="site.yaml", cache="cache",
         catalog="package/catalog.json", weather_variables="PRECTOTCORR,T2M",
     )[-2:] == ["--variables", "PRECTOTCORR,T2M"]
+    assert _command_for_watershed_data(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run",
+    )[-3:] == ["--workspace", "run", "--export-hydropinn"]

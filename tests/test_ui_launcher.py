@@ -67,6 +67,10 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "export-hydropinn", site_spec="site.yaml", package="package",
         cache="cache", hydropinn_output="export",
     ).argv[-2:] == ("--output", "export")
+    run = watershed_data_command(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run"
+    )
+    assert run.argv[-3:] == ("--workspace", "run", "--export-hydropinn")
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():
