@@ -63,6 +63,7 @@ from .watershed_data.package import freeze_package, validate_package
 from .watershed_data.reconnaissance import run_reconnaissance
 from .watershed_data.usgs import acquire_observed_discharge
 from .watershed_data.nasa_power import DEFAULT_PARAMETERS, acquire_historical_meteorology
+from .watershed_data.temporal import harmonize_asset
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -129,6 +130,14 @@ def build_parser() -> argparse.ArgumentParser:
     data_weather.add_argument("--cache", required=True)
     data_weather.add_argument("--catalog", required=True)
     data_weather.add_argument("--variables", default=",".join(DEFAULT_PARAMETERS))
+    data_harmonize = data_sub.add_parser(
+        "harmonize", help="Materialize a native temporal asset as a sorted UTC table with QC."
+    )
+    data_harmonize.add_argument("--asset-id", required=True)
+    data_harmonize.add_argument("--catalog", required=True)
+    data_harmonize.add_argument("--object-store", required=True)
+    data_harmonize.add_argument("--qc-output", required=True)
+    data_harmonize.add_argument("--provenance-output", required=True)
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1139,6 +1148,12 @@ def main(argv: list[str] | None = None) -> int:
                     spec, cache=args.cache, catalog=args.catalog, parameters=variables
                 )
                 print(f"Cataloged native meteorology: {asset['asset_id']} ({len(variables)} variables)")
+            elif args.data_command == "harmonize":
+                asset = harmonize_asset(
+                    asset_id=args.asset_id, catalog=args.catalog, object_store=args.object_store,
+                    qc_output=args.qc_output, provenance_output=args.provenance_output,
+                )
+                print(f"Cataloged harmonized temporal asset: {asset['asset_id']}")
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

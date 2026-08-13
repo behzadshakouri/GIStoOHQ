@@ -163,6 +163,9 @@ def _command_for_watershed_data(
     radius_km: float = 50.0,
     station_id: str = "",
     weather_variables: str = "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
+    asset_id: str = "",
+    qc_output: str = "watershed_package/quality_control/temporal.json",
+    provenance_output: str = "watershed_package/provenance/temporal.json",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -238,6 +241,14 @@ def _command_for_watershed_data(
         return [
             "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
             "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
+        ]
+    if action == "harmonize":
+        if not asset_id:
+            raise QgisDockConfigError("A native catalog asset ID is required.")
+        return [
+            "ohqbuild", "data", "harmonize", "--asset-id", asset_id,
+            "--catalog", catalog, "--object-store", cache,
+            "--qc-output", qc_output, "--provenance-output", provenance_output,
         ]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
@@ -754,6 +765,9 @@ class DemWorkflowDock:
             "Reconnaissance output": "reconnaissance", "Gauge radius (km)": "50",
             "Selected USGS station ID": "",
             "Weather variables": "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
+            "Native asset ID": "",
+            "QC output": "watershed_package/quality_control/temporal.json",
+            "Provenance output": "watershed_package/provenance/temporal.json",
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -790,6 +804,9 @@ class DemWorkflowDock:
                     radius_km=float(fields["Gauge radius (km)"].text()),
                     station_id=fields["Selected USGS station ID"].text(),
                     weather_variables=fields["Weather variables"].text(),
+                    asset_id=fields["Native asset ID"].text(),
+                    qc_output=fields["QC output"].text(),
+                    provenance_output=fields["Provenance output"].text(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -803,6 +820,7 @@ class DemWorkflowDock:
             ("Discover Discharge Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Historical Weather", "download-weather"),
+            ("Harmonize + QC", "harmonize"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
         ):
             button = QPushButton(label)

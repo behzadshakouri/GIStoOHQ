@@ -5,6 +5,7 @@ from .package import freeze_package, validate_package
 from .nasa_power import acquire_historical_meteorology
 from .reconnaissance import run_reconnaissance
 from .usgs import acquire_observed_discharge
+from .temporal import harmonize_asset, temporal_qc
 from .schemas import (
     PackageManifest,
     ProvenanceActivity,
@@ -28,4 +29,6 @@ __all__ = [
     "freeze_package",
     "run_reconnaissance",
     "validate_package",
+    "harmonize_asset",
+    "temporal_qc",
 ]

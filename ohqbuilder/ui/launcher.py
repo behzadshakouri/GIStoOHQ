@@ -287,6 +287,9 @@ def watershed_data_command(
     radius_km: float = 50.0,
     station_id: str = "",
     weather_variables: str = "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
+    asset_id: str = "",
+    qc_output: str = "watershed_package/quality_control/temporal.json",
+    provenance_output: str = "watershed_package/provenance/temporal.json",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -319,6 +322,17 @@ def watershed_data_command(
             (
                 "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
                 "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
+            ),
+        )
+    if action == "harmonize":
+        if not asset_id:
+            raise LauncherError("Enter a native catalog asset ID to harmonize.")
+        return WorkflowCommand(
+            "Harmonize and QC",
+            (
+                "ohqbuild", "data", "harmonize", "--asset-id", asset_id,
+                "--catalog", catalog, "--object-store", cache,
+                "--qc-output", qc_output, "--provenance-output", provenance_output,
             ),
         )
     raise LauncherError(f"Unknown watershed-data action: {action}")
@@ -1662,6 +1676,9 @@ class LauncherApp:
             "Weather variables": tk.StringVar(
                 value="PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
             ),
+            "Native asset ID": tk.StringVar(value=""),
+            "QC output": tk.StringVar(value="watershed_package/quality_control/temporal.json"),
+            "Provenance output": tk.StringVar(value="watershed_package/provenance/temporal.json"),
         }
         tk.Label(
             dialog,
@@ -1683,6 +1700,9 @@ class LauncherApp:
                     station_id=variables["Selected USGS station ID"].get(),
                     cache=variables["Cache"].get(), catalog=variables["Catalog"].get(),
                     weather_variables=variables["Weather variables"].get(),
+                    asset_id=variables["Native asset ID"].get(),
+                    qc_output=variables["QC output"].get(),
+                    provenance_output=variables["Provenance output"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1696,6 +1716,7 @@ class LauncherApp:
             ("Discover Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
+            ("Harmonize + QC", "harmonize"),
         )):
             tk.Button(dialog, text=label, command=lambda value=action: run(value)).grid(
                 row=row, column=column, padx=5, pady=10, sticky="ew"

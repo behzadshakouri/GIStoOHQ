@@ -74,6 +74,25 @@ variable names and units, point coordinates, coverage, counts, and missing-value
 counts are cataloged without resampling or filling gaps. Both graphical data
 dialogs expose this as **Download Weather**.
 
+## Harmonize and run generic temporal QC
+
+Native assets remain immutable. To create a separate sorted UTC table while
+preserving native units, missing values, and provider qualifiers:
+
+```bash
+ohqbuild data harmonize --asset-id sha256:... \
+  --catalog watershed_package/catalog.json --object-store .gistoohq-cache \
+  --qc-output watershed_package/quality_control/temporal.json \
+  --provenance-output watershed_package/provenance/temporal.json
+```
+
+The derived CSV is a new catalog asset linked to its native parent. The QC report
+uses stable rules for duplicate timestamp-variable records, missing values, and
+chronology. The provenance document records transformation name/version,
+parameters, software version, timestamps, parent asset, and output asset. This
+step converts timestamps to UTC and sorts records; it does not aggregate,
+interpolate, normalize, or convert units.
+
 ## Acquire an explicitly declared product
 
 The first generic acquisition primitive stores any explicit HTTPS product once
