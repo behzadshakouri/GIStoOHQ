@@ -293,3 +293,55 @@ def test_qgis_plugin_exposes_full_download_to_ohq_workflow():
     assert "prepare-hydrology" in dock
     assert "Build HEC-HMS" in dock
     assert "Validate HEC-HMS" in dock
+
+
+def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
+    from qgis_plugin.gistoohq_dem_workflow.dock import _command_for_watershed_data
+
+    dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
+    assert 'tabs.insertTab(2, data_tab, "Data")' in dock
+    assert "Open Watershed Data…" in dock
+    assert "Download Declared Product" in dock
+    assert "QScrollArea" in dock
+    assert "buttons.addWidget(button, index // 3, index % 3)" in dock
+
+    command = _command_for_watershed_data(
+        "acquire-url", site_spec="site.yaml", url="https://example.gov/weather.csv",
+        provider="example", product="hourly-weather", product_version="2026",
+        cache="cache", catalog="package/catalog.json",
+    )
+    assert command == [
+        "ohqbuild", "data", "acquire-url", "--url", "https://example.gov/weather.csv",
+        "--provider", "example", "--product", "hourly-weather",
+        "--product-version", "2026", "--cache", "cache",
+        "--catalog", "package/catalog.json",
+    ]
+    assert _command_for_watershed_data(
+        "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25,
+    ) == [
+        "ohqbuild", "data", "reconnaissance", "--site-spec", "site.yaml",
+        "--output", "recon", "--radius-km", "25",
+    ]
+    assert _command_for_watershed_data(
+        "download-discharge", site_spec="site.yaml", station_id="01649500",
+        cache="cache", catalog="package/catalog.json",
+    ) == [
+        "ohqbuild", "data", "download-discharge", "--site-spec", "site.yaml",
+        "--station-id", "01649500", "--cache", "cache",
+        "--catalog", "package/catalog.json",
+    ]
+    assert _command_for_watershed_data(
+        "download-weather", site_spec="site.yaml", cache="cache",
+        catalog="package/catalog.json", weather_variables="PRECTOTCORR,T2M",
+    )[-2:] == ["--variables", "PRECTOTCORR,T2M"]
+    assert _command_for_watershed_data(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run",
+    )[-3:] == ["--workspace", "run", "--export-hydropinn"]
+    assert _command_for_watershed_data(
+        "forecast-view", site_spec="site.yaml", asset_id="sha256:x",
+        prediction_time="2025-01-01T00:00:00Z", cache="cache", catalog="catalog.json",
+    )[2] == "forecast-view"
+    assert _command_for_watershed_data(
+        "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
+        status_output="status",
+    )[-2:] == ["--output", "status"]
