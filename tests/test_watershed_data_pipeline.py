@@ -43,3 +43,23 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     assert Path(result["hydropinn_manifest"]).is_file()
     assert validate_package(tmp_path / "run" / "watershed_package").package_id == result["package_id"]
     assert len(list((tmp_path / "run" / "watershed_package" / "quality_control").glob("*.json"))) == 3
+
+
+def test_weather_pet_pipeline_does_not_require_station_id(tmp_path):
+    site = write_site_spec(
+        tmp_path / "site.yaml", site_id="weather", name="Weather", longitude=-77, latitude=39,
+        start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+    )
+    result = run_watershed_data_pipeline(
+        site_spec=site, station_id="", workspace=tmp_path / "weather_run",
+        include_discharge=False,
+        weather_acquirer=_fixture_acquirer(
+            "tests/fixtures/nasa_power_hourly.json", "nasa-power", "historical-meteorology"
+        ),
+        pet_acquirer=_fixture_acquirer(
+            "tests/fixtures/nasa_power_hourly.json", "nasa-power", "pet-et"
+        ),
+        export_hydropinn_profile=True,
+    )
+    assert len(result["native_asset_ids"]) == 2
+    assert Path(result["hydropinn_manifest"]).is_file()

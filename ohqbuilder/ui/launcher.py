@@ -298,10 +298,33 @@ def watershed_data_command(
     forecast_product: str = "forecast",
     prediction_time: str = "",
     status_output: str = "watershed_package/status",
+    site_id: str = "",
+    name: str = "",
+    longitude: float | None = None,
+    latitude: float | None = None,
+    study_start: str = "",
+    study_end: str = "",
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
         raise LauncherError("A SiteSpec path is required for watershed data.")
+    if action == "init-site":
+        required = {
+            "site ID": site_id, "study start": study_start, "study end": study_end,
+        }
+        missing = [label for label, value in required.items() if not value]
+        if longitude is None or latitude is None:
+            missing.append("outlet coordinates")
+        if missing:
+            raise LauncherError("Create SiteSpec requires: " + ", ".join(missing) + ".")
+        argv = [
+            "ohqbuild", "data", "init-site", "--site-spec", site_spec,
+            "--site-id", site_id, "--lon", str(longitude), "--lat", str(latitude),
+            "--start", study_start, "--end", study_end,
+        ]
+        if name:
+            argv.extend(("--name", name))
+        return WorkflowCommand("Create SiteSpec", tuple(argv))
     if action == "reconnaissance":
         return WorkflowCommand(
             "Discover Discharge Gauges",
@@ -376,6 +399,15 @@ def watershed_data_command(
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
                 "--export-hydropinn",
+            ),
+        )
+    if action == "run-weather":
+        return WorkflowCommand(
+            "Run Weather/PET to HydroPINN",
+            (
+                "ohqbuild", "data", "run", "--site-spec", site_spec,
+                "--station-id", "", "--workspace", workspace,
+                "--no-discharge", "--export-hydropinn",
             ),
         )
     if action == "download-forecast":
@@ -1747,27 +1779,53 @@ class LauncherApp:
             "<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        config_path = Path(self.config_var.get()).expanduser().resolve()
+        project_dir = config_path.parent
+        try:
+            project_config = load_project_config(config_path) if config_path.is_file() else {}
+        except (OSError, ValueError, json.JSONDecodeError, yaml.YAMLError):
+            project_config = {}
+        data_config = project_config.get("watershed_data", {})
+        if not isinstance(data_config, dict):
+            data_config = {}
+        period = data_config.get("study_period", {})
+        if not isinstance(period, dict):
+            period = {}
+        site_name = self.site_var.get().strip() or "watershed"
+        site_id = Path(site_name).name.replace(" ", "_").lower()
+        site_spec_default = project_dir / "sites" / f"{site_id}.yaml"
+        workspace_default = project_dir / "outputs" / f"{site_id}_data"
         variables = {
-            "SiteSpec": tk.StringVar(value="sites/watershed.yaml"),
-            "Reconnaissance output": tk.StringVar(value="reconnaissance"),
+            "SiteSpec": tk.StringVar(value=str(site_spec_default)),
+            "Site ID": tk.StringVar(value=site_id),
+            "Name": tk.StringVar(value=Path(site_name).name),
+            "Outlet longitude": tk.StringVar(value=self.lon_var.get()),
+            "Outlet latitude": tk.StringVar(value=self.lat_var.get()),
+            "Study start (UTC)": tk.StringVar(value=str(period.get("start") or "")),
+            "Study end (UTC)": tk.StringVar(value=str(period.get("end") or "")),
+            "Reconnaissance output": tk.StringVar(value=str(workspace_default / "reconnaissance")),
             "Gauge radius (km)": tk.StringVar(value="50"),
             "Selected USGS station ID": tk.StringVar(value=""),
-            "Cache": tk.StringVar(value=".gistoohq-cache"),
-            "Catalog": tk.StringVar(value="watershed_package/catalog.json"),
+            "Cache": tk.StringVar(value=str(workspace_default / "cache")),
+            "Catalog": tk.StringVar(value=str(workspace_default / "watershed_package/catalog.json")),
             "Weather variables": tk.StringVar(
                 value="PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
             ),
             "Native asset ID": tk.StringVar(value=""),
-            "QC output": tk.StringVar(value="watershed_package/quality_control/temporal.json"),
-            "Provenance output": tk.StringVar(value="watershed_package/provenance/temporal.json"),
-            "Package": tk.StringVar(value="watershed_package"),
-            "HydroPINN output": tk.StringVar(value="outputs/hydropinn"),
-            "All-data workspace": tk.StringVar(value="watershed_data_run"),
+            "QC output": tk.StringVar(
+                value=str(workspace_default / "watershed_package/quality_control/temporal.json")
+            ),
+            "Provenance output": tk.StringVar(
+                value=str(workspace_default / "watershed_package/provenance/temporal.json")
+            ),
+            "Package": tk.StringVar(value=str(workspace_default / "watershed_package")),
+            "HydroPINN output": tk.StringVar(value=str(workspace_default / "hydropinn")),
+            "All-data workspace": tk.StringVar(value=str(workspace_default)),
             "Forecast URL": tk.StringVar(value=""),
             "Forecast provider": tk.StringVar(value=""),
             "Forecast product": tk.StringVar(value="forecast"),
             "Prediction time (UTC)": tk.StringVar(value=""),
-            "Status output": tk.StringVar(value="watershed_package/status"),
+            "Status output": tk.StringVar(value=str(workspace_default / "watershed_package/status")),
         }
         tk.Label(
             content,
@@ -1800,6 +1858,13 @@ class LauncherApp:
                     forecast_product=variables["Forecast product"].get(),
                     prediction_time=variables["Prediction time (UTC)"].get(),
                     status_output=variables["Status output"].get(),
+                    site_id=variables["Site ID"].get(), name=variables["Name"].get(),
+                    longitude=float(variables["Outlet longitude"].get())
+                    if variables["Outlet longitude"].get() else None,
+                    latitude=float(variables["Outlet latitude"].get())
+                    if variables["Outlet latitude"].get() else None,
+                    study_start=variables["Study start (UTC)"].get(),
+                    study_end=variables["Study end (UTC)"].get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1808,6 +1873,7 @@ class LauncherApp:
             self.start_workflow_command(command)
 
         actions = (
+            ("Create SiteSpec", "init-site"),
             ("Validate SiteSpec", "validate-site"),
             ("Discover Gauges", "reconnaissance"),
             ("Download Selected Discharge", "download-discharge"),
@@ -1818,6 +1884,7 @@ class LauncherApp:
             ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
+            ("RUN WEATHER/PET TO EXPORT", "run-weather"),
             ("Download Forecast Archive", "download-forecast"),
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 
 def _read_config(path: Path):
     import json
@@ -272,6 +274,12 @@ def _command_for_watershed_data(
             "ohqbuild", "data", "run", "--site-spec", site_spec,
             "--station-id", station_id, "--workspace", workspace,
             "--export-hydropinn",
+        ]
+    if action == "run-weather":
+        return [
+            "ohqbuild", "data", "run", "--site-spec", site_spec,
+            "--station-id", "", "--workspace", workspace,
+            "--no-discharge", "--export-hydropinn",
         ]
     if action == "download-forecast":
         if not forecast_url or not forecast_provider:
@@ -802,24 +810,48 @@ class DemWorkflowDock:
         form_widget = QWidget(scroll)
         form_layout = QVBoxLayout(form_widget)
         form = QFormLayout()
+        config_path = Path(self.config.text()).expanduser().resolve()
+        try:
+            project_config = _read_config(config_path) if config_path.is_file() else {}
+        except (OSError, ValueError, yaml.YAMLError):
+            project_config = {}
+        if not isinstance(project_config, dict):
+            project_config = {}
+        project_dir = config_path.parent
+        configured_site = _site_name(project_config)
+        site_id = Path(configured_site).name.replace(" ", "_").lower() or "watershed"
+        outlet = project_config.get("outlet", {})
+        if not isinstance(outlet, dict):
+            outlet = {}
+        data_config = project_config.get("watershed_data", {})
+        if not isinstance(data_config, dict):
+            data_config = {}
+        period = data_config.get("study_period", {})
+        if not isinstance(period, dict):
+            period = {}
+        workspace = project_dir / "outputs" / f"{site_id}_data"
         defaults = {
-            "SiteSpec": "sites/watershed.yaml", "Site ID": "", "Name": "",
-            "Longitude": "", "Latitude": "", "Start (UTC)": "",
-            "End (UTC)": "", "Product URL": "", "Provider": "",
+            "SiteSpec": str(project_dir / "sites" / f"{site_id}.yaml"),
+            "Site ID": site_id, "Name": Path(configured_site).name,
+            "Longitude": str(outlet.get("longitude") or ""),
+            "Latitude": str(outlet.get("latitude") or ""),
+            "Start (UTC)": str(period.get("start") or ""),
+            "End (UTC)": str(period.get("end") or ""), "Product URL": "", "Provider": "",
             "Product": "", "Product version": "unspecified",
-            "Cache": ".gistoohq-cache", "Catalog": "watershed_package/catalog.json",
-            "Package": "watershed_package", "Raw inclusion": "referenced",
-            "Reconnaissance output": "reconnaissance", "Gauge radius (km)": "50",
+            "Cache": str(workspace / "cache"),
+            "Catalog": str(workspace / "watershed_package/catalog.json"),
+            "Package": str(workspace / "watershed_package"), "Raw inclusion": "referenced",
+            "Reconnaissance output": str(workspace / "reconnaissance"), "Gauge radius (km)": "50",
             "Selected USGS station ID": "",
             "Weather variables": "PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN",
             "Native asset ID": "",
-            "QC output": "watershed_package/quality_control/temporal.json",
-            "Provenance output": "watershed_package/provenance/temporal.json",
-            "HydroPINN output": "outputs/hydropinn",
-            "All-data workspace": "watershed_data_run",
+            "QC output": str(workspace / "watershed_package/quality_control/temporal.json"),
+            "Provenance output": str(workspace / "watershed_package/provenance/temporal.json"),
+            "HydroPINN output": str(workspace / "hydropinn"),
+            "All-data workspace": str(workspace),
             "Forecast URL": "", "Forecast provider": "", "Forecast product": "forecast",
             "Prediction time (UTC)": "",
-            "Status output": "watershed_package/status",
+            "Status output": str(workspace / "watershed_package/status"),
         }
         fields = {label: QLineEdit(value) for label, value in defaults.items()}
         site_row = QHBoxLayout()
@@ -886,6 +918,7 @@ class DemWorkflowDock:
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
+            ("RUN WEATHER/PET TO EXPORT", "run-weather"),
             ("Download Forecast Archive", "download-forecast"),
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),

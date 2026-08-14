@@ -22,6 +22,21 @@ The generated source entries are policies, not provider selections. USGS gauge
 reconnaissance records all candidates, constraint results, scores, rejection
 reasons, and its decision before discharge acquisition.
 
+The graphical dialogs no longer assume that `sites/watershed.yaml` already
+exists. They derive an absolute SiteSpec path, output workspace, cache, catalog,
+and package paths from the loaded project configuration. Outlet and site values
+are copied from that configuration. Add an optional study period to the project
+configuration so the dialog can prefill its remaining required fields:
+
+```yaml
+watershed_data:
+  study_period:
+    start: 2024-01-01T00:00:00Z
+    end: 2024-12-31T23:00:00Z
+```
+
+Review the values and click **Create SiteSpec** before any download action.
+
 ## Discover discharge gauges before downloading
 
 ```bash
@@ -134,6 +149,14 @@ Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
 **RUN ALL DATA STEPS** button performs this orchestration in both graphical
 interfaces. Gauge selection remains explicit; this command never silently picks
 an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
+
+For a weather/PET-only workflow that needs no gauge reconnaissance or station ID,
+use **RUN WEATHER/PET TO EXPORT** in either graphical interface, or run:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --workspace outputs/hickey_run_weather --no-discharge --export-hydropinn
+```
 
 ## Archived forecasts
 
