@@ -22,6 +22,21 @@ The generated source entries are policies, not provider selections. USGS gauge
 reconnaissance records all candidates, constraint results, scores, rejection
 reasons, and its decision before discharge acquisition.
 
+The graphical dialogs no longer assume that `sites/watershed.yaml` already
+exists. They derive an absolute SiteSpec path, output workspace, cache, catalog,
+and package paths from the loaded project configuration. Outlet and site values
+are copied from that configuration. Add an optional study period to the project
+configuration so the dialog can prefill its remaining required fields:
+
+```yaml
+watershed_data:
+  study_period:
+    start: 2024-01-01T00:00:00Z
+    end: 2024-12-31T23:00:00Z
+```
+
+Review the values and click **Create SiteSpec** before any download action.
+
 ## Discover discharge gauges before downloading
 
 ```bash
@@ -135,6 +150,14 @@ Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
 interfaces. Gauge selection remains explicit; this command never silently picks
 an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
 
+For a weather/PET-only workflow that needs no gauge reconnaissance or station ID,
+use **RUN WEATHER/PET TO EXPORT** in either graphical interface, or run:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --workspace outputs/hickey_run_weather --no-discharge --export-hydropinn
+```
+
 ## Archived forecasts
 
 Forecast archives must be JSON records containing `issue_time`, `valid_time`,
@@ -165,6 +188,19 @@ This writes `status.json` and `status.md` with every asset ID, provider, product
 native/derived status, parent IDs, coverage, record counts, and object-store
 availability. Use **Inspect Data Status** in either graphical dialog to obtain the
 same report instead of copying opaque IDs directly from console output.
+
+Before a long run or export, validate the local workspace without contacting a
+provider:
+
+```bash
+ohqbuild data doctor --site-spec sites/hickey_run.yaml \
+  --catalog watershed_package/catalog.json --object-store .gistoohq-cache \
+  --package watershed_package
+```
+
+The doctor checks SiteSpec validity, catalog readability, every cataloged object
+digest, and the optional frozen package. **Check Data Workspace** exposes the same
+operation in both graphical dialogs.
 
 ## Acquire an explicitly declared product
 

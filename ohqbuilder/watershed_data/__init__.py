@@ -10,6 +10,7 @@ from .reconnaissance import run_reconnaissance
 from .usgs import acquire_observed_discharge
 from .temporal import harmonize_asset, temporal_qc
 from .status import build_data_status, write_data_status
+from .doctor import run_data_doctor
 from .schemas import (
     PackageManifest,
     ProvenanceActivity,
@@ -42,4 +43,5 @@ __all__ = [
     "temporal_qc",
     "build_data_status",
     "write_data_status",
+    "run_data_doctor",
 ]

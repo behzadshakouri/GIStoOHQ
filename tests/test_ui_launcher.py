@@ -41,6 +41,12 @@ from ohqbuilder.ui.launcher import (
 
 
 def test_standalone_launcher_builds_optional_watershed_data_commands():
+    init = watershed_data_command(
+        "init-site", site_spec="site.yaml", site_id="demo", name="Demo",
+        longitude=-77, latitude=39, study_start="2024-01-01T00:00:00Z",
+        study_end="2024-12-31T23:00:00Z",
+    )
+    assert init.argv[:5] == ("ohqbuild", "data", "init-site", "--site-spec", "site.yaml")
     discovery = watershed_data_command(
         "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25
     )
@@ -80,6 +86,11 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
         status_output="status",
     ).argv[-2:] == ("--output", "status")
+    weather_run = watershed_data_command(
+        "run-weather", site_spec="site.yaml", workspace="weather_run"
+    )
+    assert "--no-discharge" in weather_run.argv
+    assert "--export-hydropinn" in weather_run.argv
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():
@@ -90,6 +101,8 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert "Download Weather" in source
     assert 'dialog.geometry("760x700")' in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
+    assert "RUN WEATHER/PET TO EXPORT" in source
+    assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

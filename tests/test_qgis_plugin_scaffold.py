@@ -345,3 +345,8 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
         status_output="status",
     )[-2:] == ["--output", "status"]
+    weather_run = _command_for_watershed_data(
+        "run-weather", site_spec="site.yaml", workspace="weather_run",
+    )
+    assert "--no-discharge" in weather_run
+    assert "--export-hydropinn" in weather_run

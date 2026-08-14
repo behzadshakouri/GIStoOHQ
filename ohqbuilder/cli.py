@@ -73,6 +73,7 @@ from .watershed_data.temporal import harmonize_asset
 from .watershed_data.pipeline import run_watershed_data_pipeline
 from .watershed_data.forecast import acquire_forecast_archive, materialize_available_forecasts
 from .watershed_data.status import write_data_status
+from .watershed_data.doctor import run_data_doctor
 from .watershed_data.workflow import acquire_url, write_site_spec
 
 
@@ -184,6 +185,12 @@ def build_parser() -> argparse.ArgumentParser:
     data_status.add_argument("--catalog", required=True)
     data_status.add_argument("--object-store", default=None)
     data_status.add_argument("--output", required=True)
+    data_doctor = data_sub.add_parser("doctor", help="Validate a local watershed-data workspace.")
+    data_doctor.add_argument("--site-spec", required=True)
+    data_doctor.add_argument("--catalog", default=None)
+    data_doctor.add_argument("--object-store", default=None)
+    data_doctor.add_argument("--package", default=None)
+    data_doctor.add_argument("--json", action="store_true")
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1238,6 +1245,17 @@ def main(argv: list[str] | None = None) -> int:
                     catalog=args.catalog, object_store=args.object_store, output=args.output
                 )
                 print(f"Wrote watershed data status: {report}")
+            elif args.data_command == "doctor":
+                report = run_data_doctor(
+                    site_spec=args.site_spec, catalog=args.catalog,
+                    object_store=args.object_store, package=args.package,
+                )
+                if args.json:
+                    print(json.dumps(report, indent=2))
+                else:
+                    for check in report["checks"]:
+                        print(f"{'OK' if check['passed'] else 'FAIL'} {check['name']}: {check['message']}")
+                return 0 if report["passed"] else 2
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2
