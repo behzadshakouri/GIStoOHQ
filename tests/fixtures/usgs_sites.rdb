@@ -1,0 +1,6 @@
+# USGS site inventory fixture
+agency_cd	site_no	station_nm	site_tp_cd	dec_lat_va	dec_long_va	drain_area_va	begin_date	end_date	site_status
+5s	15s	50s	7s	16n	16n	10n	10d	10d	10s
+USGS	01649500	NORTHEAST BRANCH ANACOSTIA RIVER	ST	38.9500	-76.9700	72.8	1938-10-01	2026-01-01	active
+USGS	01651000	NORTHWEST BRANCH ANACOSTIA RIVER	ST	39.0000	-77.0200	49.4	2000-01-01	2026-01-01	active
+USGS	00000000	OLD INACTIVE STATION	ST	39.1000	-77.1000	10.0	1950-01-01	1960-01-01	inactive
