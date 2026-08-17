@@ -72,12 +72,16 @@ def test_power_acquisition_stores_exact_native_response(tmp_path):
 
 
 def test_pet_et_acquisition_declares_provider_semantics(tmp_path):
-    document = Path("tests/fixtures/nasa_power_hourly.json").read_text().replace(
-        '"PRECTOTCORR"', '"EVPTRNS"'
-    ).encode()
+    document = Path("tests/fixtures/nasa_power_daily.json").read_bytes()
+    calls = []
+    def opener(url, **kwargs):
+        calls.append(url)
+        return _Response(document)
     asset = acquire_pet_et(
         _spec(), cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
-        opener=lambda *args, **kwargs: _Response(document),
+        opener=opener,
     )
     assert asset["product"] == "pet-et"
     assert asset["variable_semantics"] == "provider_evapotranspiration_parameter"
+    assert asset["temporal_resolution"] == "daily"
+    assert urlsplit(calls[0]).path.endswith("/api/temporal/daily/point")

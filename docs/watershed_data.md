@@ -121,6 +121,10 @@ ohqbuild data download-pet --site-spec sites/hickey_run.yaml \
   --cache .gistoohq-cache --catalog watershed_package/catalog.json
 ```
 
+The NASA POWER weather acquisition retains hourly support. The provider's
+`EVPTRNS` product is requested from the daily point endpoint and remains daily;
+harmonization does not silently upsample it to the target model timestep.
+
 After harmonizing desired assets and freezing the generic package, create the
 thin consumer export:
 

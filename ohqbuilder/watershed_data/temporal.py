@@ -49,7 +49,8 @@ def _power_rows(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[st
     for code, values in parameters.items():
         for timestamp, raw in values.items():
             try:
-                parsed = datetime.strptime(timestamp, "%Y%m%d%H").replace(tzinfo=timezone.utc)
+                timestamp_format = "%Y%m%d%H" if len(timestamp) == 10 else "%Y%m%d"
+                parsed = datetime.strptime(timestamp, timestamp_format).replace(tzinfo=timezone.utc)
             except ValueError as exc:
                 raise WatershedDataError(f"invalid NASA POWER timestamp: {timestamp}") from exc
             rows.append({
@@ -114,17 +115,17 @@ def harmonize_asset(
     transformation = {"target_timezone": "UTC", "ordering": "timestamp_then_variable",
                       "missing_values": "preserved", "unit_conversion": "none"}
     output = catalog_store.register({
-        "provider": source["provider"], "product": "harmonized-hourly-observations",
+        "provider": source["provider"], "product": "harmonized-temporal-observations",
         "product_version": "1.0", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
-        "temporal_resolution": "hourly_native_support",
+        "temporal_resolution": source.get("temporal_resolution", "native_support"),
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-hourly-utc-table", transformation_version="1.0",
+        transformation_name="native-to-utc-table", transformation_version="1.1",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,

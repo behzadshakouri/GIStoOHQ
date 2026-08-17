@@ -53,3 +53,17 @@ def test_usgs_harmonization_preserves_qualifiers_and_native_units(tmp_path):
     assert "ft3/s" in text
     assert ",P\n" in text
     assert "2025-01-01T05:00:00Z" in text
+
+
+def test_daily_power_harmonization_preserves_daily_support(tmp_path):
+    store, catalog, native = _native_asset(
+        tmp_path, "nasa-power", "tests/fixtures/nasa_power_daily.json", "pet-et"
+    )
+    output = harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    with store.open(output["content_digest"]) as stream:
+        text = stream.read().decode()
+    assert "2025-01-01T00:00:00Z,EVPTRNS,1.2,mm/day" in text
+    assert output["product"] == "harmonized-temporal-observations"
