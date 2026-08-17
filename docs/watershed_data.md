@@ -36,6 +36,8 @@ watershed_data:
 ```
 
 Review the values and click **Create SiteSpec** before any download action.
+The two full-data buttons also pass `--init-if-missing`, so they create the
+SiteSpec automatically when all site, outlet, and study-period fields are filled.
 
 ## Discover discharge gauges before downloading
 

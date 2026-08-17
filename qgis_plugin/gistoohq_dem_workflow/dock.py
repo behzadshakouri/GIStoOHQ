@@ -270,16 +270,18 @@ def _command_for_watershed_data(
     if action == "run":
         if not station_id:
             raise QgisDockConfigError("Select an explicit USGS station ID before running all steps.")
+        bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
         return [
             "ohqbuild", "data", "run", "--site-spec", site_spec,
             "--station-id", station_id, "--workspace", workspace,
-            "--export-hydropinn",
+            "--export-hydropinn", *bootstrap,
         ]
     if action == "run-weather":
+        bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
         return [
             "ohqbuild", "data", "run", "--site-spec", site_spec,
             "--station-id", "", "--workspace", workspace,
-            "--no-discharge", "--export-hydropinn",
+            "--no-discharge", "--export-hydropinn", *bootstrap,
         ]
     if action == "download-forecast":
         if not forecast_url or not forecast_provider:
@@ -300,6 +302,20 @@ def _command_for_watershed_data(
         return ["ohqbuild", "data", "doctor", "--site-spec", site_spec,
                 "--catalog", catalog, "--object-store", cache, "--package", package]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
+
+
+def _data_bootstrap_args(site_id, name, longitude, latitude, start, end) -> list[str]:
+    if any(value in (None, "") for value in (site_id, longitude, latitude, start, end)):
+        raise QgisDockConfigError(
+            "One-button data runs require site ID, outlet coordinates, and study start/end."
+        )
+    args = [
+        "--init-if-missing", "--site-id", str(site_id), "--lon", str(longitude),
+        "--lat", str(latitude), "--start", str(start), "--end", str(end),
+    ]
+    if name:
+        args.extend(["--name", str(name)])
+    return args
 
 
 def _command_for_workflow(

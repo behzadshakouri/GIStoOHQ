@@ -74,9 +74,11 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         cache="cache", hydropinn_output="export",
     ).argv[-2:] == ("--output", "export")
     run = watershed_data_command(
-        "run", site_spec="site.yaml", station_id="01649500", workspace="run"
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run",
+        site_id="demo", longitude=-77, latitude=39,
+        study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
     )
-    assert run.argv[-3:] == ("--workspace", "run", "--export-hydropinn")
+    assert "--init-if-missing" in run.argv
     forecast = watershed_data_command(
         "download-forecast", site_spec="site.yaml", forecast_url="https://example.test/a.json",
         forecast_provider="example",
@@ -87,10 +89,13 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         status_output="status",
     ).argv[-2:] == ("--output", "status")
     weather_run = watershed_data_command(
-        "run-weather", site_spec="site.yaml", workspace="weather_run"
+        "run-weather", site_spec="site.yaml", workspace="weather_run",
+        site_id="demo", longitude=-77, latitude=39,
+        study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
     )
     assert "--no-discharge" in weather_run.argv
     assert "--export-hydropinn" in weather_run.argv
+    assert "--init-if-missing" in weather_run.argv
 
 
 def test_standalone_launcher_exposes_watershed_data_dialog():

@@ -10,6 +10,7 @@ from .package import freeze_package, validate_package
 from .schemas import SiteSpec, WatershedDataError
 from .temporal import harmonize_asset
 from .usgs import acquire_observed_discharge
+from .workflow import write_site_spec
 
 
 def run_watershed_data_pipeline(
@@ -24,13 +25,36 @@ def run_watershed_data_pipeline(
     discharge_acquirer: Callable = acquire_observed_discharge,
     weather_acquirer: Callable = acquire_historical_meteorology,
     pet_acquirer: Callable = acquire_pet_et,
+    init_if_missing: bool = False,
+    site_id: str = "",
+    name: str | None = None,
+    longitude: float | None = None,
+    latitude: float | None = None,
+    study_start: str = "",
+    study_end: str = "",
 ) -> dict[str, object]:
     """Run the optional native→QC→package workflow after explicit gauge selection."""
     if include_discharge and not station_id:
         raise WatershedDataError("an explicit station ID is required when discharge is enabled")
     if not any((include_discharge, include_weather, include_pet)):
         raise WatershedDataError("select at least one watershed-data product")
-    spec = SiteSpec.from_file(site_spec)
+    site_path = Path(site_spec).expanduser().resolve()
+    if not site_path.exists() and init_if_missing:
+        missing = [
+            label for label, value in {
+                "site_id": site_id, "longitude": longitude, "latitude": latitude,
+                "study_start": study_start, "study_end": study_end,
+            }.items() if value in (None, "")
+        ]
+        if missing:
+            raise WatershedDataError(
+                "cannot initialize missing SiteSpec; required values: " + ", ".join(missing)
+            )
+        write_site_spec(
+            site_path, site_id=site_id, name=name, longitude=float(longitude),
+            latitude=float(latitude), start=study_start, end=study_end,
+        )
+    spec = SiteSpec.from_file(site_path)
     root = Path(workspace).expanduser().resolve()
     cache = root / "cache"
     package = root / "watershed_package"
@@ -53,7 +77,7 @@ def run_watershed_data_pipeline(
             provenance_output=provenance_dir / f"{safe_id}.json",
         ))
     manifest_path = freeze_package(
-        site_spec=site_spec, catalog=catalog, output=package,
+        site_spec=site_path, catalog=catalog, output=package,
         include_raw="referenced", object_store=cache,
     )
     manifest = validate_package(package)

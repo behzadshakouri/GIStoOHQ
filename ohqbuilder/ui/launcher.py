@@ -393,21 +393,27 @@ def watershed_data_command(
     if action == "run":
         if not station_id:
             raise LauncherError("Select an explicit USGS station ID before running all data steps.")
+        bootstrap = _watershed_data_bootstrap_args(
+            site_id, name, longitude, latitude, study_start, study_end
+        )
         return WorkflowCommand(
             "Run Watershed Data Pipeline",
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
-                "--export-hydropinn",
+                "--export-hydropinn", *bootstrap,
             ),
         )
     if action == "run-weather":
+        bootstrap = _watershed_data_bootstrap_args(
+            site_id, name, longitude, latitude, study_start, study_end
+        )
         return WorkflowCommand(
             "Run Weather/PET to HydroPINN",
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", "", "--workspace", workspace,
-                "--no-discharge", "--export-hydropinn",
+                "--no-discharge", "--export-hydropinn", *bootstrap,
             ),
         )
     if action == "download-forecast":
@@ -437,6 +443,22 @@ def watershed_data_command(
             "--catalog", catalog, "--object-store", cache, "--package", package,
         ))
     raise LauncherError(f"Unknown watershed-data action: {action}")
+
+
+def _watershed_data_bootstrap_args(
+    site_id: str, name: str, longitude: float | None, latitude: float | None,
+    study_start: str, study_end: str,
+) -> tuple[str, ...]:
+    required = (site_id, longitude, latitude, study_start, study_end)
+    if any(value in (None, "") for value in required):
+        raise LauncherError(
+            "One-button data runs require site ID, outlet coordinates, and study start/end."
+        )
+    args = (
+        "--init-if-missing", "--site-id", site_id, "--lon", str(longitude),
+        "--lat", str(latitude), "--start", study_start, "--end", study_end,
+    )
+    return (*args, "--name", name) if name else args
 
 
 @dataclass(frozen=True)

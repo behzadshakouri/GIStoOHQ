@@ -336,7 +336,9 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     )[-2:] == ["--variables", "PRECTOTCORR,T2M"]
     assert _command_for_watershed_data(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
-    )[-3:] == ["--workspace", "run", "--export-hydropinn"]
+        site_id="demo", longitude=-77, latitude=39,
+        start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
+    ).count("--init-if-missing") == 1
     assert _command_for_watershed_data(
         "forecast-view", site_spec="site.yaml", asset_id="sha256:x",
         prediction_time="2025-01-01T00:00:00Z", cache="cache", catalog="catalog.json",
@@ -347,6 +349,8 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     )[-2:] == ["--output", "status"]
     weather_run = _command_for_watershed_data(
         "run-weather", site_spec="site.yaml", workspace="weather_run",
+        site_id="demo", longitude=-77, latitude=39,
+        start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
     )
     assert "--no-discharge" in weather_run
     assert "--export-hydropinn" in weather_run

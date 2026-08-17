@@ -63,3 +63,22 @@ def test_weather_pet_pipeline_does_not_require_station_id(tmp_path):
     )
     assert len(result["native_asset_ids"]) == 2
     assert Path(result["hydropinn_manifest"]).is_file()
+
+
+def test_weather_pipeline_bootstraps_missing_site_spec(tmp_path):
+    site = tmp_path / "sites" / "weather.yaml"
+    result = run_watershed_data_pipeline(
+        site_spec=site, station_id="", workspace=tmp_path / "bootstrap_run",
+        include_discharge=False, init_if_missing=True, site_id="weather", name="Weather",
+        longitude=-77, latitude=39, study_start="2025-01-01T00:00:00Z",
+        study_end="2025-01-02T00:00:00Z",
+        weather_acquirer=_fixture_acquirer(
+            "tests/fixtures/nasa_power_hourly.json", "nasa-power", "historical-meteorology"
+        ),
+        pet_acquirer=_fixture_acquirer(
+            "tests/fixtures/nasa_power_hourly.json", "nasa-power", "pet-et"
+        ),
+        export_hydropinn_profile=True,
+    )
+    assert site.is_file()
+    assert Path(result["hydropinn_manifest"]).is_file()

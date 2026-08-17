@@ -168,6 +168,13 @@ def build_parser() -> argparse.ArgumentParser:
     data_run.add_argument("--no-weather", action="store_true")
     data_run.add_argument("--no-pet", action="store_true")
     data_run.add_argument("--export-hydropinn", action="store_true")
+    data_run.add_argument("--init-if-missing", action="store_true")
+    data_run.add_argument("--site-id", default="")
+    data_run.add_argument("--name", default=None)
+    data_run.add_argument("--lon", type=float, default=None)
+    data_run.add_argument("--lat", type=float, default=None)
+    data_run.add_argument("--start", default="")
+    data_run.add_argument("--end", default="")
     forecast = data_sub.add_parser("download-forecast", help="Acquire a versioned forecast archive.")
     forecast.add_argument("--url", required=True)
     forecast.add_argument("--provider", required=True)
@@ -1226,6 +1233,9 @@ def main(argv: list[str] | None = None) -> int:
                     workspace=args.workspace, include_discharge=not args.no_discharge,
                     include_weather=not args.no_weather, include_pet=not args.no_pet,
                     export_hydropinn_profile=args.export_hydropinn,
+                    init_if_missing=args.init_if_missing, site_id=args.site_id,
+                    name=args.name, longitude=args.lon, latitude=args.lat,
+                    study_start=args.start, study_end=args.end,
                 )
                 print(f"Watershed data pipeline complete: {result['package_manifest']}")
             elif args.data_command == "download-forecast":
