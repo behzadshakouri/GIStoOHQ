@@ -58,6 +58,23 @@ from .soil_retrieval import (
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_bounds import WatershedBoundsError, resolve_materialization_bounds
+from .watershed_data.schemas import SiteSpec, WatershedDataError
+from .watershed_data.package import freeze_package, validate_package
+from .watershed_data.reconnaissance import run_reconnaissance
+from .watershed_data.usgs import acquire_observed_discharge
+from .watershed_data.hydropinn import export_hydropinn
+from .watershed_data.nasa_power import (
+    DEFAULT_PARAMETERS,
+    DEFAULT_PET_PARAMETERS,
+    acquire_historical_meteorology,
+    acquire_pet_et,
+)
+from .watershed_data.temporal import harmonize_asset
+from .watershed_data.pipeline import run_watershed_data_pipeline
+from .watershed_data.forecast import acquire_forecast_archive, materialize_available_forecasts
+from .watershed_data.status import write_data_status
+from .watershed_data.doctor import run_data_doctor
+from .watershed_data.workflow import acquire_url, write_site_spec
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +82,122 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ohqbuild", description="Build OpenHydroQual OHQ files from GIS outputs."
     )
     sub = p.add_subparsers(dest="command", required=True)
+
+    data = sub.add_parser(
+        "data",
+        help="Acquire and catalog optional provider-neutral watershed observations.",
+    )
+    data_sub = data.add_subparsers(dest="data_command", required=True)
+    data_init = data_sub.add_parser("init-site", help="Create a generic watershed SiteSpec.")
+    data_init.add_argument("--site-spec", required=True)
+    data_init.add_argument("--site-id", required=True)
+    data_init.add_argument("--name", default=None)
+    data_init.add_argument("--lon", required=True, type=float)
+    data_init.add_argument("--lat", required=True, type=float)
+    data_init.add_argument("--start", required=True)
+    data_init.add_argument("--end", required=True)
+    data_init.add_argument("--force", action="store_true")
+    data_validate = data_sub.add_parser("validate-site", help="Validate a watershed SiteSpec.")
+    data_validate.add_argument("--site-spec", required=True)
+    data_acquire = data_sub.add_parser(
+        "acquire-url",
+        help="Download one explicitly declared provider product into the immutable catalog.",
+    )
+    data_acquire.add_argument("--url", required=True)
+    data_acquire.add_argument("--provider", required=True)
+    data_acquire.add_argument("--product", required=True)
+    data_acquire.add_argument("--product-version", default="unspecified")
+    data_acquire.add_argument("--cache", required=True)
+    data_acquire.add_argument("--catalog", required=True)
+    data_freeze = data_sub.add_parser("freeze", help="Freeze a generic watershed package.")
+    data_freeze.add_argument("--site-spec", required=True)
+    data_freeze.add_argument("--catalog", required=True)
+    data_freeze.add_argument("--output", required=True)
+    data_freeze.add_argument(
+        "--include-raw", choices=("none", "referenced", "all"), default="referenced"
+    )
+    data_freeze.add_argument("--object-store", default=None)
+    data_freeze.add_argument("--redistributable", action="store_true")
+    data_package = data_sub.add_parser("validate-package", help="Validate a frozen package.")
+    data_package.add_argument("--package", required=True)
+    data_recon = data_sub.add_parser(
+        "reconnaissance", help="Discover and assess candidate USGS discharge gauges."
+    )
+    data_recon.add_argument("--site-spec", required=True)
+    data_recon.add_argument("--output", required=True)
+    data_recon.add_argument("--radius-km", type=float, default=50.0)
+    data_discharge = data_sub.add_parser(
+        "download-discharge", help="Download native USGS discharge for an explicit gauge."
+    )
+    data_discharge.add_argument("--site-spec", required=True)
+    data_discharge.add_argument("--station-id", required=True)
+    data_discharge.add_argument("--cache", required=True)
+    data_discharge.add_argument("--catalog", required=True)
+    data_weather = data_sub.add_parser(
+        "download-weather", help="Download native NASA POWER hourly meteorology."
+    )
+    data_weather.add_argument("--site-spec", required=True)
+    data_weather.add_argument("--cache", required=True)
+    data_weather.add_argument("--catalog", required=True)
+    data_weather.add_argument("--variables", default=",".join(DEFAULT_PARAMETERS))
+    data_harmonize = data_sub.add_parser(
+        "harmonize", help="Materialize a native temporal asset as a sorted UTC table with QC."
+    )
+    data_harmonize.add_argument("--asset-id", required=True)
+    data_harmonize.add_argument("--catalog", required=True)
+    data_harmonize.add_argument("--object-store", required=True)
+    data_harmonize.add_argument("--qc-output", required=True)
+    data_harmonize.add_argument("--provenance-output", required=True)
+    data_pet = data_sub.add_parser("download-pet", help="Download native NASA POWER ET/PET data.")
+    data_pet.add_argument("--site-spec", required=True)
+    data_pet.add_argument("--cache", required=True)
+    data_pet.add_argument("--catalog", required=True)
+    data_pet.add_argument("--variables", default=",".join(DEFAULT_PET_PARAMETERS))
+    data_export = data_sub.add_parser("export-hydropinn", help="Export a HydroPINN profile.")
+    data_export.add_argument("--package", required=True)
+    data_export.add_argument("--object-store", default=None)
+    data_export.add_argument("--output", required=True)
+    data_export.add_argument("--profile", default="water-balance-v1")
+    data_run = data_sub.add_parser(
+        "run", help="Download selected products, harmonize/QC, and freeze a package."
+    )
+    data_run.add_argument("--site-spec", required=True)
+    data_run.add_argument("--station-id", default="")
+    data_run.add_argument("--workspace", required=True)
+    data_run.add_argument("--no-discharge", action="store_true")
+    data_run.add_argument("--no-weather", action="store_true")
+    data_run.add_argument("--no-pet", action="store_true")
+    data_run.add_argument("--export-hydropinn", action="store_true")
+    data_run.add_argument("--init-if-missing", action="store_true")
+    data_run.add_argument("--site-id", default="")
+    data_run.add_argument("--name", default=None)
+    data_run.add_argument("--lon", type=float, default=None)
+    data_run.add_argument("--lat", type=float, default=None)
+    data_run.add_argument("--start", default="")
+    data_run.add_argument("--end", default="")
+    forecast = data_sub.add_parser("download-forecast", help="Acquire a versioned forecast archive.")
+    forecast.add_argument("--url", required=True)
+    forecast.add_argument("--provider", required=True)
+    forecast.add_argument("--product", required=True)
+    forecast.add_argument("--cache", required=True)
+    forecast.add_argument("--catalog", required=True)
+    forecast_view = data_sub.add_parser(
+        "forecast-view", help="Create a leakage-safe forecast view at a prediction time."
+    )
+    forecast_view.add_argument("--asset-id", required=True)
+    forecast_view.add_argument("--prediction-time", required=True)
+    forecast_view.add_argument("--object-store", required=True)
+    forecast_view.add_argument("--catalog", required=True)
+    data_status = data_sub.add_parser("status", help="List catalog assets and object availability.")
+    data_status.add_argument("--catalog", required=True)
+    data_status.add_argument("--object-store", default=None)
+    data_status.add_argument("--output", required=True)
+    data_doctor = data_sub.add_parser("doctor", help="Validate a local watershed-data workspace.")
+    data_doctor.add_argument("--site-spec", required=True)
+    data_doctor.add_argument("--catalog", default=None)
+    data_doctor.add_argument("--object-store", default=None)
+    data_doctor.add_argument("--package", default=None)
+    data_doctor.add_argument("--json", action="store_true")
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1017,6 +1150,126 @@ def _resolve_cli_path(config_path: str, value, default: str | None = None) -> st
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "data":
+        try:
+            if args.data_command == "init-site":
+                result = write_site_spec(
+                    args.site_spec,
+                    site_id=args.site_id,
+                    name=args.name,
+                    longitude=args.lon,
+                    latitude=args.lat,
+                    start=args.start,
+                    end=args.end,
+                    overwrite=args.force,
+                )
+                print(f"Wrote watershed SiteSpec: {result}")
+            elif args.data_command == "validate-site":
+                spec = SiteSpec.from_file(args.site_spec)
+                print(f"SiteSpec valid: {spec.site_id} ({spec.digest})")
+            elif args.data_command == "acquire-url":
+                asset = acquire_url(
+                    url=args.url,
+                    provider=args.provider,
+                    product=args.product,
+                    product_version=args.product_version,
+                    cache=args.cache,
+                    catalog=args.catalog,
+                )
+                print(f"Cataloged asset: {asset['asset_id']}")
+            elif args.data_command == "freeze":
+                manifest = freeze_package(
+                    site_spec=args.site_spec, catalog=args.catalog, output=args.output,
+                    include_raw=args.include_raw, object_store=args.object_store,
+                    redistributable=args.redistributable,
+                )
+                print(f"Froze watershed package: {manifest}")
+            elif args.data_command == "validate-package":
+                manifest = validate_package(args.package)
+                print(f"Watershed package valid: {manifest.package_id}")
+            elif args.data_command == "reconnaissance":
+                report = run_reconnaissance(
+                    args.site_spec, args.output, radius_km=args.radius_km
+                )
+                print(f"Gauge reconnaissance: {report['decision']} ({len(report['candidates'])} candidates)")
+            elif args.data_command == "download-discharge":
+                spec = SiteSpec.from_file(args.site_spec)
+                asset = acquire_observed_discharge(
+                    spec, args.station_id, cache=args.cache, catalog=args.catalog
+                )
+                print(
+                    f"Cataloged native discharge: {asset['asset_id']} "
+                    f"({asset['observation_count']} observations)"
+                )
+            elif args.data_command == "download-weather":
+                spec = SiteSpec.from_file(args.site_spec)
+                variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
+                asset = acquire_historical_meteorology(
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                )
+                print(f"Cataloged native meteorology: {asset['asset_id']} ({len(variables)} variables)")
+            elif args.data_command == "harmonize":
+                asset = harmonize_asset(
+                    asset_id=args.asset_id, catalog=args.catalog, object_store=args.object_store,
+                    qc_output=args.qc_output, provenance_output=args.provenance_output,
+                )
+                print(f"Cataloged harmonized temporal asset: {asset['asset_id']}")
+            elif args.data_command == "download-pet":
+                spec = SiteSpec.from_file(args.site_spec)
+                variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
+                asset = acquire_pet_et(
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                )
+                print(f"Cataloged native PET/ET: {asset['asset_id']}")
+            elif args.data_command == "export-hydropinn":
+                manifest = export_hydropinn(
+                    package=args.package, object_store=args.object_store,
+                    output=args.output, profile=args.profile,
+                )
+                print(f"Exported HydroPINN profile: {manifest}")
+            elif args.data_command == "run":
+                result = run_watershed_data_pipeline(
+                    site_spec=args.site_spec, station_id=args.station_id,
+                    workspace=args.workspace, include_discharge=not args.no_discharge,
+                    include_weather=not args.no_weather, include_pet=not args.no_pet,
+                    export_hydropinn_profile=args.export_hydropinn,
+                    init_if_missing=args.init_if_missing, site_id=args.site_id,
+                    name=args.name, longitude=args.lon, latitude=args.lat,
+                    study_start=args.start, study_end=args.end,
+                )
+                print(f"Watershed data pipeline complete: {result['package_manifest']}")
+            elif args.data_command == "download-forecast":
+                asset = acquire_forecast_archive(
+                    url=args.url, provider=args.provider, product=args.product,
+                    cache=args.cache, catalog=args.catalog,
+                )
+                print(f"Cataloged forecast archive: {asset['asset_id']}")
+            elif args.data_command == "forecast-view":
+                asset = materialize_available_forecasts(
+                    asset_id=args.asset_id, prediction_time=args.prediction_time,
+                    object_store=args.object_store, catalog=args.catalog,
+                )
+                print(f"Cataloged leakage-safe forecast view: {asset['asset_id']}")
+            elif args.data_command == "status":
+                report = write_data_status(
+                    catalog=args.catalog, object_store=args.object_store, output=args.output
+                )
+                print(f"Wrote watershed data status: {report}")
+            elif args.data_command == "doctor":
+                report = run_data_doctor(
+                    site_spec=args.site_spec, catalog=args.catalog,
+                    object_store=args.object_store, package=args.package,
+                )
+                if args.json:
+                    print(json.dumps(report, indent=2))
+                else:
+                    for check in report["checks"]:
+                        print(f"{'OK' if check['passed'] else 'FAIL'} {check['name']}: {check['message']}")
+                return 0 if report["passed"] else 2
+        except WatershedDataError as exc:
+            print(f"data {args.data_command} failed: {exc}")
+            return 2
+        return 0
     if args.command == "build":
         settings = BuilderSettings.from_args(args.root, args.site, args.config, args.project_name)
         input_status = _maybe_validate_inputs(settings, args.skip_input_check, args.no_schema)
