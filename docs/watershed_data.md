@@ -111,6 +111,9 @@ humidity, wind, radiation, temperature, and evapotranspiration variables; unknow
 variables remain unchanged and are not assigned guessed limits.
 For assets declaring hourly or daily native support, QC also identifies missing
 internal intervals independently for each variable. It does not fill those gaps.
+Known USGS and NASA POWER variables are checked against their declared native-unit
+contracts. Unknown variables are listed as not evaluated rather than assigned a
+guessed unit or converted silently.
 The provenance document records transformation name/version, parameters, software
 version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,

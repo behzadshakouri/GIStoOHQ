@@ -74,6 +74,7 @@ def _native_rows(raw: bytes, provider: str) -> tuple[list[dict[str, Any]], dict[
 
 def temporal_qc(
     rows: list[dict[str, Any]], asset_id: str, temporal_resolution: str | None = None,
+    units: dict[str, str] | None = None,
 ) -> list[QCResult]:
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
@@ -117,6 +118,22 @@ def temporal_qc(
                             "variable": variable, "after": previous.isoformat(),
                             "before": current.isoformat(), "missing_intervals": count,
                         })
+    expected_units = {
+        "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
+        "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
+        "ALLSKY_SFC_SW_DWN": {"kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
+    }
+    unit_mismatches = []
+    observed_variables = sorted({row["variable"] for row in rows})
+    for variable in observed_variables:
+        allowed = expected_units.get(variable)
+        if allowed is None:
+            continue
+        actual = (units or {}).get(variable, "unknown")
+        if actual not in allowed:
+            unit_mismatches.append({
+                "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
+            })
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
@@ -130,6 +147,16 @@ def temporal_qc(
             "temporal.physical_range", "error", not violations,
             f"{len(violations)} values outside declared physical ranges", (asset_id,),
             {"violation_count": len(violations), "violations": violations[:100]},
+        ),
+        QCResult(
+            "temporal.unit_compatibility", "error", not unit_mismatches,
+            f"{len(unit_mismatches)} known variables have incompatible native units",
+            (asset_id,), {
+                "mismatch_count": len(unit_mismatches), "mismatches": unit_mismatches,
+                "unknown_variables_not_evaluated": sorted(
+                    set(observed_variables) - set(expected_units)
+                ),
+            },
         ),
         QCResult(
             "temporal.expected_intervals", "warning",
@@ -159,7 +186,7 @@ def harmonize_asset(
         rows, units = _native_rows(stream.read(), source["provider"])
     if not rows:
         raise WatershedDataError("native temporal asset contains no observations")
-    qc = temporal_qc(rows, asset_id, source.get("temporal_resolution"))
+    qc = temporal_qc(rows, asset_id, source.get("temporal_resolution"), units)
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(("timestamp_utc", "variable", "value", "native_unit", "provider_qualifiers"))
