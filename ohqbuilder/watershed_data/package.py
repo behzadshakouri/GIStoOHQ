@@ -58,14 +58,21 @@ def freeze_package(
         canonical_json(catalog_data["assets"])
     ).hexdigest()
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
-    identity = {
-        "site_spec_digest": spec.digest, "catalog_digest": catalog_digest,
-        "included_asset_ids": asset_ids, "raw_inclusion": include_raw,
-    }
-    package_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     package_qc_status = _package_qc_status(destination)
+    sidecar_checksums = {
+        path.relative_to(destination).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for directory in ("quality_control", "provenance")
+        for path in sorted((destination / directory).rglob("*.json"))
+        if path.is_file()
+    }
+    identity = {
+        "site_spec_digest": spec.digest, "catalog_digest": catalog_digest,
+        "included_asset_ids": asset_ids, "raw_inclusion": include_raw,
+        "sidecar_checksums": sidecar_checksums,
+    }
+    package_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     (destination / "site_spec.yaml").write_text(
         yaml.safe_dump(spec.to_dict(), sort_keys=False), encoding="utf-8"
     )
@@ -85,6 +92,7 @@ def freeze_package(
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "raw_inclusion": include_raw, "self_contained": include_raw == "all",
         "redistributable": redistributable, "package_qc_status": package_qc_status,
+        "sidecar_checksums": sidecar_checksums,
     })
     _atomic_json(destination / "manifest.json", manifest.to_dict())
     return destination / "manifest.json"
@@ -111,10 +119,15 @@ def validate_package(path: str | Path) -> PackageManifest:
         "catalog_digest": manifest.catalog_digest,
         "included_asset_ids": manifest.included_asset_ids,
         "raw_inclusion": manifest.raw_inclusion,
+        "sidecar_checksums": manifest.sidecar_checksums,
     }
     expected_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     if manifest.package_id != expected_id:
         raise WatershedDataError("package identity does not match manifest contents")
+    for relative, expected_digest in manifest.sidecar_checksums.items():
+        sidecar = root / relative
+        if not sidecar.is_file() or hashlib.sha256(sidecar.read_bytes()).hexdigest() != expected_digest:
+            raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     if manifest.self_contained:
         for asset in catalog["assets"]:
             digest = asset["content_digest"]

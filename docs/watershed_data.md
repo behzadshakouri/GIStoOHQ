@@ -308,6 +308,9 @@ Use `--include-raw none` for metadata-only publication, `referenced` for a
 package that depends on the local object store, or `all --object-store CACHE`
 for a self-contained package. `--redistributable` is never inferred; users must
 set it only after checking every provider license.
+QC and provenance JSON sidecars are listed in the package manifest with SHA-256
+checksums and contribute to package identity. Validation rejects missing or changed
+sidecars, including edits made after a package was frozen.
 
 ## Graphical interfaces
 

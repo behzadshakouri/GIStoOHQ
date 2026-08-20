@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -219,6 +219,7 @@ class PackageManifest:
     self_contained: bool
     redistributable: bool
     package_qc_status: Literal["pass", "warning", "fail", "not_run"] = "not_run"
+    sidecar_checksums: dict[str, str] = field(default_factory=dict)
     schema_version: str = "1.0"
 
     @classmethod
@@ -234,6 +235,7 @@ class PackageManifest:
                 raw_inclusion=data["raw_inclusion"], self_contained=bool(data["self_contained"]),
                 redistributable=bool(data["redistributable"]),
                 package_qc_status=data.get("package_qc_status", "not_run"),
+                sidecar_checksums=dict(data.get("sidecar_checksums", {})),
                 schema_version=str(data.get("schema_version", "1.0")),
             )
         except (KeyError, TypeError) as exc:
@@ -244,6 +246,11 @@ class PackageManifest:
             raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
         if manifest.package_qc_status not in {"pass", "warning", "fail", "not_run"}:
             raise WatershedDataError("package_qc_status must be pass, warning, fail, or not_run")
+        for path, digest in manifest.sidecar_checksums.items():
+            if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+                raise WatershedDataError("sidecar checksum paths must be safe relative paths")
+            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise WatershedDataError("sidecar checksums must be lowercase SHA-256 values")
         return manifest
 
     def to_dict(self) -> dict[str, Any]:
@@ -256,4 +263,5 @@ class PackageManifest:
             "raw_inclusion": self.raw_inclusion, "self_contained": self.self_contained,
             "redistributable": self.redistributable,
             "package_qc_status": self.package_qc_status,
+            "sidecar_checksums": dict(sorted(self.sidecar_checksums.items())),
         }
