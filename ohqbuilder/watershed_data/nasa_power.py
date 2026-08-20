@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .catalog import AssetCatalog, ObjectStore
+from .network import download_bytes
 from .schemas import SiteSpec, WatershedDataError, canonical_request_key
 
 POWER_HOURLY_POINT = "https://power.larc.nasa.gov/api/temporal/hourly/point"
@@ -85,11 +86,9 @@ def acquire_historical_meteorology(
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
     url = endpoint + "?" + urllib.parse.urlencode(request_parameters)
-    try:
-        with opener(url, timeout=120.0) as response:
-            raw = response.read()
-    except OSError as exc:
-        raise WatershedDataError(f"NASA POWER meteorology acquisition failed: {exc}") from exc
+    raw, _ = download_bytes(
+        url, opener=opener, timeout=120.0, label="NASA POWER meteorology acquisition"
+    )
     summary = summarize_meteorology_json(raw, parameters, temporal=temporal)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
     return catalog_store.register({

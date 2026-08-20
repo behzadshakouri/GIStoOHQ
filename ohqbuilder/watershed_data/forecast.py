@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .catalog import AssetCatalog, ObjectStore
+from .network import download_bytes
 from .schemas import WatershedDataError, canonical_request_key
 
 
@@ -65,11 +66,12 @@ def acquire_forecast_archive(
     catalog_store = AssetCatalog(catalog)
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
+    raw, _ = download_bytes(
+        url, opener=opener, timeout=120.0, label="forecast archive acquisition"
+    )
     try:
-        with opener(url, timeout=120.0) as response:
-            raw = response.read()
         records = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise WatershedDataError(f"could not acquire forecast archive: {exc}") from exc
     if not isinstance(records, list):
         raise WatershedDataError("forecast archive must be a JSON array")

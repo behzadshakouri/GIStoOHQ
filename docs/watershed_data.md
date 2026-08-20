@@ -257,6 +257,11 @@ pipeline runs. Pass `--refresh`—or select **Refresh provider responses** in ei
 graphical dialog—to contact the provider deliberately and retain any new response
 as another immutable revision.
 
+When a provider call is necessary, GIStoOHQ retries a complete response up to
+three times with bounded exponential backoff. Only a fully read response is
+published to the immutable store, so a failed or truncated attempt cannot create
+a catalog asset.
+
 ## Freeze and validate a package
 
 ```bash

@@ -93,3 +93,22 @@ def test_acquisition_rejects_valid_json_without_requested_discharge(tmp_path):
             opener=lambda *args, **kwargs: _Response(body),
         )
     assert not (tmp_path / "catalog.json").exists()
+
+
+def test_acquisition_retries_transient_provider_failure(tmp_path, monkeypatch):
+    raw = Path("tests/fixtures/usgs_discharge.json").read_bytes()
+    calls = []
+
+    def opener(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("temporary outage")
+        return _Response(raw)
+
+    monkeypatch.setattr("ohqbuilder.watershed_data.network.time.sleep", lambda delay: None)
+    asset = acquire_observed_discharge(
+        _spec(), "01649500", cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        opener=opener,
+    )
+    assert len(calls) == 2
+    assert asset["observation_count"] == 2
