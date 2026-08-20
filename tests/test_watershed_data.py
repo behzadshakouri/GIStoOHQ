@@ -116,6 +116,21 @@ def test_catalog_reclaims_lock_left_by_dead_process(tmp_path):
     assert not lock.exists()
 
 
+def test_catalog_requires_complete_lineage_for_derived_assets(tmp_path):
+    asset = {
+        "provider": "example", "product": "derived", "content_digest": "b" * 64,
+        "size": 1, "media_type": "text/csv", "processing_status": "derived",
+        "parent_asset_ids": ["sha256:parent"],
+    }
+    with pytest.raises(WatershedDataError, match="transformation_name"):
+        AssetCatalog(tmp_path / "catalog.json").register(asset)
+    asset.update({
+        "transformation_name": "resample", "transformation_version": "1.0",
+        "transformation_parameters": {"timestep": "1h"},
+    })
+    assert AssetCatalog(tmp_path / "catalog.json").register(asset)["processing_status"] == "derived"
+
+
 def test_acquire_url_rejects_insecure_or_local_paths_before_network(tmp_path):
     with pytest.raises(WatershedDataError, match="HTTPS"):
         acquire_url(

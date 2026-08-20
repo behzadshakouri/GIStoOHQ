@@ -18,6 +18,8 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
         "provider": "example", "product": "derived", "processing_status": "derived",
         "parent_asset_ids": [native["asset_id"]], "content_digest": "f" * 64,
         "size": 1, "media_type": "text/csv",
+        "transformation_name": "test-transform", "transformation_version": "1.0",
+        "transformation_parameters": {},
     })
     report = build_data_status(catalog=catalog.path, object_store=store.root)
     assert report["asset_count"] == 2

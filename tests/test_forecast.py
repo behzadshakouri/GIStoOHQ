@@ -39,6 +39,7 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
         catalog=tmp_path / "catalog.json", object_store=tmp_path / "store",
     )
     assert view["record_count"] == 1
+    assert view["transformation_name"] == "prediction-time-availability-filter"
     with ObjectStore(tmp_path / "store").open(view["content_digest"]) as stream:
         rows = list(csv.DictReader(line.decode() for line in stream.readlines()))
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"

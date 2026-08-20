@@ -174,6 +174,22 @@ class AssetCatalog:
             raise WatershedDataError("asset product must be a non-empty string")
         if not isinstance(asset["media_type"], str) or "/" not in asset["media_type"]:
             raise WatershedDataError("asset media_type must be a valid type/subtype string")
+        if asset.get("processing_status") == "derived":
+            parents = asset.get("parent_asset_ids")
+            if not isinstance(parents, list) or not parents or any(
+                not isinstance(value, str) or not value for value in parents
+            ):
+                raise WatershedDataError("derived asset requires non-empty parent_asset_ids")
+            if not isinstance(asset.get("transformation_name"), str) or not asset[
+                "transformation_name"
+            ].strip():
+                raise WatershedDataError("derived asset requires transformation_name")
+            if not isinstance(asset.get("transformation_version"), str) or not asset[
+                "transformation_version"
+            ].strip():
+                raise WatershedDataError("derived asset requires transformation_version")
+            if not isinstance(asset.get("transformation_parameters"), dict):
+                raise WatershedDataError("derived asset requires transformation_parameters")
         record = dict(asset)
         identity = {
             key: record.get(key)

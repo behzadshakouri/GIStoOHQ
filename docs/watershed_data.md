@@ -110,6 +110,9 @@ chronology. The provenance document records transformation name/version,
 parameters, software version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
+Every derived catalog asset must declare non-empty parent asset IDs plus its
+transformation name, version, and parameters. Catalog publication rejects
+incomplete lineage instead of relying only on optional sidecar files.
 
 When a package is frozen, all `quality_control/*.json` reports are validated and
 aggregated into the manifest's `package_qc_status`: failed error rules produce

@@ -27,6 +27,8 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     )
     assert output["processing_status"] == "derived"
     assert output["parent_asset_ids"] == [native["asset_id"]]
+    assert output["transformation_name"] == "native-to-utc-table"
+    assert output["transformation_parameters"]["unit_conversion"] == "none"
     with store.open(output["content_digest"]) as stream:
         rows = list(csv.DictReader(io.TextIOWrapper(stream, encoding="utf-8")))
     assert rows[0]["timestamp_utc"] == "2025-01-01T00:00:00Z"

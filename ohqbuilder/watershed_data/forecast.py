@@ -116,4 +116,6 @@ def materialize_available_forecasts(
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
         "record_count": len(available), "leakage_rule": "issue_time <= prediction_time",
+        "transformation_name": "prediction-time-availability-filter",
+        "transformation_version": "1.0", "transformation_parameters": identity,
     })
