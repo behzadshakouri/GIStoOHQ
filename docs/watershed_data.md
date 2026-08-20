@@ -240,7 +240,9 @@ ohqbuild data doctor --site-spec sites/hickey_run.yaml \
 ```
 
 The doctor checks SiteSpec validity, catalog readability, every cataloged object
-digest, and the optional frozen package. **Check Data Workspace** exposes the same
+digest, and the optional frozen package. A structurally valid package still fails
+the doctor when its aggregated QC status is `fail`; warning and `not_run` states
+remain visible but do not masquerade as structural errors. **Check Data Workspace** exposes the same
 operation in both graphical dialogs.
 
 ## Acquire an explicitly declared product
