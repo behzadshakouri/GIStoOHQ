@@ -112,3 +112,4 @@ def test_acquisition_retries_transient_provider_failure(tmp_path, monkeypatch):
     )
     assert len(calls) == 2
     assert asset["observation_count"] == 2
+    assert asset["acquisition_attempts"] == 2

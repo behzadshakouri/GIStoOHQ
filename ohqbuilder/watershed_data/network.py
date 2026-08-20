@@ -14,7 +14,7 @@ def download_bytes(
     label: str,
     attempts: int = 3,
     base_delay: float = 0.25,
-) -> tuple[bytes, Any]:
+) -> tuple[bytes, Any, int]:
     """Read a complete provider response with bounded transient retries."""
     if attempts < 1:
         raise WatershedDataError("download attempts must be at least one")
@@ -22,7 +22,7 @@ def download_bytes(
     for attempt in range(1, attempts + 1):
         try:
             with opener(resource, timeout=timeout) as response:
-                return response.read(), getattr(response, "headers", None)
+                return response.read(), getattr(response, "headers", None), attempt
         except OSError as exc:
             failures.append(str(exc))
             if attempt < attempts:

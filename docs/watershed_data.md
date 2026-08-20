@@ -260,7 +260,8 @@ as another immutable revision.
 When a provider call is necessary, GIStoOHQ retries a complete response up to
 three times with bounded exponential backoff. Only a fully read response is
 published to the immutable store, so a failed or truncated attempt cannot create
-a catalog asset.
+a catalog asset. Successful native catalog records include `acquisition_attempts`,
+and the status report exposes that count for diagnosing unstable providers.
 
 ## Freeze and validate a package
 

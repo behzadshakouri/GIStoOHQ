@@ -36,6 +36,7 @@ def build_data_status(
             "parent_asset_ids": asset.get("parent_asset_ids", []),
             "temporal_coverage": asset.get("temporal_coverage"),
             "record_count": asset.get("record_count", asset.get("observation_count")),
+            "acquisition_attempts": asset.get("acquisition_attempts"),
         })
     return {
         "schema_name": "WatershedDataStatus",
@@ -68,8 +69,8 @@ def write_data_status(
         "# Watershed data status", "",
         f"Assets: **{report['asset_count']}** "
         f"({report['native_asset_count']} native, {report['derived_asset_count']} derived)", "",
-        "| Asset ID | Provider | Product | Status | Object available |",
-        "| --- | --- | --- | --- | --- |",
+        "| Asset ID | Provider | Product | Status | Attempts | Object available |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for asset in report["assets"]:
         available = "not checked" if asset["object_available"] is None else (
@@ -77,7 +78,7 @@ def write_data_status(
         )
         rows.append(
             f"| `{asset['asset_id']}` | {asset['provider']} | {asset['product']} | "
-            f"{asset['processing_status']} | {available} |"
+            f"{asset['processing_status']} | {asset['acquisition_attempts'] or '—'} | {available} |"
         )
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     markdown_path.write_text("\n".join(rows) + "\n", encoding="utf-8")

@@ -86,7 +86,7 @@ def acquire_historical_meteorology(
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
     url = endpoint + "?" + urllib.parse.urlencode(request_parameters)
-    raw, _ = download_bytes(
+    raw, _, acquisition_attempts = download_bytes(
         url, opener=opener, timeout=120.0, label="NASA POWER meteorology acquisition"
     )
     summary = summarize_meteorology_json(raw, parameters, temporal=temporal)
@@ -98,7 +98,8 @@ def acquire_historical_meteorology(
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json", "source_url": url,
         "processing_status": "native", "longitude": spec.longitude,
-        "latitude": spec.latitude, "variable_semantics": semantics, **summary,
+        "latitude": spec.latitude, "variable_semantics": semantics,
+        "acquisition_attempts": acquisition_attempts, **summary,
     })
 
 

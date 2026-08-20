@@ -66,7 +66,7 @@ def acquire_forecast_archive(
     catalog_store = AssetCatalog(catalog)
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
-    raw, _ = download_bytes(
+    raw, _, acquisition_attempts = download_bytes(
         url, opener=opener, timeout=120.0, label="forecast archive acquisition"
     )
     try:
@@ -84,7 +84,7 @@ def acquire_forecast_archive(
         "size": stored.size, "media_type": "application/json", "source_url": url,
         "processing_status": "native", "temporal_dimensions": [
             "issue_time", "valid_time", "lead_time_hours", "member",
-        ], **summary,
+        ], "acquisition_attempts": acquisition_attempts, **summary,
     })
 
 

@@ -99,7 +99,7 @@ def discover_gauges(
     opener: Callable[..., object] = urllib.request.urlopen,
 ) -> tuple[str, list[GaugeCandidate]]:
     url = build_site_query(spec, radius_km)
-    raw, _ = download_bytes(
+    raw, _, _ = download_bytes(
         url, opener=opener, timeout=60.0, label="USGS gauge discovery"
     )
     text = raw.decode("utf-8")
@@ -179,7 +179,7 @@ def acquire_observed_discharge(
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
     url = endpoint + "?" + urllib.parse.urlencode(parameters)
-    raw, _ = download_bytes(
+    raw, _, acquisition_attempts = download_bytes(
         url, opener=opener, timeout=120.0, label="USGS discharge acquisition"
     )
     summary = summarize_discharge_json(raw, station_id)
@@ -190,5 +190,5 @@ def acquire_observed_discharge(
         "request_parameters": parameters, "request_key": request_key,
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json", "source_url": url,
-        "processing_status": "native", **summary,
+        "processing_status": "native", "acquisition_attempts": acquisition_attempts, **summary,
     })

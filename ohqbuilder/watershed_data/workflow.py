@@ -69,7 +69,7 @@ def acquire_url(
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
     request = urllib.request.Request(url, headers={"User-Agent": "GIStoOHQ/0.1"})
-    raw, headers = download_bytes(
+    raw, headers, acquisition_attempts = download_bytes(
         request, opener=urllib.request.urlopen, timeout=120.0, label=f"acquisition of {url}"
     )
     stored = ObjectStore(cache).put(io.BytesIO(raw))
@@ -87,5 +87,6 @@ def acquire_url(
             "media_type": media_type,
             "source_url": url,
             "processing_status": "native",
+            "acquisition_attempts": acquisition_attempts,
         }
     )
