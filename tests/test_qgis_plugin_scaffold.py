@@ -338,6 +338,12 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "download-weather", site_spec="site.yaml", cache="cache",
         catalog="package/catalog.json", refresh=True,
     )
+    gc = _command_for_watershed_data(
+        "gc", site_spec="site.yaml", cache="cache", catalog="catalog.json",
+        status_output="status",
+    )
+    assert gc[2] == "gc"
+    assert "--delete" not in gc
     assert _command_for_watershed_data(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,

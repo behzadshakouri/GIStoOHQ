@@ -71,6 +71,7 @@ from .watershed_data.nasa_power import (
 )
 from .watershed_data.temporal import harmonize_asset
 from .watershed_data.pipeline import run_watershed_data_pipeline
+from .watershed_data.maintenance import collect_unreferenced_objects
 from .watershed_data.forecast import acquire_forecast_archive, materialize_available_forecasts
 from .watershed_data.status import write_data_status
 from .watershed_data.doctor import run_data_doctor
@@ -208,6 +209,13 @@ def build_parser() -> argparse.ArgumentParser:
     data_doctor.add_argument("--object-store", default=None)
     data_doctor.add_argument("--package", default=None)
     data_doctor.add_argument("--json", action="store_true")
+    data_gc = data_sub.add_parser(
+        "gc", help="Report unreferenced cached objects; delete only with --delete."
+    )
+    data_gc.add_argument("--object-store", required=True)
+    data_gc.add_argument("--catalog", action="append", required=True)
+    data_gc.add_argument("--output", required=True)
+    data_gc.add_argument("--delete", action="store_true")
 
     b = sub.add_parser("build", help="Build an OHQ file.")
     b.add_argument("--root", required=True)
@@ -1284,6 +1292,15 @@ def main(argv: list[str] | None = None) -> int:
                     for check in report["checks"]:
                         print(f"{'OK' if check['passed'] else 'FAIL'} {check['name']}: {check['message']}")
                 return 0 if report["passed"] else 2
+            elif args.data_command == "gc":
+                report = collect_unreferenced_objects(
+                    object_store=args.object_store, catalogs=args.catalog,
+                    output=args.output, delete=args.delete,
+                )
+                print(
+                    f"Unreferenced cache objects: {report['candidate_count']} "
+                    f"({report['candidate_bytes']} bytes); removed {report['removed_count']}"
+                )
         except WatershedDataError as exc:
             print(f"data {args.data_command} failed: {exc}")
             return 2

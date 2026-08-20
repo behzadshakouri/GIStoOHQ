@@ -263,6 +263,19 @@ published to the immutable store, so a failed or truncated attempt cannot create
 a catalog asset. Successful native catalog records include `acquisition_attempts`,
 and the status report exposes that count for diagnosing unstable providers.
 
+Cache cleanup is deliberately dry-run by default. Supply every catalog that must
+retain its objects, review the JSON report, and only then repeat with `--delete`:
+
+```bash
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json --delete
+```
+
+Objects referenced by any supplied catalog are never candidates. Destructive
+cleanup is therefore explicit and auditable rather than automatic.
+
 ## Freeze and validate a package
 
 ```bash

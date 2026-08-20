@@ -315,6 +315,9 @@ def _command_for_watershed_data(
     if action == "doctor":
         return ["ohqbuild", "data", "doctor", "--site-spec", site_spec,
                 "--catalog", catalog, "--object-store", cache, "--package", package]
+    if action == "gc":
+        return ["ohqbuild", "data", "gc", "--object-store", cache,
+                "--catalog", catalog, "--output", str(Path(status_output) / "cache-gc.json")]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
@@ -972,6 +975,7 @@ class DemWorkflowDock:
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
+            ("Inspect Cache Garbage", "gc"),
         )
         for index, (label, action) in enumerate(actions):
             button = QPushButton(label)

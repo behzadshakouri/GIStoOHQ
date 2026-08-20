@@ -459,6 +459,11 @@ def watershed_data_command(
             "ohqbuild", "data", "doctor", "--site-spec", site_spec,
             "--catalog", catalog, "--object-store", cache, "--package", package,
         ))
+    if action == "gc":
+        return WorkflowCommand("Inspect Cache Garbage", (
+            "ohqbuild", "data", "gc", "--object-store", cache,
+            "--catalog", catalog, "--output", str(Path(status_output) / "cache-gc.json"),
+        ))
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
 
@@ -1950,6 +1955,7 @@ class LauncherApp:
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
+            ("Inspect Cache Garbage", "gc"),
         )
         row = len(variables) + 2
         action_frame = tk.LabelFrame(content, text="Actions")
