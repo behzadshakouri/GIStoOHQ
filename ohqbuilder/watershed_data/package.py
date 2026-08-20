@@ -12,6 +12,37 @@ from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
 
 
+def _package_qc_status(destination: Path) -> str:
+    """Aggregate stable QC reports already materialized in the package tree."""
+    reports = sorted((destination / "quality_control").glob("*.json"))
+    if not reports:
+        return "not_run"
+    failed_severities: set[str] = set()
+    for report in reports:
+        try:
+            document = json.loads(report.read_text(encoding="utf-8"))
+            if document.get("schema_name") != "QCReport":
+                raise ValueError("schema_name is not QCReport")
+            results = document["results"]
+            if not isinstance(results, list):
+                raise TypeError("results is not a list")
+            for result in results:
+                severity = result["severity"]
+                if severity not in {"error", "warning", "information"}:
+                    raise ValueError(f"invalid severity {severity!r}")
+                if not isinstance(result["passed"], bool):
+                    raise TypeError("passed is not boolean")
+                if not result["passed"]:
+                    failed_severities.add(severity)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise WatershedDataError(f"invalid package QC report {report}: {exc}") from exc
+    if "error" in failed_severities:
+        return "fail"
+    if "warning" in failed_severities:
+        return "warning"
+    return "pass"
+
+
 def freeze_package(
     *, site_spec: str | Path, catalog: str | Path, output: str | Path,
     include_raw: str = "referenced", object_store: str | Path | None = None,
@@ -34,6 +65,7 @@ def freeze_package(
     package_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    package_qc_status = _package_qc_status(destination)
     (destination / "site_spec.yaml").write_text(
         yaml.safe_dump(spec.to_dict(), sort_keys=False), encoding="utf-8"
     )
@@ -52,7 +84,7 @@ def freeze_package(
         "producer": "GIStoOHQ", "producer_version": producer_version,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "raw_inclusion": include_raw, "self_contained": include_raw == "all",
-        "redistributable": redistributable, "package_qc_status": "not_run",
+        "redistributable": redistributable, "package_qc_status": package_qc_status,
     })
     _atomic_json(destination / "manifest.json", manifest.to_dict())
     return destination / "manifest.json"

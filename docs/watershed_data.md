@@ -111,6 +111,11 @@ parameters, software version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
 
+When a package is frozen, all `quality_control/*.json` reports are validated and
+aggregated into the manifest's `package_qc_status`: failed error rules produce
+`fail`, failed warning rules produce `warning`, otherwise executed QC produces
+`pass`. A package without QC reports remains explicitly `not_run`.
+
 ## PET/ET and HydroPINN export
 
 Download the provider's native evapotranspiration parameter separately so its

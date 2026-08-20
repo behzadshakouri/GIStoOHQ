@@ -242,6 +242,8 @@ class PackageManifest:
             raise WatershedDataError("raw_inclusion must be none, referenced, or all")
         if manifest.self_contained != (manifest.raw_inclusion == "all"):
             raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
+        if manifest.package_qc_status not in {"pass", "warning", "fail", "not_run"}:
+            raise WatershedDataError("package_qc_status must be pass, warning, fail, or not_run")
         return manifest
 
     def to_dict(self) -> dict[str, Any]:

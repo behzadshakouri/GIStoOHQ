@@ -52,6 +52,7 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     assert Path(result["package_manifest"]).is_file()
     assert Path(result["hydropinn_manifest"]).is_file()
     assert validate_package(tmp_path / "run" / "watershed_package").package_id == result["package_id"]
+    assert validate_package(tmp_path / "run" / "watershed_package").package_qc_status == "warning"
     assert len(list((tmp_path / "run" / "watershed_package" / "quality_control").glob("*.json"))) == 3
 
 

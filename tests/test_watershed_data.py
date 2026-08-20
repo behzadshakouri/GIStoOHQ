@@ -118,6 +118,30 @@ def test_qc_and_provenance_contracts_reject_invalid_values():
         )
 
 
+def test_package_manifest_aggregates_qc_results(tmp_path):
+    site = tmp_path / "site.yaml"
+    site.write_text(
+        "site_id: qc\ngeometry:\n  outlet:\n    longitude: -77\n    latitude: 39\n"
+        "study_period:\n  start: '2025-01-01T00:00:00Z'\n"
+        "  end: '2025-01-02T00:00:00Z'\n"
+    )
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    catalog.register({
+        "provider": "example", "product": "data", "content_digest": "0" * 64,
+        "size": 0, "media_type": "application/json",
+    })
+    output = tmp_path / "package"
+    qc = output / "quality_control" / "temporal.json"
+    qc.parent.mkdir(parents=True)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0", "results": [
+            {"rule_id": "temporal.missing_values", "severity": "warning", "passed": False}
+        ],
+    }))
+    freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert validate_package(output).package_qc_status == "warning"
+
+
 def test_freeze_and_validate_self_contained_package(tmp_path):
     site = tmp_path / "site.yaml"
     assert main([
