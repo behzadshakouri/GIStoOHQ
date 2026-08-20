@@ -255,6 +255,9 @@ Catalog registration also rejects malformed digests, negative sizes, empty
 provider/product names, and invalid media types before publishing the catalog.
 Catalog locks record their owning process; a lock abandoned by a terminated local
 process is reclaimed safely, while a live owner's lock is never removed.
+Every catalog read recomputes the digest over its asset array and rejects modified
+metadata, so package validation and cached-request reuse cannot trust a catalog
+whose contents were changed outside the atomic catalog writer.
 
 Acquisition commands reuse the newest locally available asset with the same
 canonical request key, avoiding unnecessary provider calls during repeated UI or

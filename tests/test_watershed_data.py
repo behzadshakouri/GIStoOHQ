@@ -131,6 +131,19 @@ def test_catalog_requires_complete_lineage_for_derived_assets(tmp_path):
     assert AssetCatalog(tmp_path / "catalog.json").register(asset)["processing_status"] == "derived"
 
 
+def test_catalog_read_rejects_metadata_tampering(tmp_path):
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    catalog.register({
+        "provider": "example", "product": "weather", "content_digest": "c" * 64,
+        "size": 1, "media_type": "application/json",
+    })
+    document = json.loads(catalog.path.read_text())
+    document["assets"][0]["product"] = "tampered"
+    catalog.path.write_text(json.dumps(document))
+    with pytest.raises(WatershedDataError, match="digest does not match"):
+        catalog.read()
+
+
 def test_acquire_url_rejects_insecure_or_local_paths_before_network(tmp_path):
     with pytest.raises(WatershedDataError, match="HTTPS"):
         acquire_url(

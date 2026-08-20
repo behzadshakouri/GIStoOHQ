@@ -153,6 +153,11 @@ class AssetCatalog:
             raise WatershedDataError(f"could not read asset catalog: {exc}") from exc
         if not isinstance(data.get("assets"), list):
             raise WatershedDataError("asset catalog assets must be an array")
+        if data.get("schema_name") != "AssetCatalog" or data.get("schema_version") != "1.0":
+            raise WatershedDataError("asset catalog schema must be AssetCatalog 1.0")
+        expected_digest = hashlib.sha256(canonical_json(data["assets"])).hexdigest()
+        if data.get("catalog_digest") != expected_digest:
+            raise WatershedDataError("asset catalog digest does not match its assets")
         return data
 
     def register(self, asset: dict[str, Any]) -> dict[str, Any]:
