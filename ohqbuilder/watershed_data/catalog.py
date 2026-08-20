@@ -48,9 +48,34 @@ class _CatalogLock:
                 os.write(self.descriptor, str(os.getpid()).encode("ascii"))
                 return self
             except FileExistsError:
+                if self._reclaim_dead_owner():
+                    continue
                 if time.monotonic() >= deadline:
                     raise WatershedDataError(f"timed out waiting for catalog lock: {self.path}")
                 time.sleep(0.05)
+
+    def _reclaim_dead_owner(self) -> bool:
+        """Remove an orphaned local lock without unlinking a replacement lock."""
+        try:
+            before = self.path.stat()
+            owner = int(self.path.read_text(encoding="ascii").strip())
+        except (FileNotFoundError, OSError, UnicodeError, ValueError):
+            return False
+        try:
+            os.kill(owner, 0)
+            return False
+        except PermissionError:
+            return False
+        except ProcessLookupError:
+            pass
+        try:
+            current = self.path.stat()
+            if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                return False
+            self.path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.descriptor is not None:

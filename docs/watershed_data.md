@@ -250,6 +250,8 @@ response. If bytes at a digest path have been corrupted, acquisition stops rathe
 than silently replacing an object that was previously published as immutable.
 Catalog registration also rejects malformed digests, negative sizes, empty
 provider/product names, and invalid media types before publishing the catalog.
+Catalog locks record their owning process; a lock abandoned by a terminated local
+process is reclaimed safely, while a live owner's lock is never removed.
 
 Acquisition commands reuse the newest locally available asset with the same
 canonical request key, avoiding unnecessary provider calls during repeated UI or

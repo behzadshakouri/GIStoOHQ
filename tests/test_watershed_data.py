@@ -103,6 +103,19 @@ def test_catalog_lock_prevents_lost_concurrent_registrations(tmp_path):
     assert len(catalog.read()["assets"]) == 8
 
 
+def test_catalog_reclaims_lock_left_by_dead_process(tmp_path):
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    lock = catalog.path.with_suffix(".json.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("2147483647", encoding="ascii")
+    asset = catalog.register({
+        "provider": "example", "product": "weather", "content_digest": "a" * 64,
+        "size": 0, "media_type": "application/json",
+    })
+    assert asset["asset_id"].startswith("sha256:")
+    assert not lock.exists()
+
+
 def test_acquire_url_rejects_insecure_or_local_paths_before_network(tmp_path):
     with pytest.raises(WatershedDataError, match="HTTPS"):
         acquire_url(
