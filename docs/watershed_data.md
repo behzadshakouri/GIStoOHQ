@@ -108,8 +108,11 @@ The derived CSV is a new catalog asset linked to its native parent. The QC repor
 uses stable rules for duplicate timestamp-variable records, missing values, and
 chronology. It also applies declared physical bounds to known discharge, rainfall,
 humidity, wind, radiation, temperature, and evapotranspiration variables; unknown
-variables remain unchanged and are not assigned guessed limits. The provenance document records transformation name/version,
-parameters, software version, timestamps, parent asset, and output asset. This
+variables remain unchanged and are not assigned guessed limits.
+For assets declaring hourly or daily native support, QC also identifies missing
+internal intervals independently for each variable. It does not fill those gaps.
+The provenance document records transformation name/version, parameters, software
+version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
 Every derived catalog asset must declare non-empty parent asset IDs plus its
