@@ -126,6 +126,7 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.geometry("760x700")' in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
+    assert "Use Reconnaissance Selection" in source
     assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
 
 

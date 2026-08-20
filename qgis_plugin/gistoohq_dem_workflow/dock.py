@@ -100,6 +100,27 @@ class QgisDockConfigError(RuntimeError):
     """Raised when the QGIS dock cannot build a backend command from config."""
 
 
+def _selected_station_from_reconnaissance(path: str) -> str:
+    import json
+
+    candidate = Path(path).expanduser().resolve()
+    report_path = candidate / "report.json" if candidate.is_dir() else candidate
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise QgisDockConfigError(f"Could not read reconnaissance report: {exc}") from exc
+    if report.get("schema_name") != "ReconnaissanceReport":
+        raise QgisDockConfigError("Selected gauge requires a ReconnaissanceReport.")
+    if report.get("decision") != "selected" or not report.get("selected_station_id"):
+        raise QgisDockConfigError(
+            f"Reconnaissance has no unambiguous selection: {report.get('decision', 'unknown')}"
+        )
+    station = str(report["selected_station_id"])
+    if not station.isdigit():
+        raise QgisDockConfigError("Selected USGS station ID must contain digits only.")
+    return station
+
+
 def _as_mapping(value, name: str) -> dict:
     if value is None:
         return {}
@@ -924,6 +945,17 @@ class DemWorkflowDock:
         buttons = QGridLayout(buttons_widget)
 
         def run(action: str) -> None:
+            if action == "use-recon-selection":
+                try:
+                    station = _selected_station_from_reconnaissance(
+                        fields["Reconnaissance output"].text()
+                    )
+                except QgisDockConfigError as exc:
+                    self.log.append(str(exc))
+                    return
+                fields["Selected USGS station ID"].setText(station)
+                self.log.append(f"Selected USGS station from reconnaissance: {station}")
+                return
             try:
                 longitude = float(fields["Longitude"].text()) if fields["Longitude"].text() else None
                 latitude = float(fields["Latitude"].text()) if fields["Latitude"].text() else None
@@ -963,6 +995,7 @@ class DemWorkflowDock:
             ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
             ("Download Declared Product", "acquire-url"),
             ("Discover Discharge Gauges", "reconnaissance"),
+            ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Historical Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),

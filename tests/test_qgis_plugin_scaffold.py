@@ -301,6 +301,7 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
     assert 'tabs.insertTab(2, data_tab, "Data")' in dock
     assert "Open Watershed Data…" in dock
+    assert "Use Reconnaissance Selection" in dock
     assert "Download Declared Product" in dock
     assert "QScrollArea" in dock
     assert "buttons.addWidget(button, index // 3, index % 3)" in dock

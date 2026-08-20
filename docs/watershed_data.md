@@ -75,7 +75,9 @@ Both graphical front ends now expose this workflow:
 - open the QGIS plugin's **Data** tab and choose **Open Watershed Data…**.
 
 In either interface, run **Discover Gauges**, review `report.md`, enter the
-chosen station ID, and select **Download Selected Discharge**. These buttons run
+chosen station ID, or use **Use Reconnaissance Selection** when the report contains
+one unambiguous acceptable candidate, and select **Download Selected Discharge**.
+Ambiguous or rejected results are never copied automatically. These buttons run
 the same backend commands documented above and do not modify Full Run to OHQ.
 
 ## Download native historical weather

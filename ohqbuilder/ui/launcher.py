@@ -19,6 +19,9 @@ from typing import Any, Literal
 
 import yaml
 
+from ohqbuilder.watershed_data.reconnaissance import selected_station_from_report
+from ohqbuilder.watershed_data.schemas import WatershedDataError
+
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 MAP_TILE_SIZE = 256
 OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
@@ -1903,6 +1906,17 @@ class LauncherApp:
         ).grid(row=len(variables) + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
+            if action == "use-recon-selection":
+                try:
+                    station = selected_station_from_report(
+                        variables["Reconnaissance output"].get()
+                    )
+                except WatershedDataError as exc:
+                    self.messages.put(f"ERROR: {exc}\n")
+                    return
+                variables["Selected USGS station ID"].set(station)
+                self.messages.put(f"Selected USGS station from reconnaissance: {station}\n")
+                return
             try:
                 command = watershed_data_command(
                     action,
@@ -1942,6 +1956,7 @@ class LauncherApp:
             ("Create SiteSpec", "init-site"),
             ("Validate SiteSpec", "validate-site"),
             ("Discover Gauges", "reconnaissance"),
+            ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
