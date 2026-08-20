@@ -19,7 +19,7 @@ def _fixture_acquirer(fixture, provider, product):
     return acquire
 
 
-def _fixture_forecast_acquirer(*, url, provider, product, cache, catalog):
+def _fixture_forecast_acquirer(*, url, provider, product, cache, catalog, **kwargs):
     raw = Path("tests/fixtures/forecast_archive.json").read_bytes()
     stored = ObjectStore(cache).put(io.BytesIO(raw))
     return AssetCatalog(catalog).register({

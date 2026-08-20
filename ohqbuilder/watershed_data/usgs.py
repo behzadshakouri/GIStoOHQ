@@ -171,8 +171,13 @@ def acquire_observed_discharge(
     cache: str | Path,
     catalog: str | Path,
     opener: Callable[..., object] = urllib.request.urlopen,
+    refresh: bool = False,
 ) -> dict[str, object]:
     endpoint, parameters = build_discharge_query(spec, station_id)
+    request_key = canonical_request_key("usgs", endpoint, parameters, "nwis-iv-waterml-1.1")
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     url = endpoint + "?" + urllib.parse.urlencode(parameters)
     try:
         with opener(url, timeout=120.0) as response:
@@ -181,8 +186,7 @@ def acquire_observed_discharge(
         raise WatershedDataError(f"USGS discharge acquisition failed: {exc}") from exc
     summary = summarize_discharge_json(raw, station_id)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
-    request_key = canonical_request_key("usgs", endpoint, parameters, "nwis-iv-waterml-1.1")
-    return AssetCatalog(catalog).register({
+    return catalog_store.register({
         "provider": "usgs", "product": "observed-discharge",
         "product_version": "nwis-iv-waterml-1.1", "station_id": station_id,
         "request_parameters": parameters, "request_key": request_key,

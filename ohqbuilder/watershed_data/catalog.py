@@ -169,3 +169,21 @@ class AssetCatalog:
             data["catalog_digest"] = hashlib.sha256(canonical_json(data["assets"])).hexdigest()
             _atomic_json(self.path, data)
         return record
+
+    def cached_request(self, request_key: str, object_store: str | Path) -> dict[str, Any] | None:
+        """Return the newest locally available revision for a canonical request."""
+        matches = [
+            asset for asset in self.read()["assets"] if asset.get("request_key") == request_key
+        ]
+        for asset in sorted(matches, key=lambda item: item.get("registered_at", ""), reverse=True):
+            try:
+                with ObjectStore(object_store).open(asset["content_digest"]) as stream:
+                    digest = hashlib.sha256(stream.read()).hexdigest()
+                if digest != asset["content_digest"]:
+                    raise WatershedDataError(
+                        f"cached object is corrupt for asset {asset.get('asset_id')}"
+                    )
+                return asset
+            except FileNotFoundError:
+                continue
+        return None

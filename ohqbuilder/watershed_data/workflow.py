@@ -54,6 +54,7 @@ def acquire_url(
     cache: str | Path,
     catalog: str | Path,
     parameters: dict[str, Any] | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """Acquire one explicitly declared URL into the generic immutable store."""
 
@@ -61,6 +62,9 @@ def acquire_url(
     if parsed.scheme != "https" or not parsed.hostname:
         raise WatershedDataError("provider product URL must be an absolute HTTPS URL")
     request_key = canonical_request_key(provider, url, parameters or {}, product_version)
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     request = urllib.request.Request(url, headers={"User-Agent": "GIStoOHQ/0.1"})
     try:
         with urllib.request.urlopen(request) as response:
@@ -70,7 +74,7 @@ def acquire_url(
         raise WatershedDataError(f"could not acquire {url}: {exc}") from exc
     if media_type == "application/octet-stream":
         media_type = mimetypes.guess_type(url)[0] or media_type
-    return AssetCatalog(catalog).register(
+    return catalog_store.register(
         {
             "provider": provider,
             "product": product,

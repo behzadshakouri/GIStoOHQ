@@ -32,6 +32,7 @@ def run_watershed_data_pipeline(
     forecast_provider: str = "",
     forecast_product: str = "forecast",
     prediction_time: str = "",
+    refresh: bool = False,
     init_if_missing: bool = False,
     site_id: str = "",
     name: str | None = None,
@@ -74,17 +75,20 @@ def run_watershed_data_pipeline(
     provenance_dir = package / "provenance"
     native_assets = []
     if include_discharge:
-        native_assets.append(discharge_acquirer(spec, station_id, cache=cache, catalog=catalog))
+        native_assets.append(discharge_acquirer(
+            spec, station_id, cache=cache, catalog=catalog, refresh=refresh
+        ))
     if include_weather:
-        native_assets.append(weather_acquirer(spec, cache=cache, catalog=catalog))
+        native_assets.append(weather_acquirer(spec, cache=cache, catalog=catalog, refresh=refresh))
     if include_pet:
-        native_assets.append(pet_acquirer(spec, cache=cache, catalog=catalog))
+        native_assets.append(pet_acquirer(spec, cache=cache, catalog=catalog, refresh=refresh))
     forecast_asset = None
     forecast_view = None
     if forecast_url:
         forecast_asset = forecast_acquirer(
             url=forecast_url, provider=forecast_provider, product=forecast_product,
             cache=cache, catalog=catalog,
+            refresh=refresh,
         )
         native_assets.append(forecast_asset)
     derived_assets = []

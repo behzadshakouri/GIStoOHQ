@@ -251,6 +251,12 @@ than silently replacing an object that was previously published as immutable.
 Catalog registration also rejects malformed digests, negative sizes, empty
 provider/product names, and invalid media types before publishing the catalog.
 
+Acquisition commands reuse the newest locally available asset with the same
+canonical request key, avoiding unnecessary provider calls during repeated UI or
+pipeline runs. Pass `--refresh`—or select **Refresh provider responses** in either
+graphical dialog—to contact the provider deliberately and retain any new response
+as another immutable revision.
+
 ## Freeze and validate a package
 
 ```bash

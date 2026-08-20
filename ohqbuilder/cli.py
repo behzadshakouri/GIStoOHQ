@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_acquire.add_argument("--product-version", default="unspecified")
     data_acquire.add_argument("--cache", required=True)
     data_acquire.add_argument("--catalog", required=True)
+    data_acquire.add_argument("--refresh", action="store_true")
     data_freeze = data_sub.add_parser("freeze", help="Freeze a generic watershed package.")
     data_freeze.add_argument("--site-spec", required=True)
     data_freeze.add_argument("--catalog", required=True)
@@ -133,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_discharge.add_argument("--station-id", required=True)
     data_discharge.add_argument("--cache", required=True)
     data_discharge.add_argument("--catalog", required=True)
+    data_discharge.add_argument("--refresh", action="store_true")
     data_weather = data_sub.add_parser(
         "download-weather", help="Download native NASA POWER hourly meteorology."
     )
@@ -140,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_weather.add_argument("--cache", required=True)
     data_weather.add_argument("--catalog", required=True)
     data_weather.add_argument("--variables", default=",".join(DEFAULT_PARAMETERS))
+    data_weather.add_argument("--refresh", action="store_true")
     data_harmonize = data_sub.add_parser(
         "harmonize", help="Materialize a native temporal asset as a sorted UTC table with QC."
     )
@@ -153,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_pet.add_argument("--cache", required=True)
     data_pet.add_argument("--catalog", required=True)
     data_pet.add_argument("--variables", default=",".join(DEFAULT_PET_PARAMETERS))
+    data_pet.add_argument("--refresh", action="store_true")
     data_export = data_sub.add_parser("export-hydropinn", help="Export a HydroPINN profile.")
     data_export.add_argument("--package", required=True)
     data_export.add_argument("--object-store", default=None)
@@ -179,12 +183,14 @@ def build_parser() -> argparse.ArgumentParser:
     data_run.add_argument("--forecast-provider", default="")
     data_run.add_argument("--forecast-product", default="forecast")
     data_run.add_argument("--prediction-time", default="")
+    data_run.add_argument("--refresh", action="store_true")
     forecast = data_sub.add_parser("download-forecast", help="Acquire a versioned forecast archive.")
     forecast.add_argument("--url", required=True)
     forecast.add_argument("--provider", required=True)
     forecast.add_argument("--product", required=True)
     forecast.add_argument("--cache", required=True)
     forecast.add_argument("--catalog", required=True)
+    forecast.add_argument("--refresh", action="store_true")
     forecast_view = data_sub.add_parser(
         "forecast-view", help="Create a leakage-safe forecast view at a prediction time."
     )
@@ -1179,6 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
                     product_version=args.product_version,
                     cache=args.cache,
                     catalog=args.catalog,
+                    refresh=args.refresh,
                 )
                 print(f"Cataloged asset: {asset['asset_id']}")
             elif args.data_command == "freeze":
@@ -1199,7 +1206,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.data_command == "download-discharge":
                 spec = SiteSpec.from_file(args.site_spec)
                 asset = acquire_observed_discharge(
-                    spec, args.station_id, cache=args.cache, catalog=args.catalog
+                    spec, args.station_id, cache=args.cache, catalog=args.catalog,
+                    refresh=args.refresh,
                 )
                 print(
                     f"Cataloged native discharge: {asset['asset_id']} "
@@ -1209,7 +1217,8 @@ def main(argv: list[str] | None = None) -> int:
                 spec = SiteSpec.from_file(args.site_spec)
                 variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
                 asset = acquire_historical_meteorology(
-                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables,
+                    refresh=args.refresh,
                 )
                 print(f"Cataloged native meteorology: {asset['asset_id']} ({len(variables)} variables)")
             elif args.data_command == "harmonize":
@@ -1222,7 +1231,8 @@ def main(argv: list[str] | None = None) -> int:
                 spec = SiteSpec.from_file(args.site_spec)
                 variables = tuple(value.strip() for value in args.variables.split(",") if value.strip())
                 asset = acquire_pet_et(
-                    spec, cache=args.cache, catalog=args.catalog, parameters=variables
+                    spec, cache=args.cache, catalog=args.catalog, parameters=variables,
+                    refresh=args.refresh,
                 )
                 print(f"Cataloged native PET/ET: {asset['asset_id']}")
             elif args.data_command == "export-hydropinn":
@@ -1242,12 +1252,14 @@ def main(argv: list[str] | None = None) -> int:
                     study_start=args.start, study_end=args.end,
                     forecast_url=args.forecast_url, forecast_provider=args.forecast_provider,
                     forecast_product=args.forecast_product, prediction_time=args.prediction_time,
+                    refresh=args.refresh,
                 )
                 print(f"Watershed data pipeline complete: {result['package_manifest']}")
             elif args.data_command == "download-forecast":
                 asset = acquire_forecast_archive(
                     url=args.url, provider=args.provider, product=args.product,
                     cache=args.cache, catalog=args.catalog,
+                    refresh=args.refresh,
                 )
                 print(f"Cataloged forecast archive: {asset['asset_id']}")
             elif args.data_command == "forecast-view":

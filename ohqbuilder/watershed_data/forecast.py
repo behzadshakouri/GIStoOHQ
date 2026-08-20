@@ -56,9 +56,15 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
 def acquire_forecast_archive(
     *, url: str, provider: str, product: str, cache: str | Path, catalog: str | Path,
     opener: Callable[..., object] = urllib.request.urlopen,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise WatershedDataError("forecast archive URL must use HTTPS")
+    parameters = {"url": url}
+    request_key = canonical_request_key(provider, url, parameters, "forecast-records-v1")
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     try:
         with opener(url, timeout=120.0) as response:
             raw = response.read()
@@ -69,10 +75,9 @@ def acquire_forecast_archive(
         raise WatershedDataError("forecast archive must be a JSON array")
     summary = validate_forecast_records(records)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
-    parameters = {"url": url}
-    return AssetCatalog(catalog).register({
+    return catalog_store.register({
         "provider": provider, "product": product, "product_version": "forecast-records-v1",
-        "request_key": canonical_request_key(provider, url, parameters, "forecast-records-v1"),
+        "request_key": request_key,
         "request_parameters": parameters, "content_digest": stored.content_digest,
         "size": stored.size, "media_type": "application/json", "source_url": url,
         "processing_status": "native", "temporal_dimensions": [
