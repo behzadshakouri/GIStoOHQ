@@ -245,6 +245,12 @@ This command is useful to adapter developers and advanced users. A provider
 adapter—not the UI—will eventually construct these requests for weather,
 discharge, PET/ET, and forecast selections.
 
+The object store verifies an already-present object before deduplicating a new
+response. If bytes at a digest path have been corrupted, acquisition stops rather
+than silently replacing an object that was previously published as immutable.
+Catalog registration also rejects malformed digests, negative sizes, empty
+provider/product names, and invalid media types before publishing the catalog.
+
 ## Freeze and validate a package
 
 ```bash

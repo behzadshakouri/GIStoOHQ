@@ -89,6 +89,16 @@ class ObjectStore:
             destination = self.root / "objects" / "sha256" / content_digest[:2] / content_digest[2:]
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists():
+                existing_digest = hashlib.sha256()
+                existing_size = 0
+                with destination.open("rb") as existing:
+                    while chunk := existing.read(1024 * 1024):
+                        existing_digest.update(chunk)
+                        existing_size += len(chunk)
+                if existing_digest.hexdigest() != content_digest or existing_size != size:
+                    raise WatershedDataError(
+                        f"immutable object is corrupt and will not be overwritten: {destination}"
+                    )
                 os.unlink(temporary)
             else:
                 os.replace(temporary, destination)
@@ -125,6 +135,20 @@ class AssetCatalog:
         missing = sorted(required - asset.keys())
         if missing:
             raise WatershedDataError(f"asset is missing required fields: {', '.join(missing)}")
+        digest = asset["content_digest"]
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            char not in "0123456789abcdef" for char in digest
+        ):
+            raise WatershedDataError("asset content_digest must be a lowercase SHA-256 value")
+        size = asset["size"]
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise WatershedDataError("asset size must be a non-negative integer")
+        if not isinstance(asset["provider"], str) or not asset["provider"].strip():
+            raise WatershedDataError("asset provider must be a non-empty string")
+        if not isinstance(asset["product"], str) or not asset["product"].strip():
+            raise WatershedDataError("asset product must be a non-empty string")
+        if not isinstance(asset["media_type"], str) or "/" not in asset["media_type"]:
+            raise WatershedDataError("asset media_type must be a valid type/subtype string")
         record = dict(asset)
         identity = {
             key: record.get(key)

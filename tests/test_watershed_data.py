@@ -57,6 +57,35 @@ def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     assert len(json.loads((tmp_path / "catalog.json").read_text())["assets"]) == 1
 
 
+def test_object_store_refuses_to_replace_corrupt_immutable_object(tmp_path):
+    store = ObjectStore(tmp_path / "cache")
+    stored = store.put(io.BytesIO(b"weather data"))
+    stored.path.write_bytes(b"corrupt")
+    with pytest.raises(WatershedDataError, match="will not be overwritten"):
+        store.put(io.BytesIO(b"weather data"))
+    assert stored.path.read_bytes() == b"corrupt"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("content_digest", "../bad", "lowercase SHA-256"),
+        ("size", -1, "non-negative integer"),
+        ("provider", "", "non-empty string"),
+        ("product", "", "non-empty string"),
+        ("media_type", "json", "type/subtype"),
+    ],
+)
+def test_catalog_rejects_invalid_asset_metadata(tmp_path, field, value, message):
+    asset = {
+        "provider": "example", "product": "weather", "content_digest": "0" * 64,
+        "size": 0, "media_type": "application/json",
+    }
+    asset[field] = value
+    with pytest.raises(WatershedDataError, match=message):
+        AssetCatalog(tmp_path / "catalog.json").register(asset)
+
+
 def test_catalog_lock_prevents_lost_concurrent_registrations(tmp_path):
     catalog = AssetCatalog(tmp_path / "catalog.json")
 
