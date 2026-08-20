@@ -35,7 +35,8 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     assert {row["variable"] for row in rows} == {"PRECTOTCORR", "T2M"}
     qc = json.loads((tmp_path / "qc.json").read_text())
     assert {item["rule_id"] for item in qc["results"]} == {
-        "temporal.duplicate_timestamps", "temporal.missing_values", "temporal.chronology"
+        "temporal.duplicate_timestamps", "temporal.missing_values", "temporal.chronology",
+        "temporal.physical_range",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -69,3 +70,27 @@ def test_daily_power_harmonization_preserves_daily_support(tmp_path):
         text = stream.read().decode()
     assert "2025-01-01T00:00:00Z,EVPTRNS,1.2,mm/day" in text
     assert output["product"] == "harmonized-temporal-observations"
+
+
+def test_temporal_qc_reports_impossible_provider_values(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["properties"]["parameter"]["RH2M"] = {"2025010100": 120.0}
+    document["parameters"]["RH2M"] = {"units": "%"}
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    qc = json.loads((tmp_path / "qc.json").read_text())
+    result = next(item for item in qc["results"] if item["rule_id"] == "temporal.physical_range")
+    assert result["passed"] is False
+    assert result["severity"] == "error"
+    assert result["details"]["violations"][0]["variable"] == "RH2M"

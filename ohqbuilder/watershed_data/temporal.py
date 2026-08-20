@@ -77,6 +77,23 @@ def temporal_qc(rows: list[dict[str, Any]], asset_id: str) -> list[QCResult]:
     duplicates = len(keys) - len(set(keys))
     missing = sum(row["value"] is None for row in rows)
     ordered = keys == sorted(keys)
+    ranges = {
+        "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
+        "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
+        "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
+    }
+    violations = []
+    for row in rows:
+        bounds = ranges.get(row["variable"])
+        value = row["value"]
+        if bounds is None or value is None:
+            continue
+        minimum, maximum = bounds
+        if value < minimum or (maximum is not None and value > maximum):
+            violations.append({
+                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
+                "value": value, "minimum": minimum, "maximum": maximum,
+            })
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
@@ -86,6 +103,11 @@ def temporal_qc(rows: list[dict[str, Any]], asset_id: str) -> list[QCResult]:
         QCResult("temporal.chronology", "warning", ordered,
                  "records are chronologically ordered" if ordered else "native records are unordered",
                  (asset_id,)),
+        QCResult(
+            "temporal.physical_range", "error", not violations,
+            f"{len(violations)} values outside declared physical ranges", (asset_id,),
+            {"violation_count": len(violations), "violations": violations[:100]},
+        ),
     ]
 
 

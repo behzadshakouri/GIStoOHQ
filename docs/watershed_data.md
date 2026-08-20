@@ -106,7 +106,9 @@ ohqbuild data harmonize --asset-id sha256:... \
 
 The derived CSV is a new catalog asset linked to its native parent. The QC report
 uses stable rules for duplicate timestamp-variable records, missing values, and
-chronology. The provenance document records transformation name/version,
+chronology. It also applies declared physical bounds to known discharge, rainfall,
+humidity, wind, radiation, temperature, and evapotranspiration variables; unknown
+variables remain unchanged and are not assigned guessed limits. The provenance document records transformation name/version,
 parameters, software version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
