@@ -39,6 +39,7 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.physical_range",
         "temporal.expected_intervals",
         "temporal.unit_compatibility",
+        "temporal.provider_qualifiers",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -58,6 +59,13 @@ def test_usgs_harmonization_preserves_qualifiers_and_native_units(tmp_path):
     assert "ft3/s" in text
     assert ",P\n" in text
     assert "2025-01-01T05:00:00Z" in text
+    qc = json.loads((tmp_path / "qc.json").read_text())
+    qualifier_result = next(
+        item for item in qc["results"] if item["rule_id"] == "temporal.provider_qualifiers"
+    )
+    assert qualifier_result["passed"] is False
+    assert qualifier_result["details"]["provisional_record_count"] == 1
+    assert qualifier_result["details"]["qualifier_counts"] == {"A": 1, "P": 1}
 
 
 def test_daily_power_harmonization_preserves_daily_support(tmp_path):

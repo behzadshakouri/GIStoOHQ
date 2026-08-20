@@ -114,6 +114,9 @@ internal intervals independently for each variable. It does not fill those gaps.
 Known USGS and NASA POWER variables are checked against their declared native-unit
 contracts. Unknown variables are listed as not evaluated rather than assigned a
 guessed unit or converted silently.
+USGS approval qualifiers are also retained and summarized. Records carrying `P`
+produce a warning-level provisional-data result, while `A` is reported as approved;
+the observations themselves remain unchanged.
 The provenance document records transformation name/version, parameters, software
 version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,

@@ -134,6 +134,14 @@ def temporal_qc(
             unit_mismatches.append({
                 "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
             })
+    qualifier_counts: dict[str, int] = {}
+    provisional_records = 0
+    for row in rows:
+        qualifiers = {value for value in str(row.get("qualifiers") or "").split(";") if value}
+        for qualifier in qualifiers:
+            qualifier_counts[qualifier] = qualifier_counts.get(qualifier, 0) + 1
+        if "P" in qualifiers:
+            provisional_records += 1
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
@@ -147,6 +155,15 @@ def temporal_qc(
             "temporal.physical_range", "error", not violations,
             f"{len(violations)} values outside declared physical ranges", (asset_id,),
             {"violation_count": len(violations), "violations": violations[:100]},
+        ),
+        QCResult(
+            "temporal.provider_qualifiers", "warning", provisional_records == 0,
+            f"{provisional_records} records carry the USGS provisional qualifier",
+            (asset_id,), {
+                "provisional_record_count": provisional_records,
+                "qualifier_counts": dict(sorted(qualifier_counts.items())),
+                "interpretation": {"A": "approved", "P": "provisional"},
+            },
         ),
         QCResult(
             "temporal.unit_compatibility", "error", not unit_mismatches,
