@@ -1,9 +1,14 @@
 from pathlib import Path
 
+import json
+import pytest
+
 import yaml
 
-from ohqbuilder.watershed_data.reconnaissance import run_reconnaissance
-from ohqbuilder.watershed_data.schemas import SiteSpec
+from ohqbuilder.watershed_data.reconnaissance import (
+    run_reconnaissance, selected_station_from_report,
+)
+from ohqbuilder.watershed_data.schemas import SiteSpec, WatershedDataError
 from ohqbuilder.watershed_data.usgs import build_site_query, parse_site_rdb
 
 
@@ -71,3 +76,17 @@ def test_allowed_status_constraint_is_reported(tmp_path):
     assessment = report["candidates"][0]
     assert assessment["constraints"]["allowed_status"] is False
     assert "not allowed" in assessment["rejection_reasons"][0]
+
+
+def test_selected_station_is_loaded_only_from_unambiguous_report(tmp_path):
+    report = {
+        "schema_name": "ReconnaissanceReport", "schema_version": "1.0",
+        "decision": "selected", "selected_station_id": "01649500",
+    }
+    (tmp_path / "report.json").write_text(json.dumps(report))
+    assert selected_station_from_report(tmp_path) == "01649500"
+    report["decision"] = "ambiguous_candidates"
+    report["selected_station_id"] = None
+    (tmp_path / "report.json").write_text(json.dumps(report))
+    with pytest.raises(WatershedDataError, match="no unambiguous selection"):
+        selected_station_from_report(tmp_path)

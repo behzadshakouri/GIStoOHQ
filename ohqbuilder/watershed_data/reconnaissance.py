@@ -105,3 +105,23 @@ def run_reconnaissance(
         )
     (destination / "report.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
     return report
+
+
+def selected_station_from_report(path: str | Path) -> str:
+    """Return an unambiguous selected station from an existing report."""
+    candidate = Path(path).expanduser().resolve()
+    report_path = candidate / "report.json" if candidate.is_dir() else candidate
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WatershedDataError(f"could not read reconnaissance report: {exc}") from exc
+    if report.get("schema_name") != "ReconnaissanceReport":
+        raise WatershedDataError("selected gauge requires a ReconnaissanceReport")
+    if report.get("decision") != "selected" or not report.get("selected_station_id"):
+        raise WatershedDataError(
+            f"reconnaissance has no unambiguous selection: {report.get('decision', 'unknown')}"
+        )
+    station_id = str(report["selected_station_id"])
+    if not station_id.isdigit():
+        raise WatershedDataError("selected USGS station ID must contain digits only")
+    return station_id

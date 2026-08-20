@@ -57,6 +57,35 @@ def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     assert len(json.loads((tmp_path / "catalog.json").read_text())["assets"]) == 1
 
 
+def test_object_store_refuses_to_replace_corrupt_immutable_object(tmp_path):
+    store = ObjectStore(tmp_path / "cache")
+    stored = store.put(io.BytesIO(b"weather data"))
+    stored.path.write_bytes(b"corrupt")
+    with pytest.raises(WatershedDataError, match="will not be overwritten"):
+        store.put(io.BytesIO(b"weather data"))
+    assert stored.path.read_bytes() == b"corrupt"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("content_digest", "../bad", "lowercase SHA-256"),
+        ("size", -1, "non-negative integer"),
+        ("provider", "", "non-empty string"),
+        ("product", "", "non-empty string"),
+        ("media_type", "json", "type/subtype"),
+    ],
+)
+def test_catalog_rejects_invalid_asset_metadata(tmp_path, field, value, message):
+    asset = {
+        "provider": "example", "product": "weather", "content_digest": "0" * 64,
+        "size": 0, "media_type": "application/json",
+    }
+    asset[field] = value
+    with pytest.raises(WatershedDataError, match=message):
+        AssetCatalog(tmp_path / "catalog.json").register(asset)
+
+
 def test_catalog_lock_prevents_lost_concurrent_registrations(tmp_path):
     catalog = AssetCatalog(tmp_path / "catalog.json")
 
@@ -72,6 +101,47 @@ def test_catalog_lock_prevents_lost_concurrent_registrations(tmp_path):
     for thread in threads:
         thread.join()
     assert len(catalog.read()["assets"]) == 8
+
+
+def test_catalog_reclaims_lock_left_by_dead_process(tmp_path):
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    lock = catalog.path.with_suffix(".json.lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("2147483647", encoding="ascii")
+    asset = catalog.register({
+        "provider": "example", "product": "weather", "content_digest": "a" * 64,
+        "size": 0, "media_type": "application/json",
+    })
+    assert asset["asset_id"].startswith("sha256:")
+    assert not lock.exists()
+
+
+def test_catalog_requires_complete_lineage_for_derived_assets(tmp_path):
+    asset = {
+        "provider": "example", "product": "derived", "content_digest": "b" * 64,
+        "size": 1, "media_type": "text/csv", "processing_status": "derived",
+        "parent_asset_ids": ["sha256:parent"],
+    }
+    with pytest.raises(WatershedDataError, match="transformation_name"):
+        AssetCatalog(tmp_path / "catalog.json").register(asset)
+    asset.update({
+        "transformation_name": "resample", "transformation_version": "1.0",
+        "transformation_parameters": {"timestep": "1h"},
+    })
+    assert AssetCatalog(tmp_path / "catalog.json").register(asset)["processing_status"] == "derived"
+
+
+def test_catalog_read_rejects_metadata_tampering(tmp_path):
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    catalog.register({
+        "provider": "example", "product": "weather", "content_digest": "c" * 64,
+        "size": 1, "media_type": "application/json",
+    })
+    document = json.loads(catalog.path.read_text())
+    document["assets"][0]["product"] = "tampered"
+    catalog.path.write_text(json.dumps(document))
+    with pytest.raises(WatershedDataError, match="digest does not match"):
+        catalog.read()
 
 
 def test_acquire_url_rejects_insecure_or_local_paths_before_network(tmp_path):
@@ -116,6 +186,30 @@ def test_qc_and_provenance_contracts_reject_invalid_values():
             "activity:1", "resample", "1", (), (), {}, "gistoohq",
             "2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z",
         )
+
+
+def test_package_manifest_aggregates_qc_results(tmp_path):
+    site = tmp_path / "site.yaml"
+    site.write_text(
+        "site_id: qc\ngeometry:\n  outlet:\n    longitude: -77\n    latitude: 39\n"
+        "study_period:\n  start: '2025-01-01T00:00:00Z'\n"
+        "  end: '2025-01-02T00:00:00Z'\n"
+    )
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    catalog.register({
+        "provider": "example", "product": "data", "content_digest": "0" * 64,
+        "size": 0, "media_type": "application/json",
+    })
+    output = tmp_path / "package"
+    qc = output / "quality_control" / "temporal.json"
+    qc.parent.mkdir(parents=True)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0", "results": [
+            {"rule_id": "temporal.missing_values", "severity": "warning", "passed": False}
+        ],
+    }))
+    freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert validate_package(output).package_qc_status == "warning"
 
 
 def test_freeze_and_validate_self_contained_package(tmp_path):

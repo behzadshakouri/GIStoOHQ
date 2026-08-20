@@ -79,6 +79,25 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
     )
     assert "--init-if-missing" in run.argv
+    refreshed = watershed_data_command(
+        "download-weather", site_spec="site.yaml", refresh=True
+    )
+    assert "--refresh" in refreshed.argv
+    gc = watershed_data_command(
+        "gc", site_spec="site.yaml", cache="cache", catalog="catalog.json",
+        status_output="status",
+    )
+    assert gc.argv[2] == "gc"
+    assert "--delete" not in gc.argv
+    forecast_run = watershed_data_command(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run",
+        site_id="demo", longitude=-77, latitude=39,
+        study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
+        forecast_url="https://example.test/f.json", forecast_provider="example",
+        prediction_time="2024-01-01T03:00:00Z",
+    )
+    assert "--forecast-url" in forecast_run.argv
+    assert "--prediction-time" in forecast_run.argv
     forecast = watershed_data_command(
         "download-forecast", site_spec="site.yaml", forecast_url="https://example.test/a.json",
         forecast_provider="example",
@@ -107,6 +126,7 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.geometry("760x700")' in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
+    assert "Use Reconnaissance Selection" in source
     assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
 
 

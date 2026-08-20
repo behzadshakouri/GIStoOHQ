@@ -4,7 +4,7 @@ import csv
 import hashlib
 import io
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -72,11 +72,76 @@ def _native_rows(raw: bytes, provider: str) -> tuple[list[dict[str, Any]], dict[
     raise WatershedDataError(f"temporal harmonization does not support provider {provider!r}")
 
 
-def temporal_qc(rows: list[dict[str, Any]], asset_id: str) -> list[QCResult]:
+def temporal_qc(
+    rows: list[dict[str, Any]], asset_id: str, temporal_resolution: str | None = None,
+    units: dict[str, str] | None = None,
+) -> list[QCResult]:
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
     missing = sum(row["value"] is None for row in rows)
     ordered = keys == sorted(keys)
+    ranges = {
+        "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
+        "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
+        "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
+    }
+    violations = []
+    for row in rows:
+        bounds = ranges.get(row["variable"])
+        value = row["value"]
+        if bounds is None or value is None:
+            continue
+        minimum, maximum = bounds
+        if value < minimum or (maximum is not None and value > maximum):
+            violations.append({
+                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
+                "value": value, "minimum": minimum, "maximum": maximum,
+            })
+    expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
+        temporal_resolution or ""
+    )
+    missing_intervals = 0
+    gap_examples = []
+    if expected_delta is not None:
+        by_variable: dict[str, list[datetime]] = {}
+        for row in rows:
+            by_variable.setdefault(row["variable"], []).append(row["timestamp"])
+        for variable, timestamps in by_variable.items():
+            unique = sorted(set(timestamps))
+            for previous, current in zip(unique, unique[1:]):
+                gap = current - previous
+                if gap > expected_delta:
+                    count = max(0, int(gap / expected_delta) - 1)
+                    missing_intervals += count
+                    if len(gap_examples) < 100:
+                        gap_examples.append({
+                            "variable": variable, "after": previous.isoformat(),
+                            "before": current.isoformat(), "missing_intervals": count,
+                        })
+    expected_units = {
+        "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
+        "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
+        "ALLSKY_SFC_SW_DWN": {"kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
+    }
+    unit_mismatches = []
+    observed_variables = sorted({row["variable"] for row in rows})
+    for variable in observed_variables:
+        allowed = expected_units.get(variable)
+        if allowed is None:
+            continue
+        actual = (units or {}).get(variable, "unknown")
+        if actual not in allowed:
+            unit_mismatches.append({
+                "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
+            })
+    qualifier_counts: dict[str, int] = {}
+    provisional_records = 0
+    for row in rows:
+        qualifiers = {value for value in str(row.get("qualifiers") or "").split(";") if value}
+        for qualifier in qualifiers:
+            qualifier_counts[qualifier] = qualifier_counts.get(qualifier, 0) + 1
+        if "P" in qualifiers:
+            provisional_records += 1
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
@@ -86,6 +151,42 @@ def temporal_qc(rows: list[dict[str, Any]], asset_id: str) -> list[QCResult]:
         QCResult("temporal.chronology", "warning", ordered,
                  "records are chronologically ordered" if ordered else "native records are unordered",
                  (asset_id,)),
+        QCResult(
+            "temporal.physical_range", "error", not violations,
+            f"{len(violations)} values outside declared physical ranges", (asset_id,),
+            {"violation_count": len(violations), "violations": violations[:100]},
+        ),
+        QCResult(
+            "temporal.provider_qualifiers", "warning", provisional_records == 0,
+            f"{provisional_records} records carry the USGS provisional qualifier",
+            (asset_id,), {
+                "provisional_record_count": provisional_records,
+                "qualifier_counts": dict(sorted(qualifier_counts.items())),
+                "interpretation": {"A": "approved", "P": "provisional"},
+            },
+        ),
+        QCResult(
+            "temporal.unit_compatibility", "error", not unit_mismatches,
+            f"{len(unit_mismatches)} known variables have incompatible native units",
+            (asset_id,), {
+                "mismatch_count": len(unit_mismatches), "mismatches": unit_mismatches,
+                "unknown_variables_not_evaluated": sorted(
+                    set(observed_variables) - set(expected_units)
+                ),
+            },
+        ),
+        QCResult(
+            "temporal.expected_intervals", "warning",
+            expected_delta is None or missing_intervals == 0,
+            "native temporal resolution is not fixed" if expected_delta is None else
+            f"{missing_intervals} expected internal intervals are missing",
+            (asset_id,), {
+                "evaluated": expected_delta is not None,
+                "temporal_resolution": temporal_resolution,
+                "missing_interval_count": missing_intervals,
+                "gaps": gap_examples,
+            },
+        ),
     ]
 
 
@@ -102,7 +203,7 @@ def harmonize_asset(
         rows, units = _native_rows(stream.read(), source["provider"])
     if not rows:
         raise WatershedDataError("native temporal asset contains no observations")
-    qc = temporal_qc(rows, asset_id)
+    qc = temporal_qc(rows, asset_id, source.get("temporal_resolution"), units)
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(("timestamp_utc", "variable", "value", "native_unit", "provider_qualifiers"))
@@ -122,6 +223,8 @@ def harmonize_asset(
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.1",
+        "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),

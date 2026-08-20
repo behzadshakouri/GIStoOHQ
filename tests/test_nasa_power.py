@@ -70,6 +70,13 @@ def test_power_acquisition_stores_exact_native_response(tmp_path):
     with ObjectStore(tmp_path / "cache").open(asset["content_digest"]) as stored:
         assert stored.read() == raw
 
+    reused = acquire_historical_meteorology(
+        _spec(), cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        parameters=("PRECTOTCORR", "T2M"),
+        opener=lambda *args, **kwargs: pytest.fail("reusable request contacted provider"),
+    )
+    assert reused["asset_id"] == asset["asset_id"]
+
 
 def test_pet_et_acquisition_declares_provider_semantics(tmp_path):
     document = Path("tests/fixtures/nasa_power_daily.json").read_bytes()

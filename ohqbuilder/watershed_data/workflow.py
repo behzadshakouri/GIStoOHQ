@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+
 import mimetypes
 import urllib.request
 from urllib.parse import urlsplit
@@ -9,6 +11,7 @@ from typing import Any
 import yaml
 
 from .catalog import AssetCatalog, ObjectStore
+from .network import download_bytes
 from .schemas import SiteSpec, WatershedDataError, canonical_request_key
 
 
@@ -54,6 +57,7 @@ def acquire_url(
     cache: str | Path,
     catalog: str | Path,
     parameters: dict[str, Any] | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """Acquire one explicitly declared URL into the generic immutable store."""
 
@@ -61,16 +65,18 @@ def acquire_url(
     if parsed.scheme != "https" or not parsed.hostname:
         raise WatershedDataError("provider product URL must be an absolute HTTPS URL")
     request_key = canonical_request_key(provider, url, parameters or {}, product_version)
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     request = urllib.request.Request(url, headers={"User-Agent": "GIStoOHQ/0.1"})
-    try:
-        with urllib.request.urlopen(request) as response:
-            stored = ObjectStore(cache).put(response)
-            media_type = response.headers.get_content_type()
-    except OSError as exc:
-        raise WatershedDataError(f"could not acquire {url}: {exc}") from exc
+    raw, headers, acquisition_attempts = download_bytes(
+        request, opener=urllib.request.urlopen, timeout=120.0, label=f"acquisition of {url}"
+    )
+    stored = ObjectStore(cache).put(io.BytesIO(raw))
+    media_type = headers.get_content_type() if headers is not None else "application/octet-stream"
     if media_type == "application/octet-stream":
         media_type = mimetypes.guess_type(url)[0] or media_type
-    return AssetCatalog(catalog).register(
+    return catalog_store.register(
         {
             "provider": provider,
             "product": product,
@@ -81,5 +87,6 @@ def acquire_url(
             "media_type": media_type,
             "source_url": url,
             "processing_status": "native",
+            "acquisition_attempts": acquisition_attempts,
         }
     )

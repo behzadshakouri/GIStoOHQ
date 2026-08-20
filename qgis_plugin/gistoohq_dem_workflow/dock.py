@@ -100,6 +100,27 @@ class QgisDockConfigError(RuntimeError):
     """Raised when the QGIS dock cannot build a backend command from config."""
 
 
+def _selected_station_from_reconnaissance(path: str) -> str:
+    import json
+
+    candidate = Path(path).expanduser().resolve()
+    report_path = candidate / "report.json" if candidate.is_dir() else candidate
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise QgisDockConfigError(f"Could not read reconnaissance report: {exc}") from exc
+    if report.get("schema_name") != "ReconnaissanceReport":
+        raise QgisDockConfigError("Selected gauge requires a ReconnaissanceReport.")
+    if report.get("decision") != "selected" or not report.get("selected_station_id"):
+        raise QgisDockConfigError(
+            f"Reconnaissance has no unambiguous selection: {report.get('decision', 'unknown')}"
+        )
+    station = str(report["selected_station_id"])
+    if not station.isdigit():
+        raise QgisDockConfigError("Selected USGS station ID must contain digits only.")
+    return station
+
+
 def _as_mapping(value, name: str) -> dict:
     if value is None:
         return {}
@@ -173,6 +194,7 @@ def _command_for_watershed_data(
     forecast_url: str = "", forecast_provider: str = "",
     forecast_product: str = "forecast", prediction_time: str = "",
     status_output: str = "watershed_package/status",
+    refresh: bool = False,
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -204,12 +226,13 @@ def _command_for_watershed_data(
         missing = [label for label, value in values.items() if not value]
         if missing:
             raise QgisDockConfigError("Missing watershed data fields: " + ", ".join(missing))
-        return [
+        command = [
             "ohqbuild", "data", "acquire-url", "--url", url,
             "--provider", provider, "--product", product,
             "--product-version", product_version or "unspecified",
             "--cache", cache, "--catalog", catalog,
         ]
+        return [*command, "--refresh"] if refresh else command
     if action == "freeze":
         values = {"SiteSpec": site_spec, "catalog": catalog, "package": package}
         missing = [label for label, value in values.items() if not value]
@@ -238,17 +261,19 @@ def _command_for_watershed_data(
         missing = [label for label, value in values.items() if not value]
         if missing:
             raise QgisDockConfigError("Missing watershed data fields: " + ", ".join(missing))
-        return [
+        command = [
             "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
             "--station-id", station_id, "--cache", cache, "--catalog", catalog,
         ]
+        return [*command, "--refresh"] if refresh else command
     if action == "download-weather":
         if not site_spec or not cache or not catalog or not weather_variables:
             raise QgisDockConfigError("SiteSpec, cache, catalog, and weather variables are required.")
-        return [
+        command = [
             "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
             "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
         ]
+        return [*command, "--refresh"] if refresh else command
     if action == "harmonize":
         if not asset_id:
             raise QgisDockConfigError("A native catalog asset ID is required.")
@@ -258,10 +283,11 @@ def _command_for_watershed_data(
             "--qc-output", qc_output, "--provenance-output", provenance_output,
         ]
     if action == "download-pet":
-        return [
+        command = [
             "ohqbuild", "data", "download-pet", "--site-spec", site_spec,
             "--cache", cache, "--catalog", catalog, "--variables", "EVPTRNS",
         ]
+        return [*command, "--refresh"] if refresh else command
     if action == "export-hydropinn":
         return [
             "ohqbuild", "data", "export-hydropinn", "--package", package,
@@ -271,24 +297,33 @@ def _command_for_watershed_data(
         if not station_id:
             raise QgisDockConfigError("Select an explicit USGS station ID before running all steps.")
         bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
+        forecast_args = _data_forecast_run_args(
+            forecast_url, forecast_provider, forecast_product, prediction_time
+        )
         return [
             "ohqbuild", "data", "run", "--site-spec", site_spec,
             "--station-id", station_id, "--workspace", workspace,
-            "--export-hydropinn", *bootstrap,
+            "--export-hydropinn", *(["--refresh"] if refresh else []),
+            *forecast_args, *bootstrap,
         ]
     if action == "run-weather":
         bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
+        forecast_args = _data_forecast_run_args(
+            forecast_url, forecast_provider, forecast_product, prediction_time
+        )
         return [
             "ohqbuild", "data", "run", "--site-spec", site_spec,
             "--station-id", "", "--workspace", workspace,
-            "--no-discharge", "--export-hydropinn", *bootstrap,
+            "--no-discharge", "--export-hydropinn", *(["--refresh"] if refresh else []),
+            *forecast_args, *bootstrap,
         ]
     if action == "download-forecast":
         if not forecast_url or not forecast_provider:
             raise QgisDockConfigError("Forecast URL and provider are required.")
-        return ["ohqbuild", "data", "download-forecast", "--url", forecast_url,
+        command = ["ohqbuild", "data", "download-forecast", "--url", forecast_url,
                 "--provider", forecast_provider, "--product", forecast_product,
                 "--cache", cache, "--catalog", catalog]
+        return [*command, "--refresh"] if refresh else command
     if action == "forecast-view":
         if not asset_id or not prediction_time:
             raise QgisDockConfigError("Forecast asset ID and prediction time are required.")
@@ -301,6 +336,9 @@ def _command_for_watershed_data(
     if action == "doctor":
         return ["ohqbuild", "data", "doctor", "--site-spec", site_spec,
                 "--catalog", catalog, "--object-store", cache, "--package", package]
+    if action == "gc":
+        return ["ohqbuild", "data", "gc", "--object-store", cache,
+                "--catalog", catalog, "--output", str(Path(status_output) / "cache-gc.json")]
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
@@ -315,6 +353,22 @@ def _data_bootstrap_args(site_id, name, longitude, latitude, start, end) -> list
     ]
     if name:
         args.extend(["--name", str(name)])
+    return args
+
+
+def _data_forecast_run_args(url, provider, product, prediction_time) -> list[str]:
+    if bool(url) != bool(provider):
+        raise QgisDockConfigError("Forecast URL and provider must be supplied together.")
+    if prediction_time and not url:
+        raise QgisDockConfigError("Prediction time requires a forecast URL and provider.")
+    if not url:
+        return []
+    args = [
+        "--forecast-url", url, "--forecast-provider", provider,
+        "--forecast-product", product or "forecast",
+    ]
+    if prediction_time:
+        args.extend(["--prediction-time", prediction_time])
     return args
 
 
@@ -808,7 +862,7 @@ class DemWorkflowDock:
         """Open the optional data workflow without adding requirements to full-run."""
         from qgis.PyQt.QtWidgets import (
             QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-            QPushButton, QVBoxLayout,
+            QPushButton, QVBoxLayout, QCheckBox,
             QScrollArea, QWidget,
         )
 
@@ -883,12 +937,25 @@ class DemWorkflowDock:
         for label, field in fields.items():
             if label != "SiteSpec":
                 form.addRow(label, field)
+        refresh_box = QCheckBox("Refresh provider responses (ignore reusable cache)")
+        form.addRow(refresh_box)
         form_layout.addLayout(form)
         buttons_widget = QWidget(form_widget)
         from qgis.PyQt.QtWidgets import QGridLayout
         buttons = QGridLayout(buttons_widget)
 
         def run(action: str) -> None:
+            if action == "use-recon-selection":
+                try:
+                    station = _selected_station_from_reconnaissance(
+                        fields["Reconnaissance output"].text()
+                    )
+                except QgisDockConfigError as exc:
+                    self.log.append(str(exc))
+                    return
+                fields["Selected USGS station ID"].setText(station)
+                self.log.append(f"Selected USGS station from reconnaissance: {station}")
+                return
             try:
                 longitude = float(fields["Longitude"].text()) if fields["Longitude"].text() else None
                 latitude = float(fields["Latitude"].text()) if fields["Latitude"].text() else None
@@ -916,6 +983,7 @@ class DemWorkflowDock:
                     forecast_product=fields["Forecast product"].text(),
                     prediction_time=fields["Prediction time (UTC)"].text(),
                     status_output=fields["Status output"].text(),
+                    refresh=refresh_box.isChecked(),
                 )
             except (QgisDockConfigError, ValueError) as exc:
                 self.log.append(f"Cannot run watershed data action: {exc}")
@@ -927,6 +995,7 @@ class DemWorkflowDock:
             ("Create SiteSpec", "init-site"), ("Validate SiteSpec", "validate-site"),
             ("Download Declared Product", "acquire-url"),
             ("Discover Discharge Gauges", "reconnaissance"),
+            ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Historical Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
@@ -939,6 +1008,7 @@ class DemWorkflowDock:
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
+            ("Inspect Cache Garbage", "gc"),
         )
         for index, (label, action) in enumerate(actions):
             button = QPushButton(label)

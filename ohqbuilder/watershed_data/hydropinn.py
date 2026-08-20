@@ -23,7 +23,9 @@ def export_hydropinn(
     catalog = AssetCatalog(root / "catalog.json").read()
     assets = [
         asset for asset in catalog["assets"]
-        if asset.get("processing_status") == "derived" and asset.get("media_type") == "text/csv"
+        if asset.get("processing_status") == "derived"
+        and asset.get("media_type") == "text/csv"
+        and asset.get("product") == "harmonized-temporal-observations"
     ]
     if not assets:
         raise WatershedDataError("package has no harmonized temporal assets to export")

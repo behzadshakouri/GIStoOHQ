@@ -76,6 +76,11 @@ def test_acquisition_stores_exact_raw_response_and_catalogs_native_metadata(tmp_
     with ObjectStore(tmp_path / "cache").open(asset["content_digest"]) as stored:
         assert stored.read() == raw
     assert AssetCatalog(tmp_path / "catalog.json").read()["assets"][0]["station_id"] == "01649500"
+    reused = acquire_observed_discharge(
+        _spec(), "01649500", cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        opener=lambda *args, **kwargs: pytest.fail("reusable request contacted provider"),
+    )
+    assert reused["asset_id"] == asset["asset_id"]
 
 
 def test_acquisition_rejects_valid_json_without_requested_discharge(tmp_path):
@@ -88,3 +93,23 @@ def test_acquisition_rejects_valid_json_without_requested_discharge(tmp_path):
             opener=lambda *args, **kwargs: _Response(body),
         )
     assert not (tmp_path / "catalog.json").exists()
+
+
+def test_acquisition_retries_transient_provider_failure(tmp_path, monkeypatch):
+    raw = Path("tests/fixtures/usgs_discharge.json").read_bytes()
+    calls = []
+
+    def opener(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("temporary outage")
+        return _Response(raw)
+
+    monkeypatch.setattr("ohqbuilder.watershed_data.network.time.sleep", lambda delay: None)
+    asset = acquire_observed_discharge(
+        _spec(), "01649500", cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        opener=opener,
+    )
+    assert len(calls) == 2
+    assert asset["observation_count"] == 2
+    assert asset["acquisition_attempts"] == 2

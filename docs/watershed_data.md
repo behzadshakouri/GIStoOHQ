@@ -75,7 +75,9 @@ Both graphical front ends now expose this workflow:
 - open the QGIS plugin's **Data** tab and choose **Open Watershed Data…**.
 
 In either interface, run **Discover Gauges**, review `report.md`, enter the
-chosen station ID, and select **Download Selected Discharge**. These buttons run
+chosen station ID, or use **Use Reconnaissance Selection** when the report contains
+one unambiguous acceptable candidate, and select **Download Selected Discharge**.
+Ambiguous or rejected results are never copied automatically. These buttons run
 the same backend commands documented above and do not modify Full Run to OHQ.
 
 ## Download native historical weather
@@ -106,10 +108,29 @@ ohqbuild data harmonize --asset-id sha256:... \
 
 The derived CSV is a new catalog asset linked to its native parent. The QC report
 uses stable rules for duplicate timestamp-variable records, missing values, and
-chronology. The provenance document records transformation name/version,
-parameters, software version, timestamps, parent asset, and output asset. This
+chronology. It also applies declared physical bounds to known discharge, rainfall,
+humidity, wind, radiation, temperature, and evapotranspiration variables; unknown
+variables remain unchanged and are not assigned guessed limits.
+For assets declaring hourly or daily native support, QC also identifies missing
+internal intervals independently for each variable. It does not fill those gaps.
+Known USGS and NASA POWER variables are checked against their declared native-unit
+contracts. Unknown variables are listed as not evaluated rather than assigned a
+guessed unit or converted silently.
+USGS approval qualifiers are also retained and summarized. Records carrying `P`
+produce a warning-level provisional-data result, while `A` is reported as approved;
+the observations themselves remain unchanged.
+The provenance document records transformation name/version, parameters, software
+version, timestamps, parent asset, and output asset. This
 step converts timestamps to UTC and sorts records; it does not aggregate,
 interpolate, normalize, or convert units.
+Every derived catalog asset must declare non-empty parent asset IDs plus its
+transformation name, version, and parameters. Catalog publication rejects
+incomplete lineage instead of relying only on optional sidecar files.
+
+When a package is frozen, all `quality_control/*.json` reports are validated and
+aggregated into the manifest's `package_qc_status`: failed error rules produce
+`fail`, failed warning rules produce `warning`, otherwise executed QC produces
+`pass`. A package without QC reports remains explicitly `not_run`.
 
 ## PET/ET and HydroPINN export
 
@@ -155,6 +176,22 @@ Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
 **RUN ALL DATA STEPS** button performs this orchestration in both graphical
 interfaces. Gauge selection remains explicit; this command never silently picks
 an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
+
+An explicitly configured forecast archive can be included in the same atomic run.
+When `--prediction-time` is present, the package also includes a leakage-safe
+forecast view containing only forecasts issued by that time:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --workspace outputs/hickey_run_data \
+  --forecast-url https://provider.example/archive.json \
+  --forecast-provider example --forecast-product precipitation \
+  --prediction-time 2025-01-01T03:00:00Z --export-hydropinn
+```
+
+The same forecast fields are honored by both graphical one-button run actions.
+Leaving them blank omits forecasts; supplying only a URL or only a provider is
+rejected before acquisition.
 
 For a weather/PET-only workflow that needs no gauge reconnaissance or station ID,
 use **RUN WEATHER/PET TO EXPORT** in either graphical interface, or run:
@@ -205,7 +242,9 @@ ohqbuild data doctor --site-spec sites/hickey_run.yaml \
 ```
 
 The doctor checks SiteSpec validity, catalog readability, every cataloged object
-digest, and the optional frozen package. **Check Data Workspace** exposes the same
+digest, and the optional frozen package. A structurally valid package still fails
+the doctor when its aggregated QC status is `fail`; warning and `not_run` states
+remain visible but do not masquerade as structural errors. **Check Data Workspace** exposes the same
 operation in both graphical dialogs.
 
 ## Acquire an explicitly declared product
@@ -224,6 +263,42 @@ This command is useful to adapter developers and advanced users. A provider
 adapter—not the UI—will eventually construct these requests for weather,
 discharge, PET/ET, and forecast selections.
 
+The object store verifies an already-present object before deduplicating a new
+response. If bytes at a digest path have been corrupted, acquisition stops rather
+than silently replacing an object that was previously published as immutable.
+Catalog registration also rejects malformed digests, negative sizes, empty
+provider/product names, and invalid media types before publishing the catalog.
+Catalog locks record their owning process; a lock abandoned by a terminated local
+process is reclaimed safely, while a live owner's lock is never removed.
+Every catalog read recomputes the digest over its asset array and rejects modified
+metadata, so package validation and cached-request reuse cannot trust a catalog
+whose contents were changed outside the atomic catalog writer.
+
+Acquisition commands reuse the newest locally available asset with the same
+canonical request key, avoiding unnecessary provider calls during repeated UI or
+pipeline runs. Pass `--refresh`—or select **Refresh provider responses** in either
+graphical dialog—to contact the provider deliberately and retain any new response
+as another immutable revision.
+
+When a provider call is necessary, GIStoOHQ retries a complete response up to
+three times with bounded exponential backoff. Only a fully read response is
+published to the immutable store, so a failed or truncated attempt cannot create
+a catalog asset. Successful native catalog records include `acquisition_attempts`,
+and the status report exposes that count for diagnosing unstable providers.
+
+Cache cleanup is deliberately dry-run by default. Supply every catalog that must
+retain its objects, review the JSON report, and only then repeat with `--delete`:
+
+```bash
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json --delete
+```
+
+Objects referenced by any supplied catalog are never candidates. Destructive
+cleanup is therefore explicit and auditable rather than automatic.
+
 ## Freeze and validate a package
 
 ```bash
@@ -237,6 +312,9 @@ Use `--include-raw none` for metadata-only publication, `referenced` for a
 package that depends on the local object store, or `all --object-store CACHE`
 for a self-contained package. `--redistributable` is never inferred; users must
 set it only after checking every provider license.
+QC and provenance JSON sidecars are listed in the package manifest with SHA-256
+checksums and contribute to package identity. Validation rejects missing or changed
+sidecars, including edits made after a package was frozen.
 
 ## Graphical interfaces
 

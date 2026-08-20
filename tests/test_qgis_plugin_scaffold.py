@@ -301,6 +301,7 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     dock = Path("qgis_plugin/gistoohq_dem_workflow/dock.py").read_text(encoding="utf-8")
     assert 'tabs.insertTab(2, data_tab, "Data")' in dock
     assert "Open Watershed Data…" in dock
+    assert "Use Reconnaissance Selection" in dock
     assert "Download Declared Product" in dock
     assert "QScrollArea" in dock
     assert "buttons.addWidget(button, index // 3, index % 3)" in dock
@@ -334,11 +335,30 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         "download-weather", site_spec="site.yaml", cache="cache",
         catalog="package/catalog.json", weather_variables="PRECTOTCORR,T2M",
     )[-2:] == ["--variables", "PRECTOTCORR,T2M"]
+    assert "--refresh" in _command_for_watershed_data(
+        "download-weather", site_spec="site.yaml", cache="cache",
+        catalog="package/catalog.json", refresh=True,
+    )
+    gc = _command_for_watershed_data(
+        "gc", site_spec="site.yaml", cache="cache", catalog="catalog.json",
+        status_output="status",
+    )
+    assert gc[2] == "gc"
+    assert "--delete" not in gc
     assert _command_for_watershed_data(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,
         start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
     ).count("--init-if-missing") == 1
+    forecast_run = _command_for_watershed_data(
+        "run", site_spec="site.yaml", station_id="01649500", workspace="run",
+        site_id="demo", longitude=-77, latitude=39,
+        start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
+        forecast_url="https://example.test/f.json", forecast_provider="example",
+        prediction_time="2024-01-01T03:00:00Z",
+    )
+    assert "--forecast-url" in forecast_run
+    assert "--prediction-time" in forecast_run
     assert _command_for_watershed_data(
         "forecast-view", site_spec="site.yaml", asset_id="sha256:x",
         prediction_time="2025-01-01T00:00:00Z", cache="cache", catalog="catalog.json",

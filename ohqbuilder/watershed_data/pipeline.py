@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from .catalog import AssetCatalog
+from .forecast import acquire_forecast_archive, materialize_available_forecasts
 from .hydropinn import export_hydropinn
 from .nasa_power import acquire_historical_meteorology, acquire_pet_et
 from .package import freeze_package, validate_package
@@ -25,6 +26,13 @@ def run_watershed_data_pipeline(
     discharge_acquirer: Callable = acquire_observed_discharge,
     weather_acquirer: Callable = acquire_historical_meteorology,
     pet_acquirer: Callable = acquire_pet_et,
+    forecast_acquirer: Callable = acquire_forecast_archive,
+    forecast_view_builder: Callable = materialize_available_forecasts,
+    forecast_url: str = "",
+    forecast_provider: str = "",
+    forecast_product: str = "forecast",
+    prediction_time: str = "",
+    refresh: bool = False,
     init_if_missing: bool = False,
     site_id: str = "",
     name: str | None = None,
@@ -36,8 +44,12 @@ def run_watershed_data_pipeline(
     """Run the optional native→QC→package workflow after explicit gauge selection."""
     if include_discharge and not station_id:
         raise WatershedDataError("an explicit station ID is required when discharge is enabled")
-    if not any((include_discharge, include_weather, include_pet)):
+    if not any((include_discharge, include_weather, include_pet)) and not forecast_url:
         raise WatershedDataError("select at least one watershed-data product")
+    if bool(forecast_url) != bool(forecast_provider):
+        raise WatershedDataError("forecast URL and provider must be supplied together")
+    if prediction_time and not forecast_url:
+        raise WatershedDataError("prediction time requires a forecast URL and provider")
     site_path = Path(site_spec).expanduser().resolve()
     if not site_path.exists() and init_if_missing:
         missing = [
@@ -63,19 +75,38 @@ def run_watershed_data_pipeline(
     provenance_dir = package / "provenance"
     native_assets = []
     if include_discharge:
-        native_assets.append(discharge_acquirer(spec, station_id, cache=cache, catalog=catalog))
+        native_assets.append(discharge_acquirer(
+            spec, station_id, cache=cache, catalog=catalog, refresh=refresh
+        ))
     if include_weather:
-        native_assets.append(weather_acquirer(spec, cache=cache, catalog=catalog))
+        native_assets.append(weather_acquirer(spec, cache=cache, catalog=catalog, refresh=refresh))
     if include_pet:
-        native_assets.append(pet_acquirer(spec, cache=cache, catalog=catalog))
+        native_assets.append(pet_acquirer(spec, cache=cache, catalog=catalog, refresh=refresh))
+    forecast_asset = None
+    forecast_view = None
+    if forecast_url:
+        forecast_asset = forecast_acquirer(
+            url=forecast_url, provider=forecast_provider, product=forecast_product,
+            cache=cache, catalog=catalog,
+            refresh=refresh,
+        )
+        native_assets.append(forecast_asset)
     derived_assets = []
     for asset in native_assets:
+        if asset is forecast_asset:
+            continue
         safe_id = asset["asset_id"].replace(":", "_")
         derived_assets.append(harmonize_asset(
             asset_id=asset["asset_id"], catalog=catalog, object_store=cache,
             qc_output=qc_dir / f"{safe_id}.json",
             provenance_output=provenance_dir / f"{safe_id}.json",
         ))
+    if forecast_asset is not None and prediction_time:
+        forecast_view = forecast_view_builder(
+            asset_id=forecast_asset["asset_id"], prediction_time=prediction_time,
+            object_store=cache, catalog=catalog,
+        )
+        derived_assets.append(forecast_view)
     manifest_path = freeze_package(
         site_spec=site_path, catalog=catalog, output=package,
         include_raw="referenced", object_store=cache,
@@ -95,4 +126,6 @@ def run_watershed_data_pipeline(
         "package_manifest": str(manifest_path),
         "package_id": manifest.package_id,
         "hydropinn_manifest": str(hydropinn_manifest) if hydropinn_manifest else None,
+        "forecast_asset_id": forecast_asset["asset_id"] if forecast_asset else None,
+        "forecast_view_asset_id": forecast_view["asset_id"] if forecast_view else None,
     }

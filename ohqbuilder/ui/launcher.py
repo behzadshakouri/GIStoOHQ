@@ -19,6 +19,9 @@ from typing import Any, Literal
 
 import yaml
 
+from ohqbuilder.watershed_data.reconnaissance import selected_station_from_report
+from ohqbuilder.watershed_data.schemas import WatershedDataError
+
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 MAP_TILE_SIZE = 256
 OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "gistoohq_osm_tiles"
@@ -304,6 +307,7 @@ def watershed_data_command(
     latitude: float | None = None,
     study_start: str = "",
     study_end: str = "",
+    refresh: bool = False,
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -336,23 +340,28 @@ def watershed_data_command(
     if action == "download-discharge":
         if not station_id:
             raise LauncherError("Enter the selected USGS station ID after reconnaissance.")
+        argv = [
+            "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
+            "--station-id", station_id, "--cache", cache, "--catalog", catalog,
+        ]
+        if refresh:
+            argv.append("--refresh")
         return WorkflowCommand(
             "Download Selected Discharge",
-            (
-                "ohqbuild", "data", "download-discharge", "--site-spec", site_spec,
-                "--station-id", station_id, "--cache", cache, "--catalog", catalog,
-            ),
+            tuple(argv),
         )
     if action == "validate-site":
         return WorkflowCommand(
             "Validate SiteSpec", ("ohqbuild", "data", "validate-site", "--site-spec", site_spec)
         )
     if action == "download-weather":
+        refresh_args = ("--refresh",) if refresh else ()
         return WorkflowCommand(
             "Download Historical Weather",
             (
                 "ohqbuild", "data", "download-weather", "--site-spec", site_spec,
                 "--cache", cache, "--catalog", catalog, "--variables", weather_variables,
+                *refresh_args,
             ),
         )
     if action == "harmonize":
@@ -367,11 +376,13 @@ def watershed_data_command(
             ),
         )
     if action == "download-pet":
+        refresh_args = ("--refresh",) if refresh else ()
         return WorkflowCommand(
             "Download PET/ET",
             (
                 "ohqbuild", "data", "download-pet", "--site-spec", site_spec,
                 "--cache", cache, "--catalog", catalog, "--variables", "EVPTRNS",
+                *refresh_args,
             ),
         )
     if action == "freeze":
@@ -396,33 +407,42 @@ def watershed_data_command(
         bootstrap = _watershed_data_bootstrap_args(
             site_id, name, longitude, latitude, study_start, study_end
         )
+        forecast_args = _watershed_data_forecast_run_args(
+            forecast_url, forecast_provider, forecast_product, prediction_time
+        )
         return WorkflowCommand(
             "Run Watershed Data Pipeline",
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
-                "--export-hydropinn", *bootstrap,
+                "--export-hydropinn", *(("--refresh",) if refresh else ()),
+                *forecast_args, *bootstrap,
             ),
         )
     if action == "run-weather":
         bootstrap = _watershed_data_bootstrap_args(
             site_id, name, longitude, latitude, study_start, study_end
         )
+        forecast_args = _watershed_data_forecast_run_args(
+            forecast_url, forecast_provider, forecast_product, prediction_time
+        )
         return WorkflowCommand(
             "Run Weather/PET to HydroPINN",
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", "", "--workspace", workspace,
-                "--no-discharge", "--export-hydropinn", *bootstrap,
+                "--no-discharge", "--export-hydropinn",
+                *(("--refresh",) if refresh else ()), *forecast_args, *bootstrap,
             ),
         )
     if action == "download-forecast":
         if not forecast_url or not forecast_provider:
             raise LauncherError("Forecast URL and provider are required.")
+        refresh_args = ("--refresh",) if refresh else ()
         return WorkflowCommand("Download Forecast Archive", (
             "ohqbuild", "data", "download-forecast", "--url", forecast_url,
             "--provider", forecast_provider, "--product", forecast_product,
-            "--cache", cache, "--catalog", catalog,
+            "--cache", cache, "--catalog", catalog, *refresh_args,
         ))
     if action == "forecast-view":
         if not asset_id or not prediction_time:
@@ -442,6 +462,11 @@ def watershed_data_command(
             "ohqbuild", "data", "doctor", "--site-spec", site_spec,
             "--catalog", catalog, "--object-store", cache, "--package", package,
         ))
+    if action == "gc":
+        return WorkflowCommand("Inspect Cache Garbage", (
+            "ohqbuild", "data", "gc", "--object-store", cache,
+            "--catalog", catalog, "--output", str(Path(status_output) / "cache-gc.json"),
+        ))
     raise LauncherError(f"Unknown watershed-data action: {action}")
 
 
@@ -459,6 +484,22 @@ def _watershed_data_bootstrap_args(
         "--lat", str(latitude), "--start", study_start, "--end", study_end,
     )
     return (*args, "--name", name) if name else args
+
+
+def _watershed_data_forecast_run_args(
+    url: str, provider: str, product: str, prediction_time: str,
+) -> tuple[str, ...]:
+    if bool(url) != bool(provider):
+        raise LauncherError("Forecast URL and provider must be supplied together.")
+    if prediction_time and not url:
+        raise LauncherError("Prediction time requires a forecast URL and provider.")
+    if not url:
+        return ()
+    args = (
+        "--forecast-url", url, "--forecast-provider", provider,
+        "--forecast-product", product or "forecast",
+    )
+    return (*args, "--prediction-time", prediction_time) if prediction_time else args
 
 
 @dataclass(frozen=True)
@@ -1858,8 +1899,24 @@ class LauncherApp:
             tk.Entry(content, textvariable=variable, width=52).grid(
                 row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
             )
+        refresh_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            content, text="Refresh provider responses (ignore reusable cache)",
+            variable=refresh_var,
+        ).grid(row=len(variables) + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
+            if action == "use-recon-selection":
+                try:
+                    station = selected_station_from_report(
+                        variables["Reconnaissance output"].get()
+                    )
+                except WatershedDataError as exc:
+                    self.messages.put(f"ERROR: {exc}\n")
+                    return
+                variables["Selected USGS station ID"].set(station)
+                self.messages.put(f"Selected USGS station from reconnaissance: {station}\n")
+                return
             try:
                 command = watershed_data_command(
                     action,
@@ -1887,6 +1944,7 @@ class LauncherApp:
                     if variables["Outlet latitude"].get() else None,
                     study_start=variables["Study start (UTC)"].get(),
                     study_end=variables["Study end (UTC)"].get(),
+                    refresh=refresh_var.get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1898,6 +1956,7 @@ class LauncherApp:
             ("Create SiteSpec", "init-site"),
             ("Validate SiteSpec", "validate-site"),
             ("Discover Gauges", "reconnaissance"),
+            ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
@@ -1911,8 +1970,9 @@ class LauncherApp:
             ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
+            ("Inspect Cache Garbage", "gc"),
         )
-        row = len(variables) + 1
+        row = len(variables) + 2
         action_frame = tk.LabelFrame(content, text="Actions")
         action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         for index, (label, action) in enumerate(actions):

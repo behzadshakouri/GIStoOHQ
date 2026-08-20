@@ -12,6 +12,7 @@ from typing import Callable
 
 from .schemas import SiteSpec, WatershedDataError
 from .catalog import AssetCatalog, ObjectStore
+from .network import download_bytes
 from .schemas import canonical_request_key
 
 USGS_SITE_SERVICE = "https://waterservices.usgs.gov/nwis/site/"
@@ -98,11 +99,10 @@ def discover_gauges(
     opener: Callable[..., object] = urllib.request.urlopen,
 ) -> tuple[str, list[GaugeCandidate]]:
     url = build_site_query(spec, radius_km)
-    try:
-        with opener(url, timeout=60.0) as response:
-            text = response.read().decode("utf-8")
-    except OSError as exc:
-        raise WatershedDataError(f"USGS gauge discovery failed: {exc}") from exc
+    raw, _, _ = download_bytes(
+        url, opener=opener, timeout=60.0, label="USGS gauge discovery"
+    )
+    text = raw.decode("utf-8")
     return url, parse_site_rdb(text, spec)
 
 
@@ -171,22 +171,24 @@ def acquire_observed_discharge(
     cache: str | Path,
     catalog: str | Path,
     opener: Callable[..., object] = urllib.request.urlopen,
+    refresh: bool = False,
 ) -> dict[str, object]:
     endpoint, parameters = build_discharge_query(spec, station_id)
+    request_key = canonical_request_key("usgs", endpoint, parameters, "nwis-iv-waterml-1.1")
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     url = endpoint + "?" + urllib.parse.urlencode(parameters)
-    try:
-        with opener(url, timeout=120.0) as response:
-            raw = response.read()
-    except OSError as exc:
-        raise WatershedDataError(f"USGS discharge acquisition failed: {exc}") from exc
+    raw, _, acquisition_attempts = download_bytes(
+        url, opener=opener, timeout=120.0, label="USGS discharge acquisition"
+    )
     summary = summarize_discharge_json(raw, station_id)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
-    request_key = canonical_request_key("usgs", endpoint, parameters, "nwis-iv-waterml-1.1")
-    return AssetCatalog(catalog).register({
+    return catalog_store.register({
         "provider": "usgs", "product": "observed-discharge",
         "product_version": "nwis-iv-waterml-1.1", "station_id": station_id,
         "request_parameters": parameters, "request_key": request_key,
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json", "source_url": url,
-        "processing_status": "native", **summary,
+        "processing_status": "native", "acquisition_attempts": acquisition_attempts, **summary,
     })

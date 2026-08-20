@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .catalog import AssetCatalog, ObjectStore
+from .network import download_bytes
 from .schemas import SiteSpec, WatershedDataError, canonical_request_key
 
 POWER_HOURLY_POINT = "https://power.larc.nasa.gov/api/temporal/hourly/point"
@@ -75,26 +76,30 @@ def acquire_historical_meteorology(
     product: str = "historical-meteorology",
     semantics: str = "meteorological_forcing",
     temporal: str = "hourly",
+    refresh: bool = False,
 ) -> dict[str, object]:
     endpoint, request_parameters = build_meteorology_query(spec, parameters, temporal=temporal)
+    request_key = canonical_request_key(
+        "nasa-power", endpoint, request_parameters, f"{temporal}-point-v1"
+    )
+    catalog_store = AssetCatalog(catalog)
+    if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
+        return cached
     url = endpoint + "?" + urllib.parse.urlencode(request_parameters)
-    try:
-        with opener(url, timeout=120.0) as response:
-            raw = response.read()
-    except OSError as exc:
-        raise WatershedDataError(f"NASA POWER meteorology acquisition failed: {exc}") from exc
+    raw, _, acquisition_attempts = download_bytes(
+        url, opener=opener, timeout=120.0, label="NASA POWER meteorology acquisition"
+    )
     summary = summarize_meteorology_json(raw, parameters, temporal=temporal)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
-    return AssetCatalog(catalog).register({
+    return catalog_store.register({
         "provider": "nasa-power", "product": product,
         "product_version": f"{temporal}-point-v1", "request_parameters": request_parameters,
-        "request_key": canonical_request_key(
-            "nasa-power", endpoint, request_parameters, f"{temporal}-point-v1"
-        ),
+        "request_key": request_key,
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json", "source_url": url,
         "processing_status": "native", "longitude": spec.longitude,
-        "latitude": spec.latitude, "variable_semantics": semantics, **summary,
+        "latitude": spec.latitude, "variable_semantics": semantics,
+        "acquisition_attempts": acquisition_attempts, **summary,
     })
 
 
@@ -102,8 +107,10 @@ def acquire_pet_et(
     spec: SiteSpec, *, cache: str | Path, catalog: str | Path,
     parameters: tuple[str, ...] = DEFAULT_PET_PARAMETERS,
     opener: Callable[..., object] = urllib.request.urlopen,
+    refresh: bool = False,
 ) -> dict[str, object]:
     return acquire_historical_meteorology(
         spec, cache=cache, catalog=catalog, parameters=parameters, opener=opener,
         product="pet-et", semantics="provider_evapotranspiration_parameter", temporal="daily",
+        refresh=refresh,
     )
