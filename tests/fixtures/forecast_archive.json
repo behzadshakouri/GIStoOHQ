@@ -1,0 +1,4 @@
+[
+  {"issue_time":"2025-01-01T00:00:00Z","valid_time":"2025-01-01T06:00:00Z","lead_time_hours":6,"member":"control","variable":"precipitation","location_or_grid_id":"grid-1","value":2.5,"units":"mm"},
+  {"issue_time":"2025-01-01T06:00:00Z","valid_time":"2025-01-01T12:00:00Z","lead_time_hours":6,"member":"control","variable":"precipitation","location_or_grid_id":"grid-1","value":1.0,"units":"mm"}
+]
