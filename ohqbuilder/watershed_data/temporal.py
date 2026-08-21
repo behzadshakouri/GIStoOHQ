@@ -75,10 +75,38 @@ def _native_rows(raw: bytes, provider: str) -> tuple[list[dict[str, Any]], dict[
 def temporal_qc(
     rows: list[dict[str, Any]], asset_id: str, temporal_resolution: str | None = None,
     units: dict[str, str] | None = None,
+    expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
+    rows_by_variable: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_variable.setdefault(row["variable"], []).append(row)
+    duplicate_examples = []
+    seen_keys = set()
+    for timestamp, variable in keys:
+        key = (timestamp, variable)
+        if key in seen_keys and len(duplicate_examples) < 100:
+            duplicate_examples.append({
+                "timestamp": timestamp.isoformat(), "variable": variable,
+            })
+        seen_keys.add(key)
     missing = sum(row["value"] is None for row in rows)
+    completeness_by_variable = {}
+    missing_examples = []
+    for variable, variable_rows in sorted(rows_by_variable.items()):
+        variable_missing = sum(row["value"] is None for row in variable_rows)
+        completeness_by_variable[variable] = {
+            "record_count": len(variable_rows),
+            "valid_count": len(variable_rows) - variable_missing,
+            "missing_count": variable_missing,
+            "missing_fraction": variable_missing / len(variable_rows),
+        }
+    for row in rows:
+        if row["value"] is None and len(missing_examples) < 100:
+            missing_examples.append({
+                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
+            })
     ordered = keys == sorted(keys)
     ranges = {
         "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
@@ -100,13 +128,64 @@ def temporal_qc(
     expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
         temporal_resolution or ""
     )
+    alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    misaligned = []
+    misaligned_count = 0
+    if expected_delta is not None:
+        interval_seconds = expected_delta.total_seconds()
+        for row in rows:
+            offset_seconds = (row["timestamp"] - alignment_origin).total_seconds()
+            if offset_seconds % interval_seconds:
+                misaligned_count += 1
+                if len(misaligned) < 100:
+                    misaligned.append({
+                        "timestamp": row["timestamp"].isoformat(),
+                        "variable": row["variable"],
+                    })
+    requested_start = _utc(expected_start) if expected_start else None
+    requested_end = _utc(expected_end) if expected_end else None
+    coverage_tolerance = expected_delta or timedelta(0)
+    coverage_gaps = []
+    coverage_by_variable = {}
+    for variable, variable_rows in sorted(rows_by_variable.items()):
+        timestamps = sorted(
+            row["timestamp"] for row in variable_rows if row["value"] is not None
+        )
+        observed_start = timestamps[0] if timestamps else None
+        observed_end = timestamps[-1] if timestamps else None
+        coverage_by_variable[variable] = {
+            "observed_start": observed_start.isoformat() if observed_start else None,
+            "observed_end": observed_end.isoformat() if observed_end else None,
+        }
+        if requested_start is not None and (
+            observed_start is None or observed_start > requested_start
+        ):
+            coverage_gaps.append({
+                "variable": variable, "boundary": "start",
+                "requested": requested_start.isoformat(),
+                "observed": observed_start.isoformat() if observed_start else None,
+                "gap_seconds": (
+                    (observed_start - requested_start).total_seconds()
+                    if observed_start else None
+                ),
+            })
+        if requested_end is not None and (
+            observed_end is None or observed_end + coverage_tolerance < requested_end
+        ):
+            coverage_gaps.append({
+                "variable": variable, "boundary": "end",
+                "requested": requested_end.isoformat(),
+                "observed": observed_end.isoformat() if observed_end else None,
+                "gap_seconds": (
+                    (requested_end - observed_end).total_seconds()
+                    if observed_end else None
+                ),
+            })
     missing_intervals = 0
     gap_examples = []
     if expected_delta is not None:
-        by_variable: dict[str, list[datetime]] = {}
-        for row in rows:
-            by_variable.setdefault(row["variable"], []).append(row["timestamp"])
-        for variable, timestamps in by_variable.items():
+        for variable, variable_rows in rows_by_variable.items():
+            timestamps = [row["timestamp"] for row in variable_rows]
             unique = sorted(set(timestamps))
             for previous, current in zip(unique, unique[1:]):
                 gap = current - previous
@@ -145,9 +224,13 @@ def temporal_qc(
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
-                 {"duplicate_count": duplicates}),
+                 {"duplicate_count": duplicates, "examples": duplicate_examples}),
         QCResult("temporal.missing_values", "warning", missing == 0,
-                 f"{missing} missing values", (asset_id,), {"missing_count": missing}),
+                 f"{missing} missing values", (asset_id,), {
+                     "missing_count": missing,
+                     "completeness_by_variable": completeness_by_variable,
+                     "examples": missing_examples,
+                 }),
         QCResult("temporal.chronology", "warning", ordered,
                  "records are chronologically ordered" if ordered else "native records are unordered",
                  (asset_id,)),
@@ -187,12 +270,39 @@ def temporal_qc(
                 "gaps": gap_examples,
             },
         ),
+        QCResult(
+            "temporal.timestep_alignment", "warning",
+            expected_delta is None or misaligned_count == 0,
+            "native temporal resolution is not fixed" if expected_delta is None else
+            f"{misaligned_count} records are not aligned to the {temporal_resolution} UTC grid",
+            (asset_id,), {
+                "evaluated": expected_delta is not None,
+                "temporal_resolution": temporal_resolution,
+                "misaligned_record_count": misaligned_count,
+                "examples": misaligned,
+            },
+        ),
+        QCResult(
+            "temporal.study_period_coverage", "warning", not coverage_gaps,
+            "study-period bounds were not supplied" if not (requested_start or requested_end)
+            else (f"{len(coverage_gaps)} variable boundaries do not cover the study period"
+                  if coverage_gaps else "all variables cover the requested study period"),
+            (asset_id,), {
+                "evaluated": bool(requested_start or requested_end),
+                "requested_start": requested_start.isoformat() if requested_start else None,
+                "requested_end": requested_end.isoformat() if requested_end else None,
+                "coverage_by_variable": coverage_by_variable,
+                "end_tolerance_seconds": coverage_tolerance.total_seconds(),
+                "uncovered_boundaries": coverage_gaps,
+            },
+        ),
     ]
 
 
 def harmonize_asset(
     *, asset_id: str, catalog: str | Path, object_store: str | Path,
     qc_output: str | Path, provenance_output: str | Path,
+    expected_start: str | None = None, expected_end: str | None = None,
 ) -> dict[str, Any]:
     catalog_store = AssetCatalog(catalog)
     catalog_data = catalog_store.read()
@@ -203,7 +313,10 @@ def harmonize_asset(
         rows, units = _native_rows(stream.read(), source["provider"])
     if not rows:
         raise WatershedDataError("native temporal asset contains no observations")
-    qc = temporal_qc(rows, asset_id, source.get("temporal_resolution"), units)
+    qc = temporal_qc(
+        rows, asset_id, source.get("temporal_resolution"), units,
+        expected_start, expected_end,
+    )
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(("timestamp_utc", "variable", "value", "native_unit", "provider_qualifiers"))
