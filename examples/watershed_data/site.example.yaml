@@ -22,6 +22,8 @@ sources:
       # maximum_drainage_area_error_fraction: 0.20
       require_study_period_overlap: true
       require_topological_compatibility: false
+      # Populate only from reviewed GIS/topology evidence, never proximity alone.
+      # topologically_compatible_station_ids: ["01649500"]
   meteorology:
     selection: auto
     policy_version: "1.0"

@@ -55,6 +55,10 @@ After watershed delineation, set `expected_drainage_area_km2` and
 `maximum_drainage_area_error_fraction` in the discharge constraints. Reconnaissance
 then reports each gauge's fractional area error, rejects incompatible gauges, and
 uses area agreement in scoring without changing the explicit topology safeguard.
+Reviewed GIS evidence can be recorded as `topologically_compatible_station_ids`.
+When topology is required, only listed stations pass; without this evidence the
+existing fail-closed behavior remains in effect. Proximity never establishes
+topological compatibility by itself.
 
 ## Download native observed discharge
 

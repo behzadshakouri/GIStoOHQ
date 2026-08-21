@@ -64,6 +64,23 @@ def test_required_topology_prevents_silent_selection(tmp_path):
     assert all(not candidate["acceptable"] for candidate in report["candidates"])
 
 
+def test_declared_topology_evidence_allows_only_compatible_station(tmp_path):
+    data = _spec().to_dict()
+    constraints = data["sources"]["discharge"]["constraints"]
+    constraints["require_topological_compatibility"] = True
+    constraints["topologically_compatible_station_ids"] = ["01649500"]
+    site = tmp_path / "site.yaml"
+    site.write_text(yaml.safe_dump(data))
+    candidates = parse_site_rdb(Path("tests/fixtures/usgs_sites.rdb").read_text(), _spec())[:2]
+    report = run_reconnaissance(
+        site, tmp_path / "recon", discover=lambda spec, radius_km: ("query", candidates)
+    )
+    assert report["decision"] == "selected"
+    assert report["selected_station_id"] == "01649500"
+    assert report["candidates"][0]["constraints"]["topological_compatibility"] is True
+    assert report["candidates"][1]["constraints"]["topological_compatibility"] is False
+
+
 def test_allowed_status_constraint_is_reported(tmp_path):
     data = _spec().to_dict()
     data["sources"]["discharge"]["constraints"]["allowed_statuses"] = ["inactive"]

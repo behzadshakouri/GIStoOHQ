@@ -52,6 +52,17 @@ def assess_candidate(candidate: GaugeCandidate, spec: SiteSpec) -> CandidateAsse
         "topological_compatibility": None,
         "drainage_area_compatibility": None,
     }
+    compatible_stations = policy.get("topologically_compatible_station_ids")
+    if compatible_stations is not None:
+        if not isinstance(compatible_stations, list) or any(
+            not str(station).isdigit() for station in compatible_stations
+        ):
+            raise WatershedDataError(
+                "topologically_compatible_station_ids must be an array of numeric station IDs"
+            )
+        constraints["topological_compatibility"] = candidate.station_id in {
+            str(station) for station in compatible_stations
+        }
     expected_area = policy.get("expected_drainage_area_km2")
     maximum_area_error = policy.get("maximum_drainage_area_error_fraction")
     if expected_area is not None:
@@ -76,8 +87,13 @@ def assess_candidate(candidate: GaugeCandidate, spec: SiteSpec) -> CandidateAsse
         reasons.append(f"distance exceeds {maximum_distance:g} km")
     if policy.get("require_study_period_overlap", True) and not overlap:
         reasons.append("record does not overlap the study period")
-    if policy.get("require_topological_compatibility", False):
-        reasons.append("topological compatibility is not established")
+    if policy.get("require_topological_compatibility", False) and not constraints[
+        "topological_compatibility"
+    ]:
+        reasons.append(
+            "topological compatibility is not established" if compatible_stations is None else
+            "station is not in the declared topologically compatible set"
+        )
     if constraints["drainage_area_compatibility"] is False:
         reasons.append(
             "gauge drainage area is unavailable" if area_error is None else
