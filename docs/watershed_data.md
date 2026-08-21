@@ -323,7 +323,9 @@ tolerance. Fixed-resolution products are also checked for timestamps that fall
 off their declared hourly or daily UTC grid. Missing-value QC includes per-variable
 record, valid, and missing counts and a bounded sample of affected timestamps.
 Duplicate timestamp-variable records likewise include bounded examples for direct
-diagnosis without making large QC reports grow without limit.
+diagnosis without making large QC reports grow without limit. Chronology is
+evaluated within each variable, so provider grouping of otherwise ordered series
+does not produce a false warning; actual inversions include bounded examples.
 
 ## Graphical interfaces
 

@@ -107,7 +107,19 @@ def temporal_qc(
             missing_examples.append({
                 "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
             })
-    ordered = keys == sorted(keys)
+    chronology_inversions = 0
+    chronology_examples = []
+    for variable, variable_rows in sorted(rows_by_variable.items()):
+        timestamps = [row["timestamp"] for row in variable_rows]
+        for previous, current in zip(timestamps, timestamps[1:]):
+            if current < previous:
+                chronology_inversions += 1
+                if len(chronology_examples) < 100:
+                    chronology_examples.append({
+                        "variable": variable,
+                        "previous_timestamp": previous.isoformat(),
+                        "current_timestamp": current.isoformat(),
+                    })
     ranges = {
         "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
         "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
@@ -231,9 +243,15 @@ def temporal_qc(
                      "completeness_by_variable": completeness_by_variable,
                      "examples": missing_examples,
                  }),
-        QCResult("temporal.chronology", "warning", ordered,
-                 "records are chronologically ordered" if ordered else "native records are unordered",
-                 (asset_id,)),
+        QCResult(
+            "temporal.chronology", "warning", chronology_inversions == 0,
+            "each variable is chronologically ordered" if chronology_inversions == 0 else
+            f"{chronology_inversions} within-variable chronology inversions",
+            (asset_id,), {
+                "inversion_count": chronology_inversions,
+                "examples": chronology_examples,
+            },
+        ),
         QCResult(
             "temporal.physical_range", "error", not violations,
             f"{len(violations)} values outside declared physical ranges", (asset_id,),

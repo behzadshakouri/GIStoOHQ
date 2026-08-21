@@ -174,6 +174,41 @@ def test_temporal_qc_reports_duplicate_timestamp_examples(tmp_path):
     }
 
 
+def test_temporal_qc_checks_chronology_within_each_variable(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    precipitation = document["properties"]["parameter"]["PRECTOTCORR"]
+    document["properties"]["parameter"]["PRECTOTCORR"] = {
+        "2025010101": precipitation["2025010101"],
+        "2025010100": precipitation["2025010100"],
+    }
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.chronology"
+    )
+    assert result["passed"] is False
+    assert result["details"] == {
+        "inversion_count": 1,
+        "examples": [{
+            "variable": "PRECTOTCORR",
+            "previous_timestamp": "2025-01-01T01:00:00+00:00",
+            "current_timestamp": "2025-01-01T00:00:00+00:00",
+        }],
+    }
+
+
 def test_temporal_qc_reports_missing_expected_hour(tmp_path):
     document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
     for values in document["properties"]["parameter"].values():
