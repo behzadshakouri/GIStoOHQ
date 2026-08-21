@@ -230,6 +230,9 @@ def test_temporal_qc_reports_missing_expected_hour(tmp_path):
     result = next(item for item in qc["results"] if item["rule_id"] == "temporal.expected_intervals")
     assert result["passed"] is False
     assert result["details"]["missing_interval_count"] == 2
+    assert result["details"]["missing_intervals_by_variable"] == {
+        "PRECTOTCORR": 1, "T2M": 1,
+    }
 
 
 def test_temporal_qc_reports_observations_off_the_declared_time_grid(tmp_path):

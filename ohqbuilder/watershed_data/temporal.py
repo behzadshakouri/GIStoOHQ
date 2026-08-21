@@ -194,9 +194,11 @@ def temporal_qc(
                 ),
             })
     missing_intervals = 0
+    missing_intervals_by_variable = {}
     gap_examples = []
     if expected_delta is not None:
-        for variable, variable_rows in rows_by_variable.items():
+        for variable, variable_rows in sorted(rows_by_variable.items()):
+            variable_missing_intervals = 0
             timestamps = [row["timestamp"] for row in variable_rows]
             unique = sorted(set(timestamps))
             for previous, current in zip(unique, unique[1:]):
@@ -204,11 +206,13 @@ def temporal_qc(
                 if gap > expected_delta:
                     count = max(0, int(gap / expected_delta) - 1)
                     missing_intervals += count
+                    variable_missing_intervals += count
                     if len(gap_examples) < 100:
                         gap_examples.append({
                             "variable": variable, "after": previous.isoformat(),
                             "before": current.isoformat(), "missing_intervals": count,
                         })
+            missing_intervals_by_variable[variable] = variable_missing_intervals
     expected_units = {
         "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
         "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
@@ -285,6 +289,7 @@ def temporal_qc(
                 "evaluated": expected_delta is not None,
                 "temporal_resolution": temporal_resolution,
                 "missing_interval_count": missing_intervals,
+                "missing_intervals_by_variable": missing_intervals_by_variable,
                 "gaps": gap_examples,
             },
         ),

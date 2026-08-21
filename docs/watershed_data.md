@@ -326,6 +326,8 @@ Duplicate timestamp-variable records likewise include bounded examples for direc
 diagnosis without making large QC reports grow without limit. Chronology is
 evaluated within each variable, so provider grouping of otherwise ordered series
 does not produce a false warning; actual inversions include bounded examples.
+Internal gap QC reports missing interval totals by variable as well as bounded gap
+examples, making a multi-variable product's incomplete series directly identifiable.
 
 ## Graphical interfaces
 
