@@ -51,6 +51,10 @@ then writes `report.json` and `report.md`. It records every candidate, distance,
 record overlap, constraint result, score, rejection reason, and selection
 decision. A required topology check is never guessed: candidates remain
 unacceptable until a later spatial-topology adapter can establish compatibility.
+After watershed delineation, set `expected_drainage_area_km2` and
+`maximum_drainage_area_error_fraction` in the discharge constraints. Reconnaissance
+then reports each gauge's fractional area error, rejects incompatible gauges, and
+uses area agreement in scoring without changing the explicit topology safeguard.
 
 ## Download native observed discharge
 

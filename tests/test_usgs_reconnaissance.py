@@ -78,6 +78,24 @@ def test_allowed_status_constraint_is_reported(tmp_path):
     assert "not allowed" in assessment["rejection_reasons"][0]
 
 
+def test_drainage_area_constraint_rejects_incompatible_gauge(tmp_path):
+    data = _spec().to_dict()
+    constraints = data["sources"]["discharge"]["constraints"]
+    constraints["expected_drainage_area_km2"] = 190.0
+    constraints["maximum_drainage_area_error_fraction"] = 0.05
+    site = tmp_path / "site.yaml"
+    site.write_text(yaml.safe_dump(data))
+    candidates = parse_site_rdb(Path("tests/fixtures/usgs_sites.rdb").read_text(), _spec())[:2]
+    report = run_reconnaissance(
+        site, tmp_path / "recon", discover=lambda spec, radius_km: ("query", candidates)
+    )
+    first, second = report["candidates"]
+    assert first["constraints"]["drainage_area_compatibility"] is True
+    assert first["metrics"]["drainage_area_error_fraction"] < 0.05
+    assert second["constraints"]["drainage_area_compatibility"] is False
+    assert "drainage-area error" in second["rejection_reasons"][0]
+
+
 def test_selected_station_is_loaded_only_from_unambiguous_report(tmp_path):
     report = {
         "schema_name": "ReconnaissanceReport", "schema_version": "1.0",

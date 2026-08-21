@@ -16,11 +16,13 @@ class CandidateAssessment:
     acceptable: bool
     constraints: dict[str, bool | None]
     rejection_reasons: tuple[str, ...]
+    metrics: dict[str, float | None]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             **self.candidate.to_dict(), "score": self.score, "acceptable": self.acceptable,
             "constraints": self.constraints, "rejection_reasons": list(self.rejection_reasons),
+            "metrics": self.metrics,
         }
 
 
@@ -48,7 +50,27 @@ def assess_candidate(candidate: GaugeCandidate, spec: SiteSpec) -> CandidateAsse
         "maximum_distance": candidate.distance_km <= maximum_distance,
         "study_period_overlap": overlap,
         "topological_compatibility": None,
+        "drainage_area_compatibility": None,
     }
+    expected_area = policy.get("expected_drainage_area_km2")
+    maximum_area_error = policy.get("maximum_drainage_area_error_fraction")
+    if expected_area is not None:
+        expected_area = float(expected_area)
+        if expected_area <= 0:
+            raise WatershedDataError("expected_drainage_area_km2 must be positive")
+    if maximum_area_error is not None:
+        maximum_area_error = float(maximum_area_error)
+        if not 0 <= maximum_area_error <= 1 or expected_area is None:
+            raise WatershedDataError(
+                "maximum_drainage_area_error_fraction requires expected area and range [0,1]"
+            )
+    area_error = None
+    if expected_area is not None and candidate.drainage_area_km2 is not None:
+        area_error = abs(candidate.drainage_area_km2 - expected_area) / expected_area
+    if maximum_area_error is not None:
+        constraints["drainage_area_compatibility"] = (
+            area_error is not None and area_error <= maximum_area_error
+        )
     reasons = []
     if not constraints["maximum_distance"]:
         reasons.append(f"distance exceeds {maximum_distance:g} km")
@@ -56,6 +78,11 @@ def assess_candidate(candidate: GaugeCandidate, spec: SiteSpec) -> CandidateAsse
         reasons.append("record does not overlap the study period")
     if policy.get("require_topological_compatibility", False):
         reasons.append("topological compatibility is not established")
+    if constraints["drainage_area_compatibility"] is False:
+        reasons.append(
+            "gauge drainage area is unavailable" if area_error is None else
+            f"drainage-area error {area_error:.3f} exceeds {maximum_area_error:.3f}"
+        )
     allowed_statuses = [str(value).lower() for value in policy.get("allowed_statuses", [])]
     if allowed_statuses:
         constraints["allowed_status"] = candidate.status in allowed_statuses
@@ -64,7 +91,12 @@ def assess_candidate(candidate: GaugeCandidate, spec: SiteSpec) -> CandidateAsse
     score = max(0.0, 100.0 - min(candidate.distance_km, 100.0))
     if overlap:
         score += 25.0
-    return CandidateAssessment(candidate, round(score, 6), not reasons, constraints, tuple(reasons))
+    if area_error is not None:
+        score += max(0.0, 20.0 * (1.0 - min(area_error, 1.0)))
+    return CandidateAssessment(
+        candidate, round(score, 6), not reasons, constraints, tuple(reasons),
+        {"drainage_area_error_fraction": area_error},
+    )
 
 
 def run_reconnaissance(

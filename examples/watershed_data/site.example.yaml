@@ -17,6 +17,9 @@ sources:
     policy_version: "1.0"
     constraints:
       maximum_distance_km: 50
+      # Set these after obtaining the delineated watershed area.
+      # expected_drainage_area_km2: 100.0
+      # maximum_drainage_area_error_fraction: 0.20
       require_study_period_overlap: true
       require_topological_compatibility: false
   meteorology:
