@@ -75,6 +75,7 @@ def _native_rows(raw: bytes, provider: str) -> tuple[list[dict[str, Any]], dict[
 def temporal_qc(
     rows: list[dict[str, Any]], asset_id: str, temporal_resolution: str | None = None,
     units: dict[str, str] | None = None,
+    expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
@@ -100,6 +101,25 @@ def temporal_qc(
     expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
         temporal_resolution or ""
     )
+    observed_start = min((row["timestamp"] for row in rows), default=None)
+    observed_end = max((row["timestamp"] for row in rows), default=None)
+    requested_start = _utc(expected_start) if expected_start else None
+    requested_end = _utc(expected_end) if expected_end else None
+    coverage_tolerance = expected_delta or timedelta(0)
+    coverage_gaps = []
+    if observed_start is not None and requested_start is not None and observed_start > requested_start:
+        coverage_gaps.append({
+            "boundary": "start", "requested": requested_start.isoformat(),
+            "observed": observed_start.isoformat(),
+            "gap_seconds": (observed_start - requested_start).total_seconds(),
+        })
+    if (observed_end is not None and requested_end is not None
+            and observed_end + coverage_tolerance < requested_end):
+        coverage_gaps.append({
+            "boundary": "end", "requested": requested_end.isoformat(),
+            "observed": observed_end.isoformat(),
+            "gap_seconds": (requested_end - observed_end).total_seconds(),
+        })
     missing_intervals = 0
     gap_examples = []
     if expected_delta is not None:
@@ -187,12 +207,27 @@ def temporal_qc(
                 "gaps": gap_examples,
             },
         ),
+        QCResult(
+            "temporal.study_period_coverage", "warning", not coverage_gaps,
+            "study-period bounds were not supplied" if not (requested_start or requested_end)
+            else f"{len(coverage_gaps)} requested study-period boundaries are not covered",
+            (asset_id,), {
+                "evaluated": bool(requested_start or requested_end),
+                "requested_start": requested_start.isoformat() if requested_start else None,
+                "requested_end": requested_end.isoformat() if requested_end else None,
+                "observed_start": observed_start.isoformat() if observed_start else None,
+                "observed_end": observed_end.isoformat() if observed_end else None,
+                "end_tolerance_seconds": coverage_tolerance.total_seconds(),
+                "uncovered_boundaries": coverage_gaps,
+            },
+        ),
     ]
 
 
 def harmonize_asset(
     *, asset_id: str, catalog: str | Path, object_store: str | Path,
     qc_output: str | Path, provenance_output: str | Path,
+    expected_start: str | None = None, expected_end: str | None = None,
 ) -> dict[str, Any]:
     catalog_store = AssetCatalog(catalog)
     catalog_data = catalog_store.read()
@@ -203,7 +238,10 @@ def harmonize_asset(
         rows, units = _native_rows(stream.read(), source["provider"])
     if not rows:
         raise WatershedDataError("native temporal asset contains no observations")
-    qc = temporal_qc(rows, asset_id, source.get("temporal_resolution"), units)
+    qc = temporal_qc(
+        rows, asset_id, source.get("temporal_resolution"), units,
+        expected_start, expected_end,
+    )
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(("timestamp_utc", "variable", "value", "native_unit", "provider_qualifiers"))

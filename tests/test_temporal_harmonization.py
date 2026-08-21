@@ -40,6 +40,7 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.expected_intervals",
         "temporal.unit_compatibility",
         "temporal.provider_qualifiers",
+        "temporal.study_period_coverage",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -151,3 +152,24 @@ def test_temporal_qc_rejects_incompatible_known_unit(tmp_path):
     assert result["details"]["mismatches"][0] == {
         "actual_unit": "kelvin", "allowed_units": ["C"], "variable": "T2M",
     }
+
+
+def test_temporal_qc_reports_incomplete_requested_study_period(tmp_path):
+    store, catalog, native = _native_asset(
+        tmp_path, "nasa-power", "tests/fixtures/nasa_power_hourly.json",
+        "historical-meteorology",
+    )
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+        expected_start="2024-12-31T23:00:00Z", expected_end="2025-01-01T04:00:00Z",
+    )
+    qc = json.loads((tmp_path / "qc.json").read_text())
+    result = next(
+        item for item in qc["results"] if item["rule_id"] == "temporal.study_period_coverage"
+    )
+    assert result["passed"] is False
+    assert result["severity"] == "warning"
+    assert [gap["boundary"] for gap in result["details"]["uncovered_boundaries"]] == [
+        "start", "end",
+    ]
