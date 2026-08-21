@@ -1,4 +1,5 @@
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,27 @@ def test_weather_pipeline_bootstraps_missing_site_spec(tmp_path):
     )
     assert site.is_file()
     assert Path(result["hydropinn_manifest"]).is_file()
+
+
+def test_discharge_pipeline_accepts_unambiguous_reconnaissance_report(tmp_path):
+    site = write_site_spec(
+        tmp_path / "site.yaml", site_id="selected", name="Selected", longitude=-77, latitude=39,
+        start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+    )
+    report_dir = tmp_path / "recon"
+    report_dir.mkdir()
+    (report_dir / "report.json").write_text(json.dumps({
+        "schema_name": "ReconnaissanceReport", "schema_version": "1.0",
+        "decision": "selected", "selected_station_id": "01649500",
+    }))
+    result = run_watershed_data_pipeline(
+        site_spec=site, station_id="", reconnaissance_report=report_dir,
+        workspace=tmp_path / "selected_run", include_weather=False, include_pet=False,
+        discharge_acquirer=_fixture_acquirer(
+            "tests/fixtures/usgs_discharge.json", "usgs", "observed-discharge"
+        ),
+    )
+    assert result["station_id"] == "01649500"
 
 
 def test_pipeline_includes_forecast_archive_and_prediction_time_view(tmp_path):

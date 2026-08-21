@@ -79,6 +79,12 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
     )
     assert "--init-if-missing" in run.argv
+    report_run = watershed_data_command(
+        "run", site_spec="site.yaml", station_id="", workspace="run",
+        reconnaissance_output="recon", site_id="demo", longitude=-77, latitude=39,
+        study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
+    )
+    assert "--reconnaissance-report" in report_run.argv
     refreshed = watershed_data_command(
         "download-weather", site_spec="site.yaml", refresh=True
     )

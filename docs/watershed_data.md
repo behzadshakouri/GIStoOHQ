@@ -176,6 +176,10 @@ Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
 **RUN ALL DATA STEPS** button performs this orchestration in both graphical
 interfaces. Gauge selection remains explicit; this command never silently picks
 an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
+If `--station-id` is omitted, `data run` may instead receive
+`--reconnaissance-report reconnaissance/`; it proceeds only when that report has
+one validated `selected` station. Both graphical full-data buttons use the report
+automatically when the station field is blank.
 
 An explicitly configured forecast archive can be included in the same atomic run.
 When `--prediction-time` is present, the package also includes a leakage-safe

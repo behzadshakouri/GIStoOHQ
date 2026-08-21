@@ -168,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     data_run.add_argument("--site-spec", required=True)
     data_run.add_argument("--station-id", default="")
+    data_run.add_argument("--reconnaissance-report", default=None)
     data_run.add_argument("--workspace", required=True)
     data_run.add_argument("--no-discharge", action="store_true")
     data_run.add_argument("--no-weather", action="store_true")
@@ -1261,6 +1262,7 @@ def main(argv: list[str] | None = None) -> int:
                     forecast_url=args.forecast_url, forecast_provider=args.forecast_provider,
                     forecast_product=args.forecast_product, prediction_time=args.prediction_time,
                     refresh=args.refresh,
+                    reconnaissance_report=args.reconnaissance_report,
                 )
                 print(f"Watershed data pipeline complete: {result['package_manifest']}")
             elif args.data_command == "download-forecast":

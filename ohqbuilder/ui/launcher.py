@@ -403,19 +403,21 @@ def watershed_data_command(
                                   "--output", hydropinn_output)
         )
     if action == "run":
-        if not station_id:
-            raise LauncherError("Select an explicit USGS station ID before running all data steps.")
         bootstrap = _watershed_data_bootstrap_args(
             site_id, name, longitude, latitude, study_start, study_end
         )
         forecast_args = _watershed_data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
         )
+        selection_args = (
+            ("--station-id", station_id) if station_id else
+            ("--reconnaissance-report", reconnaissance_output)
+        )
         return WorkflowCommand(
             "Run Watershed Data Pipeline",
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
-                "--station-id", station_id, "--workspace", workspace,
+                *selection_args, "--workspace", workspace,
                 "--export-hydropinn", *(("--refresh",) if refresh else ()),
                 *forecast_args, *bootstrap,
             ),

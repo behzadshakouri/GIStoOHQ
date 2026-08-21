@@ -351,6 +351,12 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
         site_id="demo", longitude=-77, latitude=39,
         start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
     ).count("--init-if-missing") == 1
+    report_run = _command_for_watershed_data(
+        "run", site_spec="site.yaml", station_id="", workspace="run",
+        reconnaissance_output="recon", site_id="demo", longitude=-77, latitude=39,
+        start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
+    )
+    assert "--reconnaissance-report" in report_run
     forecast_run = _command_for_watershed_data(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,

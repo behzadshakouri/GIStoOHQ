@@ -320,15 +320,16 @@ def _command_for_watershed_data(
             "--object-store", cache, "--output", hydropinn_output,
         ]
     if action == "run":
-        if not station_id:
-            raise QgisDockConfigError("Select an explicit USGS station ID before running all steps.")
         bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
         forecast_args = _data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
         )
+        selection_args = ["--station-id", station_id] if station_id else [
+            "--reconnaissance-report", reconnaissance_output,
+        ]
         return [
             "ohqbuild", "data", "run", "--site-spec", site_spec,
-            "--station-id", station_id, "--workspace", workspace,
+            *selection_args, "--workspace", workspace,
             "--export-hydropinn", *(["--refresh"] if refresh else []),
             *forecast_args, *bootstrap,
         ]

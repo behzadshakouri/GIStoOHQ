@@ -8,6 +8,7 @@ from .forecast import acquire_forecast_archive, materialize_available_forecasts
 from .hydropinn import export_hydropinn
 from .nasa_power import acquire_historical_meteorology, acquire_pet_et
 from .package import freeze_package, validate_package
+from .reconnaissance import selected_station_from_report
 from .schemas import SiteSpec, WatershedDataError
 from .temporal import harmonize_asset
 from .usgs import acquire_observed_discharge
@@ -40,10 +41,15 @@ def run_watershed_data_pipeline(
     latitude: float | None = None,
     study_start: str = "",
     study_end: str = "",
+    reconnaissance_report: str | Path | None = None,
 ) -> dict[str, object]:
     """Run the optional native→QC→package workflow after explicit gauge selection."""
     if include_discharge and not station_id:
-        raise WatershedDataError("an explicit station ID is required when discharge is enabled")
+        if reconnaissance_report is None:
+            raise WatershedDataError(
+                "an explicit station ID or reconnaissance report is required when discharge is enabled"
+            )
+        station_id = selected_station_from_report(reconnaissance_report)
     if not any((include_discharge, include_weather, include_pet)) and not forecast_url:
         raise WatershedDataError("select at least one watershed-data product")
     if bool(forecast_url) != bool(forecast_provider):
@@ -119,6 +125,7 @@ def run_watershed_data_pipeline(
         )
     return {
         "site_id": spec.site_id,
+        "station_id": station_id or None,
         "workspace": str(root),
         "catalog": str(AssetCatalog(catalog).path),
         "native_asset_ids": [asset["asset_id"] for asset in native_assets],
