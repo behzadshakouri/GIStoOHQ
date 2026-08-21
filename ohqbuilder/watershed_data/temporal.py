@@ -79,11 +79,22 @@ def temporal_qc(
 ) -> list[QCResult]:
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
+    rows_by_variable: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_variable.setdefault(row["variable"], []).append(row)
+    duplicate_examples = []
+    seen_keys = set()
+    for timestamp, variable in keys:
+        key = (timestamp, variable)
+        if key in seen_keys and len(duplicate_examples) < 100:
+            duplicate_examples.append({
+                "timestamp": timestamp.isoformat(), "variable": variable,
+            })
+        seen_keys.add(key)
     missing = sum(row["value"] is None for row in rows)
     completeness_by_variable = {}
     missing_examples = []
-    for variable in sorted({row["variable"] for row in rows}):
-        variable_rows = [row for row in rows if row["variable"] == variable]
+    for variable, variable_rows in sorted(rows_by_variable.items()):
         variable_missing = sum(row["value"] is None for row in variable_rows)
         completeness_by_variable[variable] = {
             "record_count": len(variable_rows),
@@ -96,7 +107,19 @@ def temporal_qc(
             missing_examples.append({
                 "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
             })
-    ordered = keys == sorted(keys)
+    chronology_inversions = 0
+    chronology_examples = []
+    for variable, variable_rows in sorted(rows_by_variable.items()):
+        timestamps = [row["timestamp"] for row in variable_rows]
+        for previous, current in zip(timestamps, timestamps[1:]):
+            if current < previous:
+                chronology_inversions += 1
+                if len(chronology_examples) < 100:
+                    chronology_examples.append({
+                        "variable": variable,
+                        "previous_timestamp": previous.isoformat(),
+                        "current_timestamp": current.isoformat(),
+                    })
     ranges = {
         "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
         "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
@@ -136,10 +159,9 @@ def temporal_qc(
     coverage_tolerance = expected_delta or timedelta(0)
     coverage_gaps = []
     coverage_by_variable = {}
-    for variable in sorted({row["variable"] for row in rows}):
+    for variable, variable_rows in sorted(rows_by_variable.items()):
         timestamps = sorted(
-            row["timestamp"] for row in rows
-            if row["variable"] == variable and row["value"] is not None
+            row["timestamp"] for row in variable_rows if row["value"] is not None
         )
         observed_start = timestamps[0] if timestamps else None
         observed_end = timestamps[-1] if timestamps else None
@@ -172,23 +194,25 @@ def temporal_qc(
                 ),
             })
     missing_intervals = 0
+    missing_intervals_by_variable = {}
     gap_examples = []
     if expected_delta is not None:
-        by_variable: dict[str, list[datetime]] = {}
-        for row in rows:
-            by_variable.setdefault(row["variable"], []).append(row["timestamp"])
-        for variable, timestamps in by_variable.items():
+        for variable, variable_rows in sorted(rows_by_variable.items()):
+            variable_missing_intervals = 0
+            timestamps = [row["timestamp"] for row in variable_rows]
             unique = sorted(set(timestamps))
             for previous, current in zip(unique, unique[1:]):
                 gap = current - previous
                 if gap > expected_delta:
                     count = max(0, int(gap / expected_delta) - 1)
                     missing_intervals += count
+                    variable_missing_intervals += count
                     if len(gap_examples) < 100:
                         gap_examples.append({
                             "variable": variable, "after": previous.isoformat(),
                             "before": current.isoformat(), "missing_intervals": count,
                         })
+            missing_intervals_by_variable[variable] = variable_missing_intervals
     expected_units = {
         "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
         "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
@@ -216,16 +240,22 @@ def temporal_qc(
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
-                 {"duplicate_count": duplicates}),
+                 {"duplicate_count": duplicates, "examples": duplicate_examples}),
         QCResult("temporal.missing_values", "warning", missing == 0,
                  f"{missing} missing values", (asset_id,), {
                      "missing_count": missing,
                      "completeness_by_variable": completeness_by_variable,
                      "examples": missing_examples,
                  }),
-        QCResult("temporal.chronology", "warning", ordered,
-                 "records are chronologically ordered" if ordered else "native records are unordered",
-                 (asset_id,)),
+        QCResult(
+            "temporal.chronology", "warning", chronology_inversions == 0,
+            "each variable is chronologically ordered" if chronology_inversions == 0 else
+            f"{chronology_inversions} within-variable chronology inversions",
+            (asset_id,), {
+                "inversion_count": chronology_inversions,
+                "examples": chronology_examples,
+            },
+        ),
         QCResult(
             "temporal.physical_range", "error", not violations,
             f"{len(violations)} values outside declared physical ranges", (asset_id,),
@@ -259,6 +289,7 @@ def temporal_qc(
                 "evaluated": expected_delta is not None,
                 "temporal_resolution": temporal_resolution,
                 "missing_interval_count": missing_intervals,
+                "missing_intervals_by_variable": missing_intervals_by_variable,
                 "gaps": gap_examples,
             },
         ),

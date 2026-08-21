@@ -322,6 +322,12 @@ fixed-resolution series; daily products receive one daily interval of end-bounda
 tolerance. Fixed-resolution products are also checked for timestamps that fall
 off their declared hourly or daily UTC grid. Missing-value QC includes per-variable
 record, valid, and missing counts and a bounded sample of affected timestamps.
+Duplicate timestamp-variable records likewise include bounded examples for direct
+diagnosis without making large QC reports grow without limit. Chronology is
+evaluated within each variable, so provider grouping of otherwise ordered series
+does not produce a false warning; actual inversions include bounded examples.
+Internal gap QC reports missing interval totals by variable as well as bounded gap
+examples, making a multi-variable product's incomplete series directly identifiable.
 
 ## Graphical interfaces
 
