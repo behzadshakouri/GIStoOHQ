@@ -319,7 +319,8 @@ Temporal QC also compares each variable's first and last non-missing observation
 with the SiteSpec study period during a one-button pipeline run. An incomplete
 leading or trailing window is reported separately from gaps inside a
 fixed-resolution series; daily products receive one daily interval of end-boundary
-tolerance.
+tolerance. Fixed-resolution products are also checked for timestamps that fall
+off their declared hourly or daily UTC grid.
 
 ## Graphical interfaces
 

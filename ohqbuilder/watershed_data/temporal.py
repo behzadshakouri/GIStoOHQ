@@ -101,6 +101,20 @@ def temporal_qc(
     expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
         temporal_resolution or ""
     )
+    alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    misaligned = []
+    misaligned_count = 0
+    if expected_delta is not None:
+        interval_seconds = expected_delta.total_seconds()
+        for row in rows:
+            offset_seconds = (row["timestamp"] - alignment_origin).total_seconds()
+            if offset_seconds % interval_seconds:
+                misaligned_count += 1
+                if len(misaligned) < 100:
+                    misaligned.append({
+                        "timestamp": row["timestamp"].isoformat(),
+                        "variable": row["variable"],
+                    })
     requested_start = _utc(expected_start) if expected_start else None
     requested_end = _utc(expected_end) if expected_end else None
     coverage_tolerance = expected_delta or timedelta(0)
@@ -226,6 +240,18 @@ def temporal_qc(
                 "temporal_resolution": temporal_resolution,
                 "missing_interval_count": missing_intervals,
                 "gaps": gap_examples,
+            },
+        ),
+        QCResult(
+            "temporal.timestep_alignment", "warning",
+            expected_delta is None or misaligned_count == 0,
+            "native temporal resolution is not fixed" if expected_delta is None else
+            f"{misaligned_count} records are not aligned to the {temporal_resolution} UTC grid",
+            (asset_id,), {
+                "evaluated": expected_delta is not None,
+                "temporal_resolution": temporal_resolution,
+                "misaligned_record_count": misaligned_count,
+                "examples": misaligned,
             },
         ),
         QCResult(

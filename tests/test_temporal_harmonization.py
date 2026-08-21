@@ -41,6 +41,7 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.unit_compatibility",
         "temporal.provider_qualifiers",
         "temporal.study_period_coverage",
+        "temporal.timestep_alignment",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -128,6 +129,35 @@ def test_temporal_qc_reports_missing_expected_hour(tmp_path):
     result = next(item for item in qc["results"] if item["rule_id"] == "temporal.expected_intervals")
     assert result["passed"] is False
     assert result["details"]["missing_interval_count"] == 2
+
+
+def test_temporal_qc_reports_observations_off_the_declared_time_grid(tmp_path):
+    document = json.loads(Path("tests/fixtures/usgs_discharge.json").read_text())
+    observations = document["value"]["timeSeries"][0]["values"][0]["value"]
+    observations[0]["dateTime"] = "2025-01-01T00:15:00Z"
+    observations[1]["dateTime"] = "2025-01-01T01:00:00Z"
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "usgs", "product": "observed-discharge",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.timestep_alignment"
+    )
+    assert result["passed"] is False
+    assert result["details"]["misaligned_record_count"] == 1
+    assert result["details"]["examples"] == [{
+        "timestamp": "2025-01-01T00:15:00+00:00", "variable": "00060",
+    }]
 
 
 def test_temporal_qc_rejects_incompatible_known_unit(tmp_path):
