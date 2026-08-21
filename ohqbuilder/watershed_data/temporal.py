@@ -80,6 +80,22 @@ def temporal_qc(
     keys = [(row["timestamp"], row["variable"]) for row in rows]
     duplicates = len(keys) - len(set(keys))
     missing = sum(row["value"] is None for row in rows)
+    completeness_by_variable = {}
+    missing_examples = []
+    for variable in sorted({row["variable"] for row in rows}):
+        variable_rows = [row for row in rows if row["variable"] == variable]
+        variable_missing = sum(row["value"] is None for row in variable_rows)
+        completeness_by_variable[variable] = {
+            "record_count": len(variable_rows),
+            "valid_count": len(variable_rows) - variable_missing,
+            "missing_count": variable_missing,
+            "missing_fraction": variable_missing / len(variable_rows),
+        }
+    for row in rows:
+        if row["value"] is None and len(missing_examples) < 100:
+            missing_examples.append({
+                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
+            })
     ordered = keys == sorted(keys)
     ranges = {
         "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
@@ -202,7 +218,11 @@ def temporal_qc(
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
                  {"duplicate_count": duplicates}),
         QCResult("temporal.missing_values", "warning", missing == 0,
-                 f"{missing} missing values", (asset_id,), {"missing_count": missing}),
+                 f"{missing} missing values", (asset_id,), {
+                     "missing_count": missing,
+                     "completeness_by_variable": completeness_by_variable,
+                     "examples": missing_examples,
+                 }),
         QCResult("temporal.chronology", "warning", ordered,
                  "records are chronologically ordered" if ordered else "native records are unordered",
                  (asset_id,)),

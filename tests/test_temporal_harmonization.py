@@ -108,6 +108,42 @@ def test_temporal_qc_reports_impossible_provider_values(tmp_path):
     assert result["details"]["violations"][0]["variable"] == "RH2M"
 
 
+def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["properties"]["parameter"]["T2M"]["2025010100"] = -999
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.missing_values"
+    )
+    assert result["passed"] is False
+    assert result["details"]["completeness_by_variable"] == {
+        "PRECTOTCORR": {
+            "record_count": 2, "valid_count": 2, "missing_count": 0,
+            "missing_fraction": 0.0,
+        },
+        "T2M": {
+            "record_count": 2, "valid_count": 1, "missing_count": 1,
+            "missing_fraction": 0.5,
+        },
+    }
+    assert result["details"]["examples"] == [{
+        "timestamp": "2025-01-01T00:00:00+00:00", "variable": "T2M",
+    }]
+
+
 def test_temporal_qc_reports_missing_expected_hour(tmp_path):
     document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
     for values in document["properties"]["parameter"].values():
