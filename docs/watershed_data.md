@@ -1,0 +1,334 @@
+# Optional watershed data
+
+The watershed-data commands are an additive workflow for discharge, weather,
+PET/ET, normalized forecast archives, and future provider products. They are not
+required by `ohqbuild full-run`. Start with the ready-to-copy configuration in
+`examples/watershed_data/site.example.yaml`.
+
+## Create and validate a site specification
+
+```bash
+ohqbuild data init-site \
+  --site-spec sites/hickey_run.yaml \
+  --site-id hickey_run --name "Hickey Run" \
+  --lon -76.98 --lat 38.92 \
+  --start 2018-01-01T00:00:00Z \
+  --end 2025-12-31T23:00:00Z
+
+ohqbuild data validate-site --site-spec sites/hickey_run.yaml
+```
+
+The generated source entries are policies, not provider selections. USGS gauge
+reconnaissance records all candidates, constraint results, scores, rejection
+reasons, and its decision before discharge acquisition.
+
+The graphical dialogs no longer assume that `sites/watershed.yaml` already
+exists. They derive an absolute SiteSpec path, output workspace, cache, catalog,
+and package paths from the loaded project configuration. Outlet and site values
+are copied from that configuration. Add an optional study period to the project
+configuration so the dialog can prefill its remaining required fields:
+
+```yaml
+watershed_data:
+  study_period:
+    start: 2024-01-01T00:00:00Z
+    end: 2024-12-31T23:00:00Z
+```
+
+Review the values and click **Create SiteSpec** before any download action.
+The two full-data buttons also pass `--init-if-missing`, so they create the
+SiteSpec automatically when all site, outlet, and study-period fields are filled.
+
+## Discover discharge gauges before downloading
+
+```bash
+ohqbuild data reconnaissance --site-spec sites/hickey_run.yaml \
+  --output reconnaissance --radius-km 50
+```
+
+The command queries the USGS site service for stations that publish discharge,
+then writes `report.json` and `report.md`. It records every candidate, distance,
+record overlap, constraint result, score, rejection reason, and selection
+decision. A required topology check is never guessed: candidates remain
+unacceptable until a later spatial-topology adapter can establish compatibility.
+
+## Download native observed discharge
+
+After reviewing reconnaissance, record or enter an explicit gauge ID and run:
+
+```bash
+ohqbuild data download-discharge --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --cache .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+```
+
+GIStoOHQ stores the exact USGS WaterML JSON response in the immutable object
+store. Its catalog record preserves the station and parameter identifiers,
+native units, native timezone offsets, temporal coverage, observation count,
+provider qualifiers, missing-value sentinel, request parameters, request key,
+and content digest. It does not aggregate, interpolate, normalize, or convert
+units during native acquisition.
+
+Both graphical front ends now expose this workflow:
+
+- run `ohqbuild ui` and choose **Watershed data…** in the standalone launcher;
+- open the QGIS plugin's **Data** tab and choose **Open Watershed Data…**.
+
+In either interface, run **Discover Gauges**, review `report.md`, enter the
+chosen station ID, or use **Use Reconnaissance Selection** when the report contains
+one unambiguous acceptable candidate, and select **Download Selected Discharge**.
+Ambiguous or rejected results are never copied automatically. These buttons run
+the same backend commands documented above and do not modify Full Run to OHQ.
+
+## Download native historical weather
+
+```bash
+ohqbuild data download-weather --site-spec sites/hickey_run.yaml \
+  --cache .gistoohq-cache --catalog watershed_package/catalog.json \
+  --variables PRECTOTCORR,T2M,RH2M,WS2M,ALLSKY_SFC_SW_DWN
+```
+
+The NASA POWER adapter downloads hourly point precipitation, temperature,
+humidity, wind, and surface solar radiation in UTC. The raw response, native
+variable names and units, point coordinates, coverage, counts, and missing-value
+counts are cataloged without resampling or filling gaps. Both graphical data
+dialogs expose this as **Download Weather**.
+
+## Harmonize and run generic temporal QC
+
+Native assets remain immutable. To create a separate sorted UTC table while
+preserving native units, missing values, and provider qualifiers:
+
+```bash
+ohqbuild data harmonize --asset-id sha256:... \
+  --catalog watershed_package/catalog.json --object-store .gistoohq-cache \
+  --qc-output watershed_package/quality_control/temporal.json \
+  --provenance-output watershed_package/provenance/temporal.json
+```
+
+The derived CSV is a new catalog asset linked to its native parent. The QC report
+uses stable rules for duplicate timestamp-variable records, missing values, and
+chronology. It also applies declared physical bounds to known discharge, rainfall,
+humidity, wind, radiation, temperature, and evapotranspiration variables; unknown
+variables remain unchanged and are not assigned guessed limits.
+For assets declaring hourly or daily native support, QC also identifies missing
+internal intervals independently for each variable. It does not fill those gaps.
+Known USGS and NASA POWER variables are checked against their declared native-unit
+contracts. Unknown variables are listed as not evaluated rather than assigned a
+guessed unit or converted silently.
+USGS approval qualifiers are also retained and summarized. Records carrying `P`
+produce a warning-level provisional-data result, while `A` is reported as approved;
+the observations themselves remain unchanged.
+The provenance document records transformation name/version, parameters, software
+version, timestamps, parent asset, and output asset. This
+step converts timestamps to UTC and sorts records; it does not aggregate,
+interpolate, normalize, or convert units.
+Every derived catalog asset must declare non-empty parent asset IDs plus its
+transformation name, version, and parameters. Catalog publication rejects
+incomplete lineage instead of relying only on optional sidecar files.
+
+When a package is frozen, all `quality_control/*.json` reports are validated and
+aggregated into the manifest's `package_qc_status`: failed error rules produce
+`fail`, failed warning rules produce `warning`, otherwise executed QC produces
+`pass`. A package without QC reports remains explicitly `not_run`.
+
+## PET/ET and HydroPINN export
+
+Download the provider's native evapotranspiration parameter separately so its
+semantics cannot be confused with observed ET or locally calculated reference ET:
+
+```bash
+ohqbuild data download-pet --site-spec sites/hickey_run.yaml \
+  --cache .gistoohq-cache --catalog watershed_package/catalog.json
+```
+
+The NASA POWER weather acquisition retains hourly support. The provider's
+`EVPTRNS` product is requested from the daily point endpoint and remains daily;
+harmonization does not silently upsample it to the target model timestep.
+
+After harmonizing desired assets and freezing the generic package, create the
+thin consumer export:
+
+```bash
+ohqbuild data export-hydropinn --package watershed_package \
+  --object-store .gistoohq-cache --output outputs/hydropinn
+```
+
+The export contains a manifest, `variables.json`, and named observation tables.
+It records the source package and checksums. It deliberately performs no
+normalization, imputation, feature selection, lag construction, or experimental
+partitioning. **Download PET/ET**, **Freeze Package**, **Validate Package**, and
+**Export HydroPINN** are available in both graphical data dialogs.
+
+## Run the complete optional data workflow
+
+After reconnaissance and explicit gauge selection, the CLI and both graphical
+dialogs can download discharge, weather, and PET/ET; harmonize and QC each native
+asset; freeze and validate the generic package; and optionally export HydroPINN:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --workspace outputs/hickey_run_data \
+  --export-hydropinn
+```
+
+Use `--no-discharge`, `--no-weather`, or `--no-pet` to omit a product. The
+**RUN ALL DATA STEPS** button performs this orchestration in both graphical
+interfaces. Gauge selection remains explicit; this command never silently picks
+an ambiguous station. This optional pipeline remains separate from Full Run to OHQ.
+
+An explicitly configured forecast archive can be included in the same atomic run.
+When `--prediction-time` is present, the package also includes a leakage-safe
+forecast view containing only forecasts issued by that time:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --station-id 01649500 --workspace outputs/hickey_run_data \
+  --forecast-url https://provider.example/archive.json \
+  --forecast-provider example --forecast-product precipitation \
+  --prediction-time 2025-01-01T03:00:00Z --export-hydropinn
+```
+
+The same forecast fields are honored by both graphical one-button run actions.
+Leaving them blank omits forecasts; supplying only a URL or only a provider is
+rejected before acquisition.
+
+For a weather/PET-only workflow that needs no gauge reconnaissance or station ID,
+use **RUN WEATHER/PET TO EXPORT** in either graphical interface, or run:
+
+```bash
+ohqbuild data run --site-spec sites/hickey_run.yaml \
+  --workspace outputs/hickey_run_weather --no-discharge --export-hydropinn
+```
+
+## Archived forecasts
+
+Forecast archives must be JSON records containing `issue_time`, `valid_time`,
+`lead_time_hours`, `member`, `variable`, `location_or_grid_id`, `value`, and
+`units`. Acquire a provider archive and create a prediction-time view with:
+
+```bash
+ohqbuild data download-forecast --url https://provider/archive.json \
+  --provider provider --product forecast --cache .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+ohqbuild data forecast-view --asset-id sha256:... \
+  --prediction-time 2025-01-01T03:00:00Z --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json
+```
+
+The view enforces `issue_time <= prediction_time`, preserves issue and valid
+times, and rejects inconsistent lead times. It never collapses forecasts to valid
+time alone.
+
+## Inspect downloaded and derived assets
+
+```bash
+ohqbuild data status --catalog watershed_package/catalog.json \
+  --object-store .gistoohq-cache --output watershed_package/status
+```
+
+This writes `status.json` and `status.md` with every asset ID, provider, product,
+native/derived status, parent IDs, coverage, record counts, and object-store
+availability. Use **Inspect Data Status** in either graphical dialog to obtain the
+same report instead of copying opaque IDs directly from console output.
+For harmonization in either graphical dialog, set **Asset product** (for example,
+`historical-meteorology`) and choose **Use Latest Native Asset**. The newest matching
+native revision is copied into **Native asset ID**; missing products are reported
+instead of silently selecting a different data type.
+
+Before a long run or export, validate the local workspace without contacting a
+provider:
+
+```bash
+ohqbuild data doctor --site-spec sites/hickey_run.yaml \
+  --catalog watershed_package/catalog.json --object-store .gistoohq-cache \
+  --package watershed_package
+```
+
+The doctor checks SiteSpec validity, catalog readability, every cataloged object
+digest, and the optional frozen package. A structurally valid package still fails
+the doctor when its aggregated QC status is `fail`; warning and `not_run` states
+remain visible but do not masquerade as structural errors. **Check Data Workspace** exposes the same
+operation in both graphical dialogs.
+
+## Acquire an explicitly declared product
+
+The first generic acquisition primitive stores any explicit HTTPS product once
+by its raw SHA-256 digest and registers it in an asset catalog:
+
+```bash
+ohqbuild data acquire-url \
+  --url https://provider.example/data.csv \
+  --provider example --product hourly-weather --product-version 2026 \
+  --cache .gistoohq-cache --catalog watershed_package/catalog.json
+```
+
+This command is useful to adapter developers and advanced users. A provider
+adapter—not the UI—will eventually construct these requests for weather,
+discharge, PET/ET, and forecast selections.
+
+The object store verifies an already-present object before deduplicating a new
+response. If bytes at a digest path have been corrupted, acquisition stops rather
+than silently replacing an object that was previously published as immutable.
+Catalog registration also rejects malformed digests, negative sizes, empty
+provider/product names, and invalid media types before publishing the catalog.
+Catalog locks record their owning process; a lock abandoned by a terminated local
+process is reclaimed safely, while a live owner's lock is never removed.
+Every catalog read recomputes the digest over its asset array and rejects modified
+metadata, so package validation and cached-request reuse cannot trust a catalog
+whose contents were changed outside the atomic catalog writer.
+
+Acquisition commands reuse the newest locally available asset with the same
+canonical request key, avoiding unnecessary provider calls during repeated UI or
+pipeline runs. Pass `--refresh`—or select **Refresh provider responses** in either
+graphical dialog—to contact the provider deliberately and retain any new response
+as another immutable revision.
+
+When a provider call is necessary, GIStoOHQ retries a complete response up to
+three times with bounded exponential backoff. Only a fully read response is
+published to the immutable store, so a failed or truncated attempt cannot create
+a catalog asset. Successful native catalog records include `acquisition_attempts`,
+and the status report exposes that count for diagnosing unstable providers.
+
+Cache cleanup is deliberately dry-run by default. Supply every catalog that must
+retain its objects, review the JSON report, and only then repeat with `--delete`:
+
+```bash
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json
+ohqbuild data gc --object-store .gistoohq-cache \
+  --catalog watershed_package/catalog.json --output cache-gc.json --delete
+```
+
+Objects referenced by any supplied catalog are never candidates. Destructive
+cleanup is therefore explicit and auditable rather than automatic.
+
+## Freeze and validate a package
+
+```bash
+ohqbuild data freeze --site-spec sites/hickey_run.yaml \
+  --catalog watershed_package/catalog.json --output watershed_package \
+  --include-raw referenced
+ohqbuild data validate-package --package watershed_package
+```
+
+Use `--include-raw none` for metadata-only publication, `referenced` for a
+package that depends on the local object store, or `all --object-store CACHE`
+for a self-contained package. `--redistributable` is never inferred; users must
+set it only after checking every provider license.
+QC and provenance JSON sidecars are listed in the package manifest with SHA-256
+checksums and contribute to package identity. Validation rejects missing or changed
+sidecars, including edits made after a package was frozen.
+
+## Graphical interfaces
+
+The QGIS dock exposes **Data** → **Open Watershed Data…**. The standalone launcher
+exposes **Watershed data…**. Both dialogs are scrollable, group actions in a
+three-column grid, and call the same `ohqbuild data` backend used by the terminal.
+They support SiteSpec creation/validation, reconnaissance, discharge, weather,
+PET/ET, normalized forecast archives, QC/harmonization, status reporting,
+package freeze/validation, HydroPINN export, and the post-reconnaissance
+**RUN ALL DATA STEPS** action.
+
+The existing **Full Run** button remains the default route to OHQ. Watershed
+observations remain optional and are never a prerequisite for an OHQ run.

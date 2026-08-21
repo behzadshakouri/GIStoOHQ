@@ -1,0 +1,12 @@
+{
+  "type": "Feature",
+  "geometry": {"type": "Point", "coordinates": [-76.98, 38.94, 0]},
+  "properties": {"parameter": {
+    "PRECTOTCORR": {"2025010100": 0.0, "2025010101": 1.2},
+    "T2M": {"2025010100": 2.5, "2025010101": 2.1}
+  }},
+  "parameters": {
+    "PRECTOTCORR": {"units": "mm/hour", "longname": "Corrected Precipitation"},
+    "T2M": {"units": "C", "longname": "Temperature at 2 Meters"}
+  }
+}

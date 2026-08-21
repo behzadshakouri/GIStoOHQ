@@ -1,0 +1,27 @@
+schema_name: SiteSpec
+schema_version: "1.0"
+site_id: example_watershed
+name: Example Watershed
+geometry:
+  outlet:
+    longitude: -76.98
+    latitude: 38.92
+  supplied_basin: null
+study_period:
+  start: 2024-01-01T00:00:00Z
+  end: 2024-12-31T23:00:00Z
+target_timestep: 1h
+sources:
+  discharge:
+    selection: auto
+    policy_version: "1.0"
+    constraints:
+      maximum_distance_km: 50
+      require_study_period_overlap: true
+      require_topological_compatibility: false
+  meteorology:
+    selection: auto
+    policy_version: "1.0"
+  pet:
+    selection: auto
+    policy_version: "1.0"

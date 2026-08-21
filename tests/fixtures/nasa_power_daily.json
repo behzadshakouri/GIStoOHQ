@@ -1,0 +1,4 @@
+{
+  "properties": {"parameter": {"EVPTRNS": {"20250101": 1.2, "20250102": -999.0}}},
+  "parameters": {"EVPTRNS": {"units": "mm/day"}}
+}
