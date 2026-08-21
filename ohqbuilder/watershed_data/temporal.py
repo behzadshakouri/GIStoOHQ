@@ -101,25 +101,46 @@ def temporal_qc(
     expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
         temporal_resolution or ""
     )
-    observed_start = min((row["timestamp"] for row in rows), default=None)
-    observed_end = max((row["timestamp"] for row in rows), default=None)
     requested_start = _utc(expected_start) if expected_start else None
     requested_end = _utc(expected_end) if expected_end else None
     coverage_tolerance = expected_delta or timedelta(0)
     coverage_gaps = []
-    if observed_start is not None and requested_start is not None and observed_start > requested_start:
-        coverage_gaps.append({
-            "boundary": "start", "requested": requested_start.isoformat(),
-            "observed": observed_start.isoformat(),
-            "gap_seconds": (observed_start - requested_start).total_seconds(),
-        })
-    if (observed_end is not None and requested_end is not None
-            and observed_end + coverage_tolerance < requested_end):
-        coverage_gaps.append({
-            "boundary": "end", "requested": requested_end.isoformat(),
-            "observed": observed_end.isoformat(),
-            "gap_seconds": (requested_end - observed_end).total_seconds(),
-        })
+    coverage_by_variable = {}
+    for variable in sorted({row["variable"] for row in rows}):
+        timestamps = sorted(
+            row["timestamp"] for row in rows
+            if row["variable"] == variable and row["value"] is not None
+        )
+        observed_start = timestamps[0] if timestamps else None
+        observed_end = timestamps[-1] if timestamps else None
+        coverage_by_variable[variable] = {
+            "observed_start": observed_start.isoformat() if observed_start else None,
+            "observed_end": observed_end.isoformat() if observed_end else None,
+        }
+        if requested_start is not None and (
+            observed_start is None or observed_start > requested_start
+        ):
+            coverage_gaps.append({
+                "variable": variable, "boundary": "start",
+                "requested": requested_start.isoformat(),
+                "observed": observed_start.isoformat() if observed_start else None,
+                "gap_seconds": (
+                    (observed_start - requested_start).total_seconds()
+                    if observed_start else None
+                ),
+            })
+        if requested_end is not None and (
+            observed_end is None or observed_end + coverage_tolerance < requested_end
+        ):
+            coverage_gaps.append({
+                "variable": variable, "boundary": "end",
+                "requested": requested_end.isoformat(),
+                "observed": observed_end.isoformat() if observed_end else None,
+                "gap_seconds": (
+                    (requested_end - observed_end).total_seconds()
+                    if observed_end else None
+                ),
+            })
     missing_intervals = 0
     gap_examples = []
     if expected_delta is not None:
@@ -210,13 +231,13 @@ def temporal_qc(
         QCResult(
             "temporal.study_period_coverage", "warning", not coverage_gaps,
             "study-period bounds were not supplied" if not (requested_start or requested_end)
-            else f"{len(coverage_gaps)} requested study-period boundaries are not covered",
+            else (f"{len(coverage_gaps)} variable boundaries do not cover the study period"
+                  if coverage_gaps else "all variables cover the requested study period"),
             (asset_id,), {
                 "evaluated": bool(requested_start or requested_end),
                 "requested_start": requested_start.isoformat() if requested_start else None,
                 "requested_end": requested_end.isoformat() if requested_end else None,
-                "observed_start": observed_start.isoformat() if observed_start else None,
-                "observed_end": observed_end.isoformat() if observed_end else None,
+                "coverage_by_variable": coverage_by_variable,
                 "end_tolerance_seconds": coverage_tolerance.total_seconds(),
                 "uncovered_boundaries": coverage_gaps,
             },

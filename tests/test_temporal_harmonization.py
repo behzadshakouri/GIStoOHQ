@@ -171,5 +171,34 @@ def test_temporal_qc_reports_incomplete_requested_study_period(tmp_path):
     assert result["passed"] is False
     assert result["severity"] == "warning"
     assert [gap["boundary"] for gap in result["details"]["uncovered_boundaries"]] == [
-        "start", "end",
+        "start", "end", "start", "end",
     ]
+
+
+def test_temporal_qc_checks_study_period_coverage_for_each_variable(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["properties"]["parameter"]["T2M"].pop("2025010100")
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+        expected_start="2025-01-01T00:00:00Z", expected_end="2025-01-01T02:00:00Z",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.study_period_coverage"
+    )
+    assert result["passed"] is False
+    assert result["details"]["uncovered_boundaries"] == [{
+        "variable": "T2M", "boundary": "start",
+        "requested": "2025-01-01T00:00:00+00:00",
+        "observed": "2025-01-01T01:00:00+00:00", "gap_seconds": 3600.0,
+    }]
