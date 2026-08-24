@@ -261,6 +261,8 @@ same report instead of copying opaque IDs directly from console output.
 Forecast entries in `status.json` include issue/valid coverage, prediction time,
 variables, and the per-variable member, location, unit, and record-count summaries
 carried by the catalog.
+When forecasts are present, `status.md` adds a forecast-support table with issue and
+valid coverage, prediction-time cutoffs, and variables for quick human review.
 
 Before a long run or export, validate the local workspace without contacting a
 provider:

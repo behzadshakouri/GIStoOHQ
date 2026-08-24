@@ -47,4 +47,8 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
     )
     assert json.loads(output.read_text())["asset_count"] == 2
     assert native["asset_id"] in (tmp_path / "status" / "status.md").read_text()
-    assert "| Attempts |" in (tmp_path / "status" / "status.md").read_text()
+    markdown = (tmp_path / "status" / "status.md").read_text()
+    assert "| Attempts |" in markdown
+    assert "## Forecast support" in markdown
+    assert "2025-01-01T00:00:00Z → 2025-01-01T06:00:00Z" in markdown
+    assert "precipitation" in markdown

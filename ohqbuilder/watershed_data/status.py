@@ -88,6 +88,25 @@ def write_data_status(
             f"| `{asset['asset_id']}` | {asset['provider']} | {asset['product']} | "
             f"{asset['processing_status']} | {asset['acquisition_attempts'] or '—'} | {available} |"
         )
+    forecast_assets = [
+        asset for asset in report["assets"]
+        if asset["issue_time_coverage"] is not None or asset["valid_time_coverage"] is not None
+    ]
+    if forecast_assets:
+        rows.extend([
+            "", "## Forecast support", "",
+            "| Asset ID | Prediction time | Issue coverage | Valid coverage | Variables |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+        for asset in forecast_assets:
+            issue = asset["issue_time_coverage"] or {}
+            valid = asset["valid_time_coverage"] or {}
+            issue_text = f"{issue.get('start', '—')} → {issue.get('end', '—')}"
+            valid_text = f"{valid.get('start', '—')} → {valid.get('end', '—')}"
+            rows.append(
+                f"| `{asset['asset_id']}` | {asset['prediction_time'] or '—'} | "
+                f"{issue_text} | {valid_text} | {', '.join(asset['variables']) or '—'} |"
+            )
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
     markdown_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     return json_path
