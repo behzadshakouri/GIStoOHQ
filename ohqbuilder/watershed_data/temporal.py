@@ -84,9 +84,15 @@ def temporal_qc(
     missing = 0
     missing_examples = []
     valid_bounds_by_variable: dict[str, tuple[datetime, datetime]] = {}
+    completeness_counts: dict[str, list[int]] = {}
+    previous_timestamp_by_variable: dict[str, datetime] = {}
+    chronology_inversions = 0
+    chronology_examples = []
     for row in rows:
         timestamp, variable = row["timestamp"], row["variable"]
         rows_by_variable.setdefault(variable, []).append(row)
+        counts = completeness_counts.setdefault(variable, [0, 0])
+        counts[0] += 1
         key = (timestamp, variable)
         if key in seen_keys:
             duplicates += 1
@@ -97,6 +103,7 @@ def temporal_qc(
         seen_keys.add(key)
         if row["value"] is None:
             missing += 1
+            counts[1] += 1
             if len(missing_examples) < 100:
                 missing_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
@@ -108,28 +115,25 @@ def temporal_qc(
             )
         else:
             valid_bounds_by_variable[variable] = (timestamp, timestamp)
-    completeness_by_variable = {}
-    for variable, variable_rows in sorted(rows_by_variable.items()):
-        variable_missing = sum(row["value"] is None for row in variable_rows)
-        completeness_by_variable[variable] = {
-            "record_count": len(variable_rows),
-            "valid_count": len(variable_rows) - variable_missing,
-            "missing_count": variable_missing,
-            "missing_fraction": variable_missing / len(variable_rows),
+        previous = previous_timestamp_by_variable.get(variable)
+        if previous is not None and timestamp < previous:
+            chronology_inversions += 1
+            if len(chronology_examples) < 100:
+                chronology_examples.append({
+                    "variable": variable,
+                    "previous_timestamp": previous.isoformat(),
+                    "current_timestamp": timestamp.isoformat(),
+                })
+        previous_timestamp_by_variable[variable] = timestamp
+    completeness_by_variable = {
+        variable: {
+            "record_count": counts[0],
+            "valid_count": counts[0] - counts[1],
+            "missing_count": counts[1],
+            "missing_fraction": counts[1] / counts[0],
         }
-    chronology_inversions = 0
-    chronology_examples = []
-    for variable, variable_rows in sorted(rows_by_variable.items()):
-        timestamps = [row["timestamp"] for row in variable_rows]
-        for previous, current in zip(timestamps, timestamps[1:]):
-            if current < previous:
-                chronology_inversions += 1
-                if len(chronology_examples) < 100:
-                    chronology_examples.append({
-                        "variable": variable,
-                        "previous_timestamp": previous.isoformat(),
-                        "current_timestamp": current.isoformat(),
-                    })
+        for variable, counts in sorted(completeness_counts.items())
+    }
     ranges = {
         "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
         "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
