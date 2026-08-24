@@ -222,6 +222,9 @@ time alone.
 Forecast validation also rejects duplicate issue/valid/member/variable/location
 keys, empty dimensions or units, nonnumeric values, and NaN or infinite numbers
 before either native acquisition or prediction-time view publication.
+Prediction-time materialization also refuses an empty view when the requested
+cutoff precedes every forecast issue time, rather than publishing a zero-record
+derived asset that cannot drive a model.
 
 ## Inspect downloaded and derived assets
 

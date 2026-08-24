@@ -44,6 +44,9 @@ def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
     with pytest.raises(WatershedDataError, match="empty fields: member"):
         validate_forecast_records(records)
 
+    with pytest.raises(WatershedDataError, match="record 0 must be an object"):
+        validate_forecast_records(["not-an-object"])
+
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = "not-a-number"
     with pytest.raises(WatershedDataError, match="must be numeric"):
@@ -67,3 +70,18 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     with ObjectStore(tmp_path / "store").open(view["content_digest"]) as stream:
         rows = list(csv.DictReader(line.decode() for line in stream.readlines()))
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"
+
+
+def test_forecast_view_rejects_prediction_time_before_archive_availability(tmp_path):
+    raw = Path("tests/fixtures/forecast_archive.json").read_bytes()
+    asset = acquire_forecast_archive(
+        url="https://example.test/archive.json", provider="example", product="forecast",
+        cache=tmp_path / "store", catalog=tmp_path / "catalog.json",
+        opener=lambda *args, **kwargs: Response(raw),
+    )
+    with pytest.raises(WatershedDataError, match="no records available"):
+        materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2024-12-31T23:00:00Z",
+            catalog=tmp_path / "catalog.json", object_store=tmp_path / "store",
+        )
+    assert len(json.loads((tmp_path / "catalog.json").read_text())["assets"]) == 1

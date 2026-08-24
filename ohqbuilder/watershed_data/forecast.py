@@ -33,6 +33,8 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     issues, valids, variables, members, locations = [], [], set(), set(), set()
     record_keys = set()
     for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise WatershedDataError(f"forecast record {index} must be an object")
         missing = sorted(required - record.keys())
         if missing:
             raise WatershedDataError(f"forecast record {index} is missing: {', '.join(missing)}")
@@ -127,6 +129,10 @@ def materialize_available_forecasts(
         records = json.load(stream)
     validate_forecast_records(records)
     available = [record for record in records if _time(record["issue_time"], "issue_time") <= cutoff]
+    if not available:
+        raise WatershedDataError(
+            "forecast archive has no records available by the requested prediction_time"
+        )
     buffer = io.StringIO(newline="")
     fields = ["issue_time", "valid_time", "lead_time_hours", "member", "variable",
               "location_or_grid_id", "value", "units"]
