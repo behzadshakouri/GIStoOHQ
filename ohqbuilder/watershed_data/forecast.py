@@ -39,6 +39,9 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     issues, valids, variables, members, locations = [], [], set(), set(), set()
     record_keys = set()
     units_by_variable: dict[str, set[str]] = {}
+    members_by_variable: dict[str, set[str]] = {}
+    locations_by_variable: dict[str, set[str]] = {}
+    record_counts_by_variable: dict[str, int] = {}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise WatershedDataError(f"forecast record {index} must be an object")
@@ -88,6 +91,13 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         members.add(dimensions["member"])
         locations.add(dimensions["location_or_grid_id"])
         units_by_variable.setdefault(dimensions["variable"], set()).add(dimensions["units"])
+        members_by_variable.setdefault(dimensions["variable"], set()).add(dimensions["member"])
+        locations_by_variable.setdefault(dimensions["variable"], set()).add(
+            dimensions["location_or_grid_id"]
+        )
+        record_counts_by_variable[dimensions["variable"]] = (
+            record_counts_by_variable.get(dimensions["variable"], 0) + 1
+        )
     inconsistent_units = {
         variable: sorted(unit_values)
         for variable, unit_values in sorted(units_by_variable.items())
@@ -108,6 +118,15 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             variable: next(iter(unit_values))
             for variable, unit_values in sorted(units_by_variable.items())
         },
+        "members_by_variable": {
+            variable: sorted(member_values)
+            for variable, member_values in sorted(members_by_variable.items())
+        },
+        "locations_by_variable": {
+            variable: sorted(location_values)
+            for variable, location_values in sorted(locations_by_variable.items())
+        },
+        "record_counts_by_variable": dict(sorted(record_counts_by_variable.items())),
         "issue_time_coverage": {"start": min(issues).isoformat(), "end": max(issues).isoformat()},
         "valid_time_coverage": {"start": min(valids).isoformat(), "end": max(valids).isoformat()},
         "availability_rule": "issue_time_must_not_exceed_prediction_time",

@@ -95,6 +95,9 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     assert view["variables"] == ["precipitation"]
     assert view["members"] == ["control"]
     assert view["units_by_variable"] == {"precipitation": "mm"}
+    assert view["members_by_variable"] == {"precipitation": ["control"]}
+    assert view["locations_by_variable"] == {"precipitation": ["grid-1"]}
+    assert view["record_counts_by_variable"] == {"precipitation": 1}
     assert view["issue_time_coverage"] == {
         "start": "2025-01-01T00:00:00+00:00", "end": "2025-01-01T00:00:00+00:00",
     }

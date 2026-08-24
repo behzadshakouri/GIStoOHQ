@@ -236,6 +236,8 @@ responses cached under the earlier validation contract are not silently reused.
 Derived view catalog records repeat the filtered record count, variables, members,
 locations, units, and issue/valid coverage, so consumers need not inspect the CSV
 to determine whether a prediction-time view fits their profile.
+Per-variable record counts, member sets, and location sets preserve the relationship
+between forecast dimensions instead of exposing only archive-wide unions.
 View materialization revalidates the stored native document and reports malformed
 UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
 Provider-specific extension fields remain valid native metadata and are ignored by
