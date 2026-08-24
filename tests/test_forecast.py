@@ -26,7 +26,6 @@ def test_forecast_contract_rejects_bad_lead_and_future_issue():
     with pytest.raises(WatershedDataError, match="inconsistent"):
         validate_forecast_records(records)
 
-
 def test_forecast_contract_rejects_duplicate_and_nonfinite_records():
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records.append(dict(records[0]))
@@ -54,7 +53,12 @@ def test_forecast_contract_rejects_inconsistent_units_per_variable():
 def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["member"] = " "
-    with pytest.raises(WatershedDataError, match="empty fields: member"):
+    with pytest.raises(WatershedDataError, match="invalid string fields: member"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["units"] = None
+    with pytest.raises(WatershedDataError, match="invalid string fields: units"):
         validate_forecast_records(records)
 
     with pytest.raises(WatershedDataError, match="record 0 must be an object"):
@@ -62,7 +66,17 @@ def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
 
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = "not-a-number"
-    with pytest.raises(WatershedDataError, match="must be numeric"):
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["value"] = True
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["lead_time_hours"] = "6"
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
         validate_forecast_records(records)
 
 
@@ -81,11 +95,15 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     )
     assert view["record_count"] == 1
     assert view["transformation_name"] == "prediction-time-availability-filter"
-    assert view["transformation_version"] == "1.1"
+    assert view["transformation_version"] == "1.2"
     assert view["transformation_parameters"]["timestamp_normalization"] == "UTC"
+    assert view["transformation_parameters"]["numeric_normalization"] == "float"
     assert view["variables"] == ["precipitation"]
     assert view["members"] == ["control"]
     assert view["units_by_variable"] == {"precipitation": "mm"}
+    assert view["members_by_variable"] == {"precipitation": ["control"]}
+    assert view["locations_by_variable"] == {"precipitation": ["grid-1"]}
+    assert view["record_counts_by_variable"] == {"precipitation": 1}
     assert view["issue_time_coverage"] == {
         "start": "2025-01-01T00:00:00+00:00", "end": "2025-01-01T00:00:00+00:00",
     }
@@ -94,11 +112,27 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"
 
 
+def test_forecast_acquisition_rejects_empty_identity_before_download(tmp_path):
+    called = False
+
+    def opener(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    with pytest.raises(WatershedDataError, match="provider and product must be non-empty"):
+        acquire_forecast_archive(
+            url="https://example.test/archive.json", provider=" ", product="forecast",
+            cache=tmp_path / "store", catalog=tmp_path / "catalog.json", opener=opener,
+        )
+    assert called is False
+
+
 def test_forecast_view_normalizes_timestamps_and_dimensions(tmp_path):
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["issue_time"] = "2024-12-31T19:00:00-05:00"
     records[0]["valid_time"] = "2025-01-01T01:00:00-05:00"
     records[0]["member"] = " member-1 "
+    records[0]["provider_metadata"] = {"cycle": "00Z"}
     raw = json.dumps(records).encode()
     asset = acquire_forecast_archive(
         url="https://example.test/archive.json", provider="example", product="forecast",
@@ -114,6 +148,44 @@ def test_forecast_view_normalizes_timestamps_and_dimensions(tmp_path):
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"
     assert rows[0]["valid_time"] == "2025-01-01T06:00:00Z"
     assert rows[0]["member"] == "member-1"
+    assert "provider_metadata" not in rows[0]
+
+
+def test_forecast_view_digest_is_independent_of_native_record_order(tmp_path):
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    digests = []
+    for name, ordered_records in (("forward", records), ("reverse", list(reversed(records)))):
+        raw = json.dumps(ordered_records).encode()
+        asset = acquire_forecast_archive(
+            url=f"https://example.test/{name}.json", provider="example", product="forecast",
+            cache=tmp_path / name / "store", catalog=tmp_path / name / "catalog.json",
+            opener=lambda *args, body=raw, **kwargs: Response(body),
+        )
+        view = materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2025-01-01T07:00:00Z",
+            catalog=tmp_path / name / "catalog.json", object_store=tmp_path / name / "store",
+        )
+        digests.append(view["content_digest"])
+    assert digests[0] == digests[1]
+
+
+def test_forecast_view_digest_normalizes_integer_and_float_representation(tmp_path):
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    digests = []
+    for name, value in (("integer", 1), ("float", 1.0)):
+        records[0]["value"] = value
+        raw = json.dumps(records).encode()
+        asset = acquire_forecast_archive(
+            url=f"https://example.test/{name}.json", provider="example", product="forecast",
+            cache=tmp_path / name / "store", catalog=tmp_path / name / "catalog.json",
+            opener=lambda *args, body=raw, **kwargs: Response(body),
+        )
+        view = materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2025-01-01T03:00:00Z",
+            catalog=tmp_path / name / "catalog.json", object_store=tmp_path / name / "store",
+        )
+        digests.append(view["content_digest"])
+    assert digests[0] == digests[1]
 
 
 def test_forecast_view_rejects_prediction_time_before_archive_availability(tmp_path):

@@ -39,6 +39,9 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     issues, valids, variables, members, locations = [], [], set(), set(), set()
     record_keys = set()
     units_by_variable: dict[str, set[str]] = {}
+    members_by_variable: dict[str, set[str]] = {}
+    locations_by_variable: dict[str, set[str]] = {}
+    record_counts_by_variable: dict[str, int] = {}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise WatershedDataError(f"forecast record {index} must be an object")
@@ -48,27 +51,31 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         issue, valid = _time(record["issue_time"], "issue_time"), _time(record["valid_time"], "valid_time")
         if issue > valid:
             raise WatershedDataError(f"forecast record {index} has issue_time after valid_time")
-        try:
-            lead_time = float(record["lead_time_hours"])
-            value = float(record["value"])
-        except (TypeError, ValueError) as exc:
+        if any(
+            isinstance(record[field], bool) or not isinstance(record[field], (int, float))
+            for field in ("lead_time_hours", "value")
+        ):
             raise WatershedDataError(
-                f"forecast record {index} lead_time_hours and value must be numeric"
-            ) from exc
+                f"forecast record {index} lead_time_hours and value must be JSON numbers"
+            )
+        lead_time = float(record["lead_time_hours"])
+        value = float(record["value"])
         if not math.isfinite(lead_time) or not math.isfinite(value):
             raise WatershedDataError(f"forecast record {index} contains a non-finite number")
         expected = (valid - issue).total_seconds() / 3600
         if abs(lead_time - expected) > 1e-6:
             raise WatershedDataError(f"forecast record {index} has inconsistent lead_time_hours")
-        dimensions = {
-            field: str(record[field]).strip()
-            for field in ("member", "variable", "location_or_grid_id", "units")
-        }
-        empty_dimensions = sorted(field for field, value in dimensions.items() if not value)
-        if empty_dimensions:
+        dimension_fields = ("member", "variable", "location_or_grid_id", "units")
+        invalid_dimensions = sorted(
+            field for field in dimension_fields
+            if not isinstance(record[field], str) or not record[field].strip()
+        )
+        if invalid_dimensions:
             raise WatershedDataError(
-                f"forecast record {index} has empty fields: {', '.join(empty_dimensions)}"
+                f"forecast record {index} has invalid string fields: "
+                + ", ".join(invalid_dimensions)
             )
+        dimensions = {field: record[field].strip() for field in dimension_fields}
         record_key = (
             issue, valid, dimensions["member"], dimensions["variable"],
             dimensions["location_or_grid_id"],
@@ -82,6 +89,13 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         members.add(dimensions["member"])
         locations.add(dimensions["location_or_grid_id"])
         units_by_variable.setdefault(dimensions["variable"], set()).add(dimensions["units"])
+        members_by_variable.setdefault(dimensions["variable"], set()).add(dimensions["member"])
+        locations_by_variable.setdefault(dimensions["variable"], set()).add(
+            dimensions["location_or_grid_id"]
+        )
+        record_counts_by_variable[dimensions["variable"]] = (
+            record_counts_by_variable.get(dimensions["variable"], 0) + 1
+        )
     inconsistent_units = {
         variable: sorted(unit_values)
         for variable, unit_values in sorted(units_by_variable.items())
@@ -102,6 +116,15 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             variable: next(iter(unit_values))
             for variable, unit_values in sorted(units_by_variable.items())
         },
+        "members_by_variable": {
+            variable: sorted(member_values)
+            for variable, member_values in sorted(members_by_variable.items())
+        },
+        "locations_by_variable": {
+            variable: sorted(location_values)
+            for variable, location_values in sorted(locations_by_variable.items())
+        },
+        "record_counts_by_variable": dict(sorted(record_counts_by_variable.items())),
         "issue_time_coverage": {"start": min(issues).isoformat(), "end": max(issues).isoformat()},
         "valid_time_coverage": {"start": min(valids).isoformat(), "end": max(valids).isoformat()},
         "availability_rule": "issue_time_must_not_exceed_prediction_time",
@@ -115,6 +138,8 @@ def acquire_forecast_archive(
 ) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise WatershedDataError("forecast archive URL must use HTTPS")
+    if not provider.strip() or not product.strip():
+        raise WatershedDataError("forecast provider and product must be non-empty")
     parameters = {"url": url}
     request_key = canonical_request_key(provider, url, parameters, FORECAST_RECORDS_VERSION)
     catalog_store = AssetCatalog(catalog)
@@ -165,6 +190,8 @@ def materialize_available_forecasts(
         normalized = dict(record)
         normalized["issue_time"] = _utc_text(record["issue_time"], "issue_time")
         normalized["valid_time"] = _utc_text(record["valid_time"], "valid_time")
+        normalized["lead_time_hours"] = float(record["lead_time_hours"])
+        normalized["value"] = float(record["value"])
         for field in ("member", "variable", "location_or_grid_id", "units"):
             normalized[field] = str(record[field]).strip()
         available.append(normalized)
@@ -176,22 +203,26 @@ def materialize_available_forecasts(
     buffer = io.StringIO(newline="")
     fields = ["issue_time", "valid_time", "lead_time_hours", "member", "variable",
               "location_or_grid_id", "value", "units"]
-    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
+    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n", extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(sorted(available, key=lambda row: (row["issue_time"], row["valid_time"], row["member"])))
+    writer.writerows(sorted(available, key=lambda row: (
+        row["issue_time"], row["valid_time"], row["member"], row["variable"],
+        row["location_or_grid_id"],
+    )))
     stored = ObjectStore(object_store).put(io.BytesIO(buffer.getvalue().encode()))
     identity = {
         "parent": asset_id, "prediction_time": cutoff.isoformat(),
         "timestamp_normalization": "UTC", "dimension_whitespace": "stripped",
+        "numeric_normalization": "float",
     }
     return catalog_store.register({
         "provider": source["provider"], "product": "available-forecast-view",
-        "product_version": "1.1", "request_key": hashlib.sha256(
+        "product_version": "1.2", "request_key": hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
         "leakage_rule": "issue_time <= prediction_time", **available_summary,
         "transformation_name": "prediction-time-availability-filter",
-        "transformation_version": "1.1", "transformation_parameters": identity,
+        "transformation_version": "1.2", "transformation_parameters": identity,
     })

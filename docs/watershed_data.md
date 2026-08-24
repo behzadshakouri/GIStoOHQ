@@ -236,8 +236,21 @@ responses cached under the earlier validation contract are not silently reused.
 Derived view catalog records repeat the filtered record count, variables, members,
 locations, units, and issue/valid coverage, so consumers need not inspect the CSV
 to determine whether a prediction-time view fits their profile.
+Per-variable record counts, member sets, and location sets preserve the relationship
+between forecast dimensions instead of exposing only archive-wide unions.
 View materialization revalidates the stored native document and reports malformed
 UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
+Provider-specific extension fields remain valid native metadata and are ignored by
+the generic derived CSV writer. Provider and product identities are validated
+before any network request.
+Forecast dimensions and units must be non-empty JSON strings; nulls and other types
+are not stringified implicitly. Lead times and values must be JSON numbers; numeric
+strings and booleans are rejected instead of being coerced.
+Derived rows are sorted by every forecast key dimension, making view content
+digests independent of provider record order.
+Lead times and values are normalized to floating-point CSV text, so equivalent JSON
+integer and floating-point representations produce the same derived content. This
+normalization is recorded in version 1.2 transformation metadata.
 
 ## Inspect downloaded and derived assets
 
@@ -250,6 +263,11 @@ This writes `status.json` and `status.md` with every asset ID, provider, product
 native/derived status, parent IDs, coverage, record counts, and object-store
 availability. Use **Inspect Data Status** in either graphical dialog to obtain the
 same report instead of copying opaque IDs directly from console output.
+Forecast entries in `status.json` include issue/valid coverage, prediction time,
+variables, and the per-variable member, location, unit, and record-count summaries
+carried by the catalog.
+When forecasts are present, `status.md` adds a forecast-support table with issue and
+valid coverage, prediction-time cutoffs, and variables for quick human review.
 
 Before a long run or export, validate the local workspace without contacting a
 provider:
