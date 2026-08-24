@@ -26,6 +26,30 @@ def test_forecast_contract_rejects_bad_lead_and_future_issue():
         validate_forecast_records(records)
 
 
+def test_forecast_contract_rejects_duplicate_and_nonfinite_records():
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records.append(dict(records[0]))
+    with pytest.raises(WatershedDataError, match="duplicates a forecast key"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["value"] = float("nan")
+    with pytest.raises(WatershedDataError, match="non-finite"):
+        validate_forecast_records(records)
+
+
+def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["member"] = " "
+    with pytest.raises(WatershedDataError, match="empty fields: member"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["value"] = "not-a-number"
+    with pytest.raises(WatershedDataError, match="must be numeric"):
+        validate_forecast_records(records)
+
+
 def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     raw = Path("tests/fixtures/forecast_archive.json").read_bytes()
     asset = acquire_forecast_archive(

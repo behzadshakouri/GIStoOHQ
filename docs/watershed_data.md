@@ -219,6 +219,9 @@ ohqbuild data forecast-view --asset-id sha256:... \
 The view enforces `issue_time <= prediction_time`, preserves issue and valid
 times, and rejects inconsistent lead times. It never collapses forecasts to valid
 time alone.
+Forecast validation also rejects duplicate issue/valid/member/variable/location
+keys, empty dimensions or units, nonnumeric values, and NaN or infinite numbers
+before either native acquisition or prediction-time view publication.
 
 ## Inspect downloaded and derived assets
 

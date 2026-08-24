@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     if not records:
         raise WatershedDataError("forecast archive contains no records")
     issues, valids, variables, members, locations = [], [], set(), set(), set()
+    record_keys = set()
     for index, record in enumerate(records):
         missing = sorted(required - record.keys())
         if missing:
@@ -37,14 +39,39 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         issue, valid = _time(record["issue_time"], "issue_time"), _time(record["valid_time"], "valid_time")
         if issue > valid:
             raise WatershedDataError(f"forecast record {index} has issue_time after valid_time")
+        try:
+            lead_time = float(record["lead_time_hours"])
+            value = float(record["value"])
+        except (TypeError, ValueError) as exc:
+            raise WatershedDataError(
+                f"forecast record {index} lead_time_hours and value must be numeric"
+            ) from exc
+        if not math.isfinite(lead_time) or not math.isfinite(value):
+            raise WatershedDataError(f"forecast record {index} contains a non-finite number")
         expected = (valid - issue).total_seconds() / 3600
-        if abs(float(record["lead_time_hours"]) - expected) > 1e-6:
+        if abs(lead_time - expected) > 1e-6:
             raise WatershedDataError(f"forecast record {index} has inconsistent lead_time_hours")
+        dimensions = {
+            field: str(record[field]).strip()
+            for field in ("member", "variable", "location_or_grid_id", "units")
+        }
+        empty_dimensions = sorted(field for field, value in dimensions.items() if not value)
+        if empty_dimensions:
+            raise WatershedDataError(
+                f"forecast record {index} has empty fields: {', '.join(empty_dimensions)}"
+            )
+        record_key = (
+            issue, valid, dimensions["member"], dimensions["variable"],
+            dimensions["location_or_grid_id"],
+        )
+        if record_key in record_keys:
+            raise WatershedDataError(f"forecast record {index} duplicates a forecast key")
+        record_keys.add(record_key)
         issues.append(issue)
         valids.append(valid)
-        variables.add(str(record["variable"]))
-        members.add(str(record["member"]))
-        locations.add(str(record["location_or_grid_id"]))
+        variables.add(dimensions["variable"])
+        members.add(dimensions["member"])
+        locations.add(dimensions["location_or_grid_id"])
     return {
         "record_count": len(records), "variables": sorted(variables), "members": sorted(members),
         "location_or_grid_ids": sorted(locations),
