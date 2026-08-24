@@ -228,6 +228,9 @@ derived asset that cannot drive a model.
 Derived forecast views normalize issue and valid timestamps to UTC and strip
 surrounding whitespace from dimension and unit labels; the transformation metadata
 records both operations.
+Each forecast variable must use one consistent normalized unit throughout an
+archive. The catalog summary records that variable-to-unit mapping for downstream
+profile checks.
 
 ## Inspect downloaded and derived assets
 

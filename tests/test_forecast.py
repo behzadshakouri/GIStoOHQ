@@ -32,6 +32,18 @@ def test_forecast_contract_rejects_duplicate_and_nonfinite_records():
     with pytest.raises(WatershedDataError, match="duplicates a forecast key"):
         validate_forecast_records(records)
 
+
+def test_forecast_contract_rejects_inconsistent_units_per_variable():
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[1]["variable"] = records[0]["variable"]
+    records[1]["units"] = "inches"
+    with pytest.raises(WatershedDataError, match=r"inconsistent units: precipitation=inches,mm"):
+        validate_forecast_records(records)
+
+    records[1]["units"] = records[0]["units"]
+    summary = validate_forecast_records(records)
+    assert summary["units_by_variable"] == {"precipitation": "mm"}
+
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = float("nan")
     with pytest.raises(WatershedDataError, match="non-finite"):

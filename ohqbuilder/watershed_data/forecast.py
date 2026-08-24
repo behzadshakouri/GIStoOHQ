@@ -36,6 +36,7 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         raise WatershedDataError("forecast archive contains no records")
     issues, valids, variables, members, locations = [], [], set(), set(), set()
     record_keys = set()
+    units_by_variable: dict[str, set[str]] = {}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise WatershedDataError(f"forecast record {index} must be an object")
@@ -78,9 +79,27 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         variables.add(dimensions["variable"])
         members.add(dimensions["member"])
         locations.add(dimensions["location_or_grid_id"])
+        units_by_variable.setdefault(dimensions["variable"], set()).add(dimensions["units"])
+    inconsistent_units = {
+        variable: sorted(unit_values)
+        for variable, unit_values in sorted(units_by_variable.items())
+        if len(unit_values) > 1
+    }
+    if inconsistent_units:
+        raise WatershedDataError(
+            "forecast variables use inconsistent units: "
+            + "; ".join(
+                f"{variable}={','.join(unit_values)}"
+                for variable, unit_values in inconsistent_units.items()
+            )
+        )
     return {
         "record_count": len(records), "variables": sorted(variables), "members": sorted(members),
         "location_or_grid_ids": sorted(locations),
+        "units_by_variable": {
+            variable: next(iter(unit_values))
+            for variable, unit_values in sorted(units_by_variable.items())
+        },
         "issue_time_coverage": {"start": min(issues).isoformat(), "end": max(issues).isoformat()},
         "valid_time_coverage": {"start": min(valids).isoformat(), "end": max(valids).isoformat()},
         "availability_rule": "issue_time_must_not_exceed_prediction_time",
