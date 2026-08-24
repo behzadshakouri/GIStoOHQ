@@ -51,17 +51,15 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         issue, valid = _time(record["issue_time"], "issue_time"), _time(record["valid_time"], "valid_time")
         if issue > valid:
             raise WatershedDataError(f"forecast record {index} has issue_time after valid_time")
-        if isinstance(record["lead_time_hours"], bool) or isinstance(record["value"], bool):
+        if any(
+            isinstance(record[field], bool) or not isinstance(record[field], (int, float))
+            for field in ("lead_time_hours", "value")
+        ):
             raise WatershedDataError(
-                f"forecast record {index} lead_time_hours and value must be numeric, not boolean"
+                f"forecast record {index} lead_time_hours and value must be JSON numbers"
             )
-        try:
-            lead_time = float(record["lead_time_hours"])
-            value = float(record["value"])
-        except (TypeError, ValueError) as exc:
-            raise WatershedDataError(
-                f"forecast record {index} lead_time_hours and value must be numeric"
-            ) from exc
+        lead_time = float(record["lead_time_hours"])
+        value = float(record["value"])
         if not math.isfinite(lead_time) or not math.isfinite(value):
             raise WatershedDataError(f"forecast record {index} contains a non-finite number")
         expected = (valid - issue).total_seconds() / 3600

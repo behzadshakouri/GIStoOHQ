@@ -66,12 +66,17 @@ def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
 
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = "not-a-number"
-    with pytest.raises(WatershedDataError, match="must be numeric"):
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
         validate_forecast_records(records)
 
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = True
-    with pytest.raises(WatershedDataError, match="numeric, not boolean"):
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["lead_time_hours"] = "6"
+    with pytest.raises(WatershedDataError, match="must be JSON numbers"):
         validate_forecast_records(records)
 
 

@@ -244,8 +244,8 @@ Provider-specific extension fields remain valid native metadata and are ignored 
 the generic derived CSV writer. Provider and product identities are validated
 before any network request.
 Forecast dimensions and units must be non-empty JSON strings; nulls and other types
-are not stringified implicitly. Boolean lead times or values are likewise rejected
-instead of being accepted as the numbers zero or one.
+are not stringified implicitly. Lead times and values must be JSON numbers; numeric
+strings and booleans are rejected instead of being coerced.
 Derived rows are sorted by every forecast key dimension, making view content
 digests independent of provider record order.
 
