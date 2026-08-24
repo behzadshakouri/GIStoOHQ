@@ -81,6 +81,9 @@ def temporal_qc(
     duplicates = 0
     duplicate_examples = []
     seen_keys = set()
+    missing = 0
+    missing_examples = []
+    valid_bounds_by_variable: dict[str, tuple[datetime, datetime]] = {}
     for row in rows:
         timestamp, variable = row["timestamp"], row["variable"]
         rows_by_variable.setdefault(variable, []).append(row)
@@ -92,9 +95,20 @@ def temporal_qc(
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
         seen_keys.add(key)
-    missing = sum(row["value"] is None for row in rows)
+        if row["value"] is None:
+            missing += 1
+            if len(missing_examples) < 100:
+                missing_examples.append({
+                    "timestamp": timestamp.isoformat(), "variable": variable,
+                })
+        elif variable in valid_bounds_by_variable:
+            observed_start, observed_end = valid_bounds_by_variable[variable]
+            valid_bounds_by_variable[variable] = (
+                min(observed_start, timestamp), max(observed_end, timestamp),
+            )
+        else:
+            valid_bounds_by_variable[variable] = (timestamp, timestamp)
     completeness_by_variable = {}
-    missing_examples = []
     for variable, variable_rows in sorted(rows_by_variable.items()):
         variable_missing = sum(row["value"] is None for row in variable_rows)
         completeness_by_variable[variable] = {
@@ -103,11 +117,6 @@ def temporal_qc(
             "missing_count": variable_missing,
             "missing_fraction": variable_missing / len(variable_rows),
         }
-    for row in rows:
-        if row["value"] is None and len(missing_examples) < 100:
-            missing_examples.append({
-                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
-            })
     chronology_inversions = 0
     chronology_examples = []
     for variable, variable_rows in sorted(rows_by_variable.items()):
@@ -164,12 +173,8 @@ def temporal_qc(
         variable: sorted({row["timestamp"] for row in variable_rows})
         for variable, variable_rows in rows_by_variable.items()
     } if expected_delta is not None else {})
-    for variable, variable_rows in sorted(rows_by_variable.items()):
-        valid_timestamps = [
-            row["timestamp"] for row in variable_rows if row["value"] is not None
-        ]
-        observed_start = min(valid_timestamps, default=None)
-        observed_end = max(valid_timestamps, default=None)
+    for variable in sorted(rows_by_variable):
+        observed_start, observed_end = valid_bounds_by_variable.get(variable, (None, None))
         coverage_by_variable[variable] = {
             "observed_start": observed_start.isoformat() if observed_start else None,
             "observed_end": observed_end.isoformat() if observed_end else None,
