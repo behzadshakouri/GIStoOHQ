@@ -55,7 +55,9 @@ def run_data_doctor(
             record("package", True, f"valid package {manifest.package_id}")
             record(
                 "package_qc", manifest.package_qc_status != "fail",
-                f"package QC status is {manifest.package_qc_status}",
+                f"package QC status is {manifest.package_qc_status}"
+                + (f" ({', '.join(manifest.failed_qc_rule_ids)})"
+                   if manifest.failed_qc_rule_ids else ""),
             )
         except WatershedDataError as exc:
             record("package", False, str(exc))
