@@ -219,6 +219,7 @@ class PackageManifest:
     self_contained: bool
     redistributable: bool
     package_qc_status: Literal["pass", "warning", "fail", "not_run"] = "not_run"
+    failed_qc_rule_ids: tuple[str, ...] = ()
     sidecar_checksums: dict[str, str] = field(default_factory=dict)
     schema_version: str = "1.0"
 
@@ -235,6 +236,7 @@ class PackageManifest:
                 raw_inclusion=data["raw_inclusion"], self_contained=bool(data["self_contained"]),
                 redistributable=bool(data["redistributable"]),
                 package_qc_status=data.get("package_qc_status", "not_run"),
+                failed_qc_rule_ids=tuple(data.get("failed_qc_rule_ids", ())),
                 sidecar_checksums=dict(data.get("sidecar_checksums", {})),
                 schema_version=str(data.get("schema_version", "1.0")),
             )
@@ -246,6 +248,10 @@ class PackageManifest:
             raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
         if manifest.package_qc_status not in {"pass", "warning", "fail", "not_run"}:
             raise WatershedDataError("package_qc_status must be pass, warning, fail, or not_run")
+        if any(not isinstance(rule_id, str) or not rule_id for rule_id in manifest.failed_qc_rule_ids):
+            raise WatershedDataError("failed_qc_rule_ids must contain non-empty strings")
+        if tuple(sorted(set(manifest.failed_qc_rule_ids))) != manifest.failed_qc_rule_ids:
+            raise WatershedDataError("failed_qc_rule_ids must be sorted and unique")
         for path, digest in manifest.sidecar_checksums.items():
             if not path or Path(path).is_absolute() or ".." in Path(path).parts:
                 raise WatershedDataError("sidecar checksum paths must be safe relative paths")
@@ -263,5 +269,6 @@ class PackageManifest:
             "raw_inclusion": self.raw_inclusion, "self_contained": self.self_contained,
             "redistributable": self.redistributable,
             "package_qc_status": self.package_qc_status,
+            "failed_qc_rule_ids": list(self.failed_qc_rule_ids),
             "sidecar_checksums": dict(sorted(self.sidecar_checksums.items())),
         }
