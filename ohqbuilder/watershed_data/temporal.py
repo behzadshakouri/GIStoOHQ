@@ -87,7 +87,7 @@ def temporal_qc(
     )
     interval_seconds = expected_delta.total_seconds() if expected_delta is not None else None
     alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    rows_by_variable: dict[str, list[dict[str, Any]]] = {}
+    timestamps_by_variable: dict[str, list[datetime]] = {}
     duplicates = 0
     duplicate_examples = []
     seen_keys = set()
@@ -106,7 +106,7 @@ def temporal_qc(
     provisional_records = 0
     for row in rows:
         timestamp, variable, value = row["timestamp"], row["variable"], row["value"]
-        rows_by_variable.setdefault(variable, []).append(row)
+        timestamps_by_variable.setdefault(variable, []).append(timestamp)
         counts = completeness_counts.setdefault(variable, [0, 0])
         counts[0] += 1
         key = (timestamp, variable)
@@ -179,10 +179,10 @@ def temporal_qc(
     coverage_gaps = []
     coverage_by_variable = {}
     sorted_timestamps_by_variable = ({
-        variable: sorted({row["timestamp"] for row in variable_rows})
-        for variable, variable_rows in rows_by_variable.items()
+        variable: sorted(set(timestamps))
+        for variable, timestamps in timestamps_by_variable.items()
     } if expected_delta is not None else {})
-    for variable in sorted(rows_by_variable):
+    for variable in sorted(timestamps_by_variable):
         observed_start, observed_end = valid_bounds_by_variable.get(variable, (None, None))
         coverage_by_variable[variable] = {
             "observed_start": observed_start.isoformat() if observed_start else None,
@@ -216,7 +216,7 @@ def temporal_qc(
     missing_intervals_by_variable = {}
     gap_examples = []
     if expected_delta is not None:
-        for variable in sorted(rows_by_variable):
+        for variable in sorted(timestamps_by_variable):
             variable_missing_intervals = 0
             timestamps = sorted_timestamps_by_variable[variable]
             for previous, current in zip(timestamps, timestamps[1:]):
