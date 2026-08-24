@@ -6,7 +6,7 @@ import pytest
 
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.hydropinn import export_hydropinn
-from ohqbuilder.watershed_data.package import freeze_package
+from ohqbuilder.watershed_data.package import freeze_package, validate_package
 from ohqbuilder.watershed_data.schemas import WatershedDataError
 from ohqbuilder.watershed_data.temporal import harmonize_asset
 from ohqbuilder.watershed_data.workflow import write_site_spec
@@ -66,7 +66,17 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
             "message": "1 non-finite numeric observation", "asset_ids": [], "details": {},
         }],
     }))
-    freeze_package(site_spec=site, catalog=catalog.path, output=package)
+    manifest_path = freeze_package(site_spec=site, catalog=catalog.path, output=package)
+    assert json.loads(manifest_path.read_text())["failed_qc_rule_ids"] == [
+        "temporal.finite_values"
+    ]
+    original_manifest = manifest_path.read_text()
+    edited_manifest = json.loads(original_manifest)
+    edited_manifest["failed_qc_rule_ids"] = []
+    manifest_path.write_text(json.dumps(edited_manifest))
+    with pytest.raises(WatershedDataError, match="QC summary does not match"):
+        validate_package(package)
+    manifest_path.write_text(original_manifest)
     with pytest.raises(WatershedDataError, match="source package has failed QC"):
         export_hydropinn(package=package, object_store=store.root, output=tmp_path / "hydropinn")
     assert not (tmp_path / "hydropinn").exists()

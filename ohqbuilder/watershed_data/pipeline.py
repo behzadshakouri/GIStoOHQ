@@ -132,6 +132,7 @@ def run_watershed_data_pipeline(
         "package_manifest": str(manifest_path),
         "package_id": manifest.package_id,
         "package_qc_status": manifest.package_qc_status,
+        "failed_qc_rule_ids": list(manifest.failed_qc_rule_ids),
         "hydropinn_manifest": str(hydropinn_manifest) if hydropinn_manifest else None,
         "forecast_asset_id": forecast_asset["asset_id"] if forecast_asset else None,
         "forecast_view_asset_id": forecast_view["asset_id"] if forecast_view else None,
