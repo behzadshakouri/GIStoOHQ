@@ -246,6 +246,8 @@ before any network request.
 Forecast dimensions and units must be non-empty JSON strings; nulls and other types
 are not stringified implicitly. Boolean lead times or values are likewise rejected
 instead of being accepted as the numbers zero or one.
+Derived rows are sorted by every forecast key dimension, making view content
+digests independent of provider record order.
 
 ## Inspect downloaded and derived assets
 

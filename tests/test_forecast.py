@@ -145,6 +145,24 @@ def test_forecast_view_normalizes_timestamps_and_dimensions(tmp_path):
     assert "provider_metadata" not in rows[0]
 
 
+def test_forecast_view_digest_is_independent_of_native_record_order(tmp_path):
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    digests = []
+    for name, ordered_records in (("forward", records), ("reverse", list(reversed(records)))):
+        raw = json.dumps(ordered_records).encode()
+        asset = acquire_forecast_archive(
+            url=f"https://example.test/{name}.json", provider="example", product="forecast",
+            cache=tmp_path / name / "store", catalog=tmp_path / name / "catalog.json",
+            opener=lambda *args, body=raw, **kwargs: Response(body),
+        )
+        view = materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2025-01-01T07:00:00Z",
+            catalog=tmp_path / name / "catalog.json", object_store=tmp_path / name / "store",
+        )
+        digests.append(view["content_digest"])
+    assert digests[0] == digests[1]
+
+
 def test_forecast_view_rejects_prediction_time_before_archive_availability(tmp_path):
     raw = Path("tests/fixtures/forecast_archive.json").read_bytes()
     asset = acquire_forecast_archive(

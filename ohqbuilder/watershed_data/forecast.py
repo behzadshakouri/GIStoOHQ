@@ -205,7 +205,10 @@ def materialize_available_forecasts(
               "location_or_grid_id", "value", "units"]
     writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n", extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(sorted(available, key=lambda row: (row["issue_time"], row["valid_time"], row["member"])))
+    writer.writerows(sorted(available, key=lambda row: (
+        row["issue_time"], row["valid_time"], row["member"], row["variable"],
+        row["location_or_grid_id"],
+    )))
     stored = ObjectStore(object_store).put(io.BytesIO(buffer.getvalue().encode()))
     identity = {
         "parent": asset_id, "prediction_time": cutoff.isoformat(),
