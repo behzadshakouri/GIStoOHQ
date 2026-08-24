@@ -101,6 +101,7 @@ def run_watershed_data_pipeline(
             qc_output=qc_dir / f"{safe_id}.json",
             provenance_output=provenance_dir / f"{safe_id}.json",
             expected_start=spec.study_start, expected_end=spec.study_end,
+            fail_on_qc_error=True,
         ))
     if forecast_asset is not None and prediction_time:
         forecast_view = forecast_view_builder(

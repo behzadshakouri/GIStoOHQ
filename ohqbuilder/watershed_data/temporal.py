@@ -365,6 +365,7 @@ def harmonize_asset(
     *, asset_id: str, catalog: str | Path, object_store: str | Path,
     qc_output: str | Path, provenance_output: str | Path,
     expected_start: str | None = None, expected_end: str | None = None,
+    fail_on_qc_error: bool = False,
 ) -> dict[str, Any]:
     catalog_store = AssetCatalog(catalog)
     catalog_data = catalog_store.read()
@@ -379,6 +380,15 @@ def harmonize_asset(
         rows, asset_id, source.get("temporal_resolution"), units,
         expected_start, expected_end,
     )
+    _atomic_json(Path(qc_output), {"schema_name": "QCReport", "schema_version": "1.0",
+                                  "results": [item.to_dict() for item in qc]})
+    failed_error_rules = [
+        item.rule_id for item in qc if item.severity == "error" and not item.passed
+    ]
+    if fail_on_qc_error and failed_error_rules:
+        raise WatershedDataError(
+            "temporal harmonization failed QC: " + ", ".join(failed_error_rules)
+        )
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(("timestamp_utc", "variable", "value", "native_unit", "provider_qualifiers"))
@@ -408,7 +418,5 @@ def harmonize_asset(
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,
     )
-    _atomic_json(Path(qc_output), {"schema_name": "QCReport", "schema_version": "1.0",
-                                  "results": [item.to_dict() for item in qc]})
     _atomic_json(Path(provenance_output), activity.to_dict())
     return output

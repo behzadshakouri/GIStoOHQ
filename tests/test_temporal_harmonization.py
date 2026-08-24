@@ -4,7 +4,10 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
+from ohqbuilder.watershed_data.schemas import WatershedDataError
 from ohqbuilder.watershed_data.temporal import harmonize_asset, temporal_qc
 
 
@@ -352,6 +355,28 @@ def test_temporal_qc_rejects_incompatible_known_unit(tmp_path):
     assert result["details"]["mismatches"][0] == {
         "actual_unit": "kelvin", "allowed_units": ["C"], "variable": "T2M",
     }
+
+
+def test_harmonization_can_fail_before_publishing_asset_on_qc_error(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["parameters"]["T2M"]["units"] = "kelvin"
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(json.dumps(document).encode()))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    with pytest.raises(WatershedDataError, match="temporal.unit_compatibility"):
+        harmonize_asset(
+            asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+            qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+            fail_on_qc_error=True,
+        )
+    assert (tmp_path / "qc.json").is_file()
+    assert not (tmp_path / "provenance.json").exists()
+    assert [asset["asset_id"] for asset in catalog.read()["assets"]] == [native["asset_id"]]
 
 
 def test_temporal_qc_reports_incomplete_requested_study_period(tmp_path):
