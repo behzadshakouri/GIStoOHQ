@@ -82,6 +82,12 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     assert view["transformation_name"] == "prediction-time-availability-filter"
     assert view["transformation_version"] == "1.1"
     assert view["transformation_parameters"]["timestamp_normalization"] == "UTC"
+    assert view["variables"] == ["precipitation"]
+    assert view["members"] == ["control"]
+    assert view["units_by_variable"] == {"precipitation": "mm"}
+    assert view["issue_time_coverage"] == {
+        "start": "2025-01-01T00:00:00+00:00", "end": "2025-01-01T00:00:00+00:00",
+    }
     with ObjectStore(tmp_path / "store").open(view["content_digest"]) as stream:
         rows = list(csv.DictReader(line.decode() for line in stream.readlines()))
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"

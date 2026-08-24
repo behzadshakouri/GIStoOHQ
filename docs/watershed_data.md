@@ -233,6 +233,9 @@ archive. The catalog summary records that variable-to-unit mapping for downstrea
 profile checks.
 The strengthened archive contract uses product version `forecast-records-v2`, so
 responses cached under the earlier validation contract are not silently reused.
+Derived view catalog records repeat the filtered record count, variables, members,
+locations, units, and issue/valid coverage, so consumers need not inspect the CSV
+to determine whether a prediction-time view fits their profile.
 
 ## Inspect downloaded and derived assets
 

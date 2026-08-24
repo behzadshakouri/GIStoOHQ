@@ -167,6 +167,7 @@ def materialize_available_forecasts(
         raise WatershedDataError(
             "forecast archive has no records available by the requested prediction_time"
         )
+    available_summary = validate_forecast_records(available)
     buffer = io.StringIO(newline="")
     fields = ["issue_time", "valid_time", "lead_time_hours", "member", "variable",
               "location_or_grid_id", "value", "units"]
@@ -185,7 +186,7 @@ def materialize_available_forecasts(
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
-        "record_count": len(available), "leakage_rule": "issue_time <= prediction_time",
+        "leakage_rule": "issue_time <= prediction_time", **available_summary,
         "transformation_name": "prediction-time-availability-filter",
         "transformation_version": "1.1", "transformation_parameters": identity,
     })
