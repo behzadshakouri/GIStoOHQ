@@ -24,10 +24,17 @@ def _package_qc_summary(destination: Path) -> tuple[str, tuple[str, ...]]:
             document = json.loads(report.read_text(encoding="utf-8"))
             if document.get("schema_name") != "QCReport":
                 raise ValueError("schema_name is not QCReport")
+            if document.get("schema_version") != "1.0":
+                raise ValueError("schema_version is not 1.0")
             results = document["results"]
             if not isinstance(results, list):
                 raise TypeError("results is not a list")
             for result in results:
+                if not isinstance(result, dict):
+                    raise TypeError("result is not an object")
+                rule_id = result.get("rule_id")
+                if not isinstance(rule_id, str) or "." not in rule_id:
+                    raise TypeError("rule_id is not a stable dotted identifier")
                 severity = result["severity"]
                 if severity not in {"error", "warning", "information"}:
                     raise ValueError(f"invalid severity {severity!r}")
@@ -35,9 +42,6 @@ def _package_qc_summary(destination: Path) -> tuple[str, tuple[str, ...]]:
                     raise TypeError("passed is not boolean")
                 if not result["passed"]:
                     failed_severities.add(severity)
-                    rule_id = result["rule_id"]
-                    if not isinstance(rule_id, str) or not rule_id:
-                        raise TypeError("rule_id is not a non-empty string")
                     failed_rule_ids.add(rule_id)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise WatershedDataError(f"invalid package QC report {report}: {exc}") from exc

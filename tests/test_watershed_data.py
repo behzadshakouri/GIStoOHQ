@@ -210,6 +210,13 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     }))
     freeze_package(site_spec=site, catalog=catalog.path, output=output)
     assert validate_package(output).package_qc_status == "warning"
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0", "results": [
+            {"severity": "information", "passed": True}
+        ],
+    }))
+    with pytest.raises(WatershedDataError, match="stable dotted identifier"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
 
 
 def test_freeze_and_validate_self_contained_package(tmp_path):
