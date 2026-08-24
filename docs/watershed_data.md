@@ -331,6 +331,8 @@ examples, making a multi-variable product's incomplete series directly identifia
 A variable containing no valid observations is an error rather than ordinary
 missingness, preventing an entirely empty forcing or target series from passing as
 a warning-only package.
+NaN and infinite numeric observations are rejected explicitly instead of escaping
+ordinary physical-range comparisons or being written as usable model inputs.
 
 ## Graphical interfaces
 

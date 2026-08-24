@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,8 @@ def temporal_qc(
     chronology_examples = []
     violation_count = 0
     violations = []
+    nonfinite_count = 0
+    nonfinite_examples = []
     misaligned_count = 0
     misaligned = []
     qualifier_counts: dict[str, int] = {}
@@ -108,7 +111,7 @@ def temporal_qc(
         timestamp, variable, value = row["timestamp"], row["variable"], row["value"]
         if expected_delta is not None:
             timestamps_by_variable.setdefault(variable, []).append(timestamp)
-        counts = completeness_counts.setdefault(variable, [0, 0])
+        counts = completeness_counts.setdefault(variable, [0, 0, 0])
         counts[0] += 1
         key = (timestamp, variable)
         if key in seen_keys:
@@ -125,6 +128,8 @@ def temporal_qc(
                 missing_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
+        elif not math.isfinite(value):
+            counts[2] += 1
         elif variable in valid_bounds_by_variable:
             observed_start, observed_end = valid_bounds_by_variable[variable]
             valid_bounds_by_variable[variable] = (
@@ -143,7 +148,14 @@ def temporal_qc(
                 })
         previous_timestamp_by_variable[variable] = timestamp
         bounds = ranges.get(variable)
-        if bounds is not None and value is not None:
+        if value is not None and not math.isfinite(value):
+            nonfinite_count += 1
+            if len(nonfinite_examples) < 100:
+                nonfinite_examples.append({
+                    "timestamp": timestamp.isoformat(), "variable": variable,
+                    "value": str(value),
+                })
+        elif bounds is not None and value is not None:
             minimum, maximum = bounds
             if value < minimum or (maximum is not None and value > maximum):
                 violation_count += 1
@@ -168,7 +180,7 @@ def temporal_qc(
     completeness_by_variable = {
         variable: {
             "record_count": counts[0],
-            "valid_count": counts[0] - counts[1],
+            "valid_count": counts[0] - counts[1] - counts[2],
             "missing_count": counts[1],
             "missing_fraction": counts[1] / counts[0],
         }
@@ -266,6 +278,13 @@ def temporal_qc(
             "temporal.variable_availability", "error", not unavailable_variables,
             f"{len(unavailable_variables)} variables contain no valid observations",
             (asset_id,), {"unavailable_variables": unavailable_variables},
+        ),
+        QCResult(
+            "temporal.finite_values", "error", nonfinite_count == 0,
+            f"{nonfinite_count} non-finite numeric observations",
+            (asset_id,), {
+                "nonfinite_count": nonfinite_count, "examples": nonfinite_examples,
+            },
         ),
         QCResult(
             "temporal.chronology", "warning", chronology_inversions == 0,

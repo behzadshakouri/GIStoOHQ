@@ -44,6 +44,7 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.study_period_coverage",
         "temporal.timestep_alignment",
         "temporal.variable_availability",
+        "temporal.finite_values",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -124,6 +125,27 @@ def test_temporal_qc_bounds_physical_range_examples():
     assert result.passed is False
     assert result.details["violation_count"] == 101
     assert len(result.details["violations"]) == 100
+
+
+def test_temporal_qc_rejects_nonfinite_numeric_values():
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"timestamp": start, "variable": "T2M", "value": float("nan"), "qualifiers": ""},
+        {"timestamp": start + timedelta(hours=1), "variable": "T2M",
+         "value": float("inf"), "qualifiers": ""},
+    ]
+    results = temporal_qc(rows, "sha256:test", "hourly", {"T2M": "C"})
+    finite = next(item for item in results if item.rule_id == "temporal.finite_values")
+    physical = next(item for item in results if item.rule_id == "temporal.physical_range")
+    assert finite.passed is False
+    assert finite.details == {
+        "nonfinite_count": 2,
+        "examples": [
+            {"timestamp": "2025-01-01T00:00:00+00:00", "variable": "T2M", "value": "nan"},
+            {"timestamp": "2025-01-01T01:00:00+00:00", "variable": "T2M", "value": "inf"},
+        ],
+    }
+    assert physical.passed is True
 
 
 def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
