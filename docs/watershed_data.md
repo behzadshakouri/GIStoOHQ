@@ -231,6 +231,8 @@ records both operations.
 Each forecast variable must use one consistent normalized unit throughout an
 archive. The catalog summary records that variable-to-unit mapping for downstream
 profile checks.
+The strengthened archive contract uses product version `forecast-records-v2`, so
+responses cached under the earlier validation contract are not silently reused.
 
 ## Inspect downloaded and derived assets
 

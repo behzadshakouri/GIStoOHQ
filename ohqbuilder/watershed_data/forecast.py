@@ -14,6 +14,8 @@ from .catalog import AssetCatalog, ObjectStore
 from .network import download_bytes
 from .schemas import WatershedDataError, canonical_request_key
 
+FORECAST_RECORDS_VERSION = "forecast-records-v2"
+
 
 def _time(value: str, field: str) -> datetime:
     try:
@@ -114,7 +116,7 @@ def acquire_forecast_archive(
     if not url.startswith("https://"):
         raise WatershedDataError("forecast archive URL must use HTTPS")
     parameters = {"url": url}
-    request_key = canonical_request_key(provider, url, parameters, "forecast-records-v1")
+    request_key = canonical_request_key(provider, url, parameters, FORECAST_RECORDS_VERSION)
     catalog_store = AssetCatalog(catalog)
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
@@ -130,7 +132,7 @@ def acquire_forecast_archive(
     summary = validate_forecast_records(records)
     stored = ObjectStore(cache).put(io.BytesIO(raw))
     return catalog_store.register({
-        "provider": provider, "product": product, "product_version": "forecast-records-v1",
+        "provider": provider, "product": product, "product_version": FORECAST_RECORDS_VERSION,
         "request_key": request_key,
         "request_parameters": parameters, "content_digest": stored.content_digest,
         "size": stored.size, "media_type": "application/json", "source_url": url,

@@ -72,6 +72,7 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
         cache=tmp_path / "store", catalog=tmp_path / "catalog.json",
         opener=lambda *args, **kwargs: Response(raw),
     )
+    assert asset["product_version"] == "forecast-records-v2"
     assert asset["temporal_dimensions"] == ["issue_time", "valid_time", "lead_time_hours", "member"]
     view = materialize_available_forecasts(
         asset_id=asset["asset_id"], prediction_time="2025-01-01T03:00:00Z",
