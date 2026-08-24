@@ -77,6 +77,16 @@ def temporal_qc(
     units: dict[str, str] | None = None,
     expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
+    ranges = {
+        "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
+        "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
+        "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
+    }
+    expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
+        temporal_resolution or ""
+    )
+    interval_seconds = expected_delta.total_seconds() if expected_delta is not None else None
+    alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
     rows_by_variable: dict[str, list[dict[str, Any]]] = {}
     duplicates = 0
     duplicate_examples = []
@@ -88,8 +98,14 @@ def temporal_qc(
     previous_timestamp_by_variable: dict[str, datetime] = {}
     chronology_inversions = 0
     chronology_examples = []
+    violation_count = 0
+    violations = []
+    misaligned_count = 0
+    misaligned = []
+    qualifier_counts: dict[str, int] = {}
+    provisional_records = 0
     for row in rows:
-        timestamp, variable = row["timestamp"], row["variable"]
+        timestamp, variable, value = row["timestamp"], row["variable"], row["value"]
         rows_by_variable.setdefault(variable, []).append(row)
         counts = completeness_counts.setdefault(variable, [0, 0])
         counts[0] += 1
@@ -125,6 +141,29 @@ def temporal_qc(
                     "current_timestamp": timestamp.isoformat(),
                 })
         previous_timestamp_by_variable[variable] = timestamp
+        bounds = ranges.get(variable)
+        if bounds is not None and value is not None:
+            minimum, maximum = bounds
+            if value < minimum or (maximum is not None and value > maximum):
+                violation_count += 1
+                if len(violations) < 100:
+                    violations.append({
+                        "timestamp": timestamp.isoformat(), "variable": variable,
+                        "value": value, "minimum": minimum, "maximum": maximum,
+                    })
+        if interval_seconds is not None:
+            offset_seconds = (timestamp - alignment_origin).total_seconds()
+            if offset_seconds % interval_seconds:
+                misaligned_count += 1
+                if len(misaligned) < 100:
+                    misaligned.append({
+                        "timestamp": timestamp.isoformat(), "variable": variable,
+                    })
+        qualifiers = {item for item in str(row.get("qualifiers") or "").split(";") if item}
+        for qualifier in qualifiers:
+            qualifier_counts[qualifier] = qualifier_counts.get(qualifier, 0) + 1
+        if "P" in qualifiers:
+            provisional_records += 1
     completeness_by_variable = {
         variable: {
             "record_count": counts[0],
@@ -134,40 +173,6 @@ def temporal_qc(
         }
         for variable, counts in sorted(completeness_counts.items())
     }
-    ranges = {
-        "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
-        "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
-        "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
-    }
-    violations = []
-    for row in rows:
-        bounds = ranges.get(row["variable"])
-        value = row["value"]
-        if bounds is None or value is None:
-            continue
-        minimum, maximum = bounds
-        if value < minimum or (maximum is not None and value > maximum):
-            violations.append({
-                "timestamp": row["timestamp"].isoformat(), "variable": row["variable"],
-                "value": value, "minimum": minimum, "maximum": maximum,
-            })
-    expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
-        temporal_resolution or ""
-    )
-    alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
-    misaligned = []
-    misaligned_count = 0
-    if expected_delta is not None:
-        interval_seconds = expected_delta.total_seconds()
-        for row in rows:
-            offset_seconds = (row["timestamp"] - alignment_origin).total_seconds()
-            if offset_seconds % interval_seconds:
-                misaligned_count += 1
-                if len(misaligned) < 100:
-                    misaligned.append({
-                        "timestamp": row["timestamp"].isoformat(),
-                        "variable": row["variable"],
-                    })
     requested_start = _utc(expected_start) if expected_start else None
     requested_end = _utc(expected_end) if expected_end else None
     coverage_tolerance = expected_delta or timedelta(0)
@@ -242,14 +247,6 @@ def temporal_qc(
             unit_mismatches.append({
                 "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
             })
-    qualifier_counts: dict[str, int] = {}
-    provisional_records = 0
-    for row in rows:
-        qualifiers = {value for value in str(row.get("qualifiers") or "").split(";") if value}
-        for qualifier in qualifiers:
-            qualifier_counts[qualifier] = qualifier_counts.get(qualifier, 0) + 1
-        if "P" in qualifiers:
-            provisional_records += 1
     return [
         QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
@@ -270,9 +267,9 @@ def temporal_qc(
             },
         ),
         QCResult(
-            "temporal.physical_range", "error", not violations,
-            f"{len(violations)} values outside declared physical ranges", (asset_id,),
-            {"violation_count": len(violations), "violations": violations[:100]},
+            "temporal.physical_range", "error", violation_count == 0,
+            f"{violation_count} values outside declared physical ranges", (asset_id,),
+            {"violation_count": violation_count, "violations": violations},
         ),
         QCResult(
             "temporal.provider_qualifiers", "warning", provisional_records == 0,

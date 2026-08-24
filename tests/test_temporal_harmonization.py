@@ -1,10 +1,11 @@
 import csv
 import io
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
-from ohqbuilder.watershed_data.temporal import harmonize_asset
+from ohqbuilder.watershed_data.temporal import harmonize_asset, temporal_qc
 
 
 def _native_asset(tmp_path, provider, fixture, product):
@@ -106,6 +107,22 @@ def test_temporal_qc_reports_impossible_provider_values(tmp_path):
     assert result["passed"] is False
     assert result["severity"] == "error"
     assert result["details"]["violations"][0]["variable"] == "RH2M"
+
+
+def test_temporal_qc_bounds_physical_range_examples():
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"timestamp": start + timedelta(hours=index), "variable": "RH2M",
+         "value": 120.0, "qualifiers": ""}
+        for index in range(101)
+    ]
+    result = next(
+        item for item in temporal_qc(rows, "sha256:test", "hourly", {"RH2M": "%"})
+        if item.rule_id == "temporal.physical_range"
+    )
+    assert result.passed is False
+    assert result.details["violation_count"] == 101
+    assert len(result.details["violations"]) == 100
 
 
 def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
