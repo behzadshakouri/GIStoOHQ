@@ -328,6 +328,26 @@ evaluated within each variable, so provider grouping of otherwise ordered series
 does not produce a false warning; actual inversions include bounded examples.
 Internal gap QC reports missing interval totals by variable as well as bounded gap
 examples, making a multi-variable product's incomplete series directly identifiable.
+A variable containing no valid observations is an error rather than ordinary
+missingness, preventing an entirely empty forcing or target series from passing as
+a warning-only package.
+NaN and infinite numeric observations are rejected explicitly instead of escaping
+ordinary physical-range comparisons or being written as usable model inputs.
+HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
+passing, and `not_run` packages remain exportable; callers receive the aggregate
+status in one-button pipeline results and can apply stricter policy if required.
+Package manifests and one-button results list the stable IDs of every failed QC
+rule. Package validation recomputes both the aggregate status and this rule list
+from the checksummed sidecars, rejecting a stale or edited summary.
+Package freezing validates every QC result, including successful results, against
+the QCReport 1.0 contract and requires stable dotted rule identifiers.
+QC aggregation recursively includes JSON reports under `quality_control/`, allowing
+provider or asset subdirectories without omitting their failures from the manifest.
+Workspace doctor and refused HydroPINN export messages include failed rule IDs, so
+users can move directly from a gate failure to the relevant QC sidecar result.
+One-button pipeline harmonization also stops before publishing a derived asset when
+an error-level temporal rule fails. Its QC sidecar remains available for diagnosis,
+but no provenance activity or ordinary derived catalog record is created.
 
 ## Graphical interfaces
 

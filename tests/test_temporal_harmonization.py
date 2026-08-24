@@ -1,10 +1,14 @@
 import csv
 import io
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
-from ohqbuilder.watershed_data.temporal import harmonize_asset
+from ohqbuilder.watershed_data.schemas import WatershedDataError
+from ohqbuilder.watershed_data.temporal import harmonize_asset, temporal_qc
 
 
 def _native_asset(tmp_path, provider, fixture, product):
@@ -42,6 +46,8 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.provider_qualifiers",
         "temporal.study_period_coverage",
         "temporal.timestep_alignment",
+        "temporal.variable_availability",
+        "temporal.finite_values",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -108,6 +114,43 @@ def test_temporal_qc_reports_impossible_provider_values(tmp_path):
     assert result["details"]["violations"][0]["variable"] == "RH2M"
 
 
+def test_temporal_qc_bounds_physical_range_examples():
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"timestamp": start + timedelta(hours=index), "variable": "RH2M",
+         "value": 120.0, "qualifiers": ""}
+        for index in range(101)
+    ]
+    result = next(
+        item for item in temporal_qc(rows, "sha256:test", "hourly", {"RH2M": "%"})
+        if item.rule_id == "temporal.physical_range"
+    )
+    assert result.passed is False
+    assert result.details["violation_count"] == 101
+    assert len(result.details["violations"]) == 100
+
+
+def test_temporal_qc_rejects_nonfinite_numeric_values():
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"timestamp": start, "variable": "T2M", "value": float("nan"), "qualifiers": ""},
+        {"timestamp": start + timedelta(hours=1), "variable": "T2M",
+         "value": float("inf"), "qualifiers": ""},
+    ]
+    results = temporal_qc(rows, "sha256:test", "hourly", {"T2M": "C"})
+    finite = next(item for item in results if item.rule_id == "temporal.finite_values")
+    physical = next(item for item in results if item.rule_id == "temporal.physical_range")
+    assert finite.passed is False
+    assert finite.details == {
+        "nonfinite_count": 2,
+        "examples": [
+            {"timestamp": "2025-01-01T00:00:00+00:00", "variable": "T2M", "value": "nan"},
+            {"timestamp": "2025-01-01T01:00:00+00:00", "variable": "T2M", "value": "inf"},
+        ],
+    }
+    assert physical.passed is True
+
+
 def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
     document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
     document["properties"]["parameter"]["T2M"]["2025010100"] = -999
@@ -142,6 +185,32 @@ def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
     assert result["details"]["examples"] == [{
         "timestamp": "2025-01-01T00:00:00+00:00", "variable": "T2M",
     }]
+
+
+def test_temporal_qc_rejects_variable_with_no_valid_observations(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    for timestamp in document["properties"]["parameter"]["T2M"]:
+        document["properties"]["parameter"]["T2M"][timestamp] = -999
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.variable_availability"
+    )
+    assert result["passed"] is False
+    assert result["severity"] == "error"
+    assert result["details"]["unavailable_variables"] == ["T2M"]
 
 
 def test_temporal_qc_reports_duplicate_timestamp_examples(tmp_path):
@@ -286,6 +355,28 @@ def test_temporal_qc_rejects_incompatible_known_unit(tmp_path):
     assert result["details"]["mismatches"][0] == {
         "actual_unit": "kelvin", "allowed_units": ["C"], "variable": "T2M",
     }
+
+
+def test_harmonization_can_fail_before_publishing_asset_on_qc_error(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["parameters"]["T2M"]["units"] = "kelvin"
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(json.dumps(document).encode()))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    with pytest.raises(WatershedDataError, match="temporal.unit_compatibility"):
+        harmonize_asset(
+            asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+            qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+            fail_on_qc_error=True,
+        )
+    assert (tmp_path / "qc.json").is_file()
+    assert not (tmp_path / "provenance.json").exists()
+    assert [asset["asset_id"] for asset in catalog.read()["assets"]] == [native["asset_id"]]
 
 
 def test_temporal_qc_reports_incomplete_requested_study_period(tmp_path):
