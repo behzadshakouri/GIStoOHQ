@@ -151,7 +151,12 @@ def materialize_available_forecasts(
     if source is None:
         raise WatershedDataError(f"forecast asset not found: {asset_id}")
     with ObjectStore(object_store).open(source["content_digest"]) as stream:
-        records = json.load(stream)
+        try:
+            records = json.load(stream)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise WatershedDataError("forecast asset is not valid UTF-8 JSON") from exc
+    if not isinstance(records, list):
+        raise WatershedDataError("forecast asset must contain a JSON array")
     validate_forecast_records(records)
     available = []
     for record in records:

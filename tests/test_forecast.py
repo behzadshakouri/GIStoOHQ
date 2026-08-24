@@ -1,10 +1,11 @@
 import csv
+import io
 import json
 from pathlib import Path
 
 import pytest
 
-from ohqbuilder.watershed_data.catalog import ObjectStore
+from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.forecast import (
     acquire_forecast_archive, materialize_available_forecasts, validate_forecast_records,
 )
@@ -128,3 +129,23 @@ def test_forecast_view_rejects_prediction_time_before_archive_availability(tmp_p
             catalog=tmp_path / "catalog.json", object_store=tmp_path / "store",
         )
     assert len(json.loads((tmp_path / "catalog.json").read_text())["assets"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [(b"not-json", "not valid UTF-8 JSON"), (b'{}', "must contain a JSON array")],
+)
+def test_forecast_view_reports_invalid_source_documents(tmp_path, raw, message):
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    asset = catalog.register({
+        "provider": "example", "product": "forecast",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "processing_status": "native",
+    })
+    with pytest.raises(WatershedDataError, match=message):
+        materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2025-01-01T00:00:00Z",
+            catalog=catalog.path, object_store=store.root,
+        )

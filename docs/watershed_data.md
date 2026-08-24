@@ -236,6 +236,8 @@ responses cached under the earlier validation contract are not silently reused.
 Derived view catalog records repeat the filtered record count, variables, members,
 locations, units, and issue/valid coverage, so consumers need not inspect the CSV
 to determine whether a prediction-time view fits their profile.
+View materialization revalidates the stored native document and reports malformed
+UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
 
 ## Inspect downloaded and derived assets
 
