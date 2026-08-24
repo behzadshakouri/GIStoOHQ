@@ -190,6 +190,8 @@ def materialize_available_forecasts(
         normalized = dict(record)
         normalized["issue_time"] = _utc_text(record["issue_time"], "issue_time")
         normalized["valid_time"] = _utc_text(record["valid_time"], "valid_time")
+        normalized["lead_time_hours"] = float(record["lead_time_hours"])
+        normalized["value"] = float(record["value"])
         for field in ("member", "variable", "location_or_grid_id", "units"):
             normalized[field] = str(record[field]).strip()
         available.append(normalized)
@@ -211,15 +213,16 @@ def materialize_available_forecasts(
     identity = {
         "parent": asset_id, "prediction_time": cutoff.isoformat(),
         "timestamp_normalization": "UTC", "dimension_whitespace": "stripped",
+        "numeric_normalization": "float",
     }
     return catalog_store.register({
         "provider": source["provider"], "product": "available-forecast-view",
-        "product_version": "1.1", "request_key": hashlib.sha256(
+        "product_version": "1.2", "request_key": hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
         "leakage_rule": "issue_time <= prediction_time", **available_summary,
         "transformation_name": "prediction-time-availability-filter",
-        "transformation_version": "1.1", "transformation_parameters": identity,
+        "transformation_version": "1.2", "transformation_parameters": identity,
     })

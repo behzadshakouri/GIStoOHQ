@@ -248,6 +248,9 @@ are not stringified implicitly. Lead times and values must be JSON numbers; nume
 strings and booleans are rejected instead of being coerced.
 Derived rows are sorted by every forecast key dimension, making view content
 digests independent of provider record order.
+Lead times and values are normalized to floating-point CSV text, so equivalent JSON
+integer and floating-point representations produce the same derived content. This
+normalization is recorded in version 1.2 transformation metadata.
 
 ## Inspect downloaded and derived assets
 

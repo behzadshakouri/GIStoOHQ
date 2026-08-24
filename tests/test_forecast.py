@@ -95,8 +95,9 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     )
     assert view["record_count"] == 1
     assert view["transformation_name"] == "prediction-time-availability-filter"
-    assert view["transformation_version"] == "1.1"
+    assert view["transformation_version"] == "1.2"
     assert view["transformation_parameters"]["timestamp_normalization"] == "UTC"
+    assert view["transformation_parameters"]["numeric_normalization"] == "float"
     assert view["variables"] == ["precipitation"]
     assert view["members"] == ["control"]
     assert view["units_by_variable"] == {"precipitation": "mm"}
@@ -162,6 +163,25 @@ def test_forecast_view_digest_is_independent_of_native_record_order(tmp_path):
         )
         view = materialize_available_forecasts(
             asset_id=asset["asset_id"], prediction_time="2025-01-01T07:00:00Z",
+            catalog=tmp_path / name / "catalog.json", object_store=tmp_path / name / "store",
+        )
+        digests.append(view["content_digest"])
+    assert digests[0] == digests[1]
+
+
+def test_forecast_view_digest_normalizes_integer_and_float_representation(tmp_path):
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    digests = []
+    for name, value in (("integer", 1), ("float", 1.0)):
+        records[0]["value"] = value
+        raw = json.dumps(records).encode()
+        asset = acquire_forecast_archive(
+            url=f"https://example.test/{name}.json", provider="example", product="forecast",
+            cache=tmp_path / name / "store", catalog=tmp_path / name / "catalog.json",
+            opener=lambda *args, body=raw, **kwargs: Response(body),
+        )
+        view = materialize_available_forecasts(
+            asset_id=asset["asset_id"], prediction_time="2025-01-01T03:00:00Z",
             catalog=tmp_path / name / "catalog.json", object_store=tmp_path / name / "store",
         )
         digests.append(view["content_digest"])
