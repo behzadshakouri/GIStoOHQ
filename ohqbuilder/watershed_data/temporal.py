@@ -106,7 +106,8 @@ def temporal_qc(
     provisional_records = 0
     for row in rows:
         timestamp, variable, value = row["timestamp"], row["variable"], row["value"]
-        timestamps_by_variable.setdefault(variable, []).append(timestamp)
+        if expected_delta is not None:
+            timestamps_by_variable.setdefault(variable, []).append(timestamp)
         counts = completeness_counts.setdefault(variable, [0, 0])
         counts[0] += 1
         key = (timestamp, variable)
@@ -182,7 +183,7 @@ def temporal_qc(
         variable: sorted(set(timestamps))
         for variable, timestamps in timestamps_by_variable.items()
     } if expected_delta is not None else {})
-    for variable in sorted(timestamps_by_variable):
+    for variable in sorted(completeness_counts):
         observed_start, observed_end = valid_bounds_by_variable.get(variable, (None, None))
         coverage_by_variable[variable] = {
             "observed_start": observed_start.isoformat() if observed_start else None,
