@@ -43,6 +43,7 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
         "temporal.provider_qualifiers",
         "temporal.study_period_coverage",
         "temporal.timestep_alignment",
+        "temporal.variable_availability",
     }
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
@@ -159,6 +160,32 @@ def test_temporal_qc_reports_missing_value_completeness_by_variable(tmp_path):
     assert result["details"]["examples"] == [{
         "timestamp": "2025-01-01T00:00:00+00:00", "variable": "T2M",
     }]
+
+
+def test_temporal_qc_rejects_variable_with_no_valid_observations(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    for timestamp in document["properties"]["parameter"]["T2M"]:
+        document["properties"]["parameter"]["T2M"][timestamp] = -999
+    raw = json.dumps(document).encode()
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(raw))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    result = next(
+        item for item in json.loads((tmp_path / "qc.json").read_text())["results"]
+        if item["rule_id"] == "temporal.variable_availability"
+    )
+    assert result["passed"] is False
+    assert result["severity"] == "error"
+    assert result["details"]["unavailable_variables"] == ["T2M"]
 
 
 def test_temporal_qc_reports_duplicate_timestamp_examples(tmp_path):

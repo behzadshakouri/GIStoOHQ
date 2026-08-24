@@ -174,6 +174,10 @@ def temporal_qc(
         }
         for variable, counts in sorted(completeness_counts.items())
     }
+    unavailable_variables = [
+        variable for variable, counts in completeness_by_variable.items()
+        if counts["valid_count"] == 0
+    ]
     requested_start = _utc(expected_start) if expected_start else None
     requested_end = _utc(expected_end) if expected_end else None
     coverage_tolerance = expected_delta or timedelta(0)
@@ -258,6 +262,11 @@ def temporal_qc(
                      "completeness_by_variable": completeness_by_variable,
                      "examples": missing_examples,
                  }),
+        QCResult(
+            "temporal.variable_availability", "error", not unavailable_variables,
+            f"{len(unavailable_variables)} variables contain no valid observations",
+            (asset_id,), {"unavailable_variables": unavailable_variables},
+        ),
         QCResult(
             "temporal.chronology", "warning", chronology_inversions == 0,
             "each variable is chronologically ordered" if chronology_inversions == 0 else

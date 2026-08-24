@@ -328,6 +328,9 @@ evaluated within each variable, so provider grouping of otherwise ordered series
 does not produce a false warning; actual inversions include bounded examples.
 Internal gap QC reports missing interval totals by variable as well as bounded gap
 examples, making a multi-variable product's incomplete series directly identifiable.
+A variable containing no valid observations is an error rather than ordinary
+missingness, preventing an entirely empty forcing or target series from passing as
+a warning-only package.
 
 ## Graphical interfaces
 
