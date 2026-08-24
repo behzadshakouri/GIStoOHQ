@@ -14,7 +14,7 @@ from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_js
 
 def _package_qc_summary(destination: Path) -> tuple[str, tuple[str, ...]]:
     """Aggregate stable QC reports already materialized in the package tree."""
-    reports = sorted((destination / "quality_control").glob("*.json"))
+    reports = sorted((destination / "quality_control").rglob("*.json"))
     if not reports:
         return "not_run", ()
     failed_severities: set[str] = set()

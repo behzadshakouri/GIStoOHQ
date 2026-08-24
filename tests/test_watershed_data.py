@@ -201,7 +201,7 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
         "size": 0, "media_type": "application/json",
     })
     output = tmp_path / "package"
-    qc = output / "quality_control" / "temporal.json"
+    qc = output / "quality_control" / "providers" / "temporal.json"
     qc.parent.mkdir(parents=True)
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [
