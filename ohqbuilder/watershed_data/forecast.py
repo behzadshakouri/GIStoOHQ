@@ -48,6 +48,10 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         issue, valid = _time(record["issue_time"], "issue_time"), _time(record["valid_time"], "valid_time")
         if issue > valid:
             raise WatershedDataError(f"forecast record {index} has issue_time after valid_time")
+        if isinstance(record["lead_time_hours"], bool) or isinstance(record["value"], bool):
+            raise WatershedDataError(
+                f"forecast record {index} lead_time_hours and value must be numeric, not boolean"
+            )
         try:
             lead_time = float(record["lead_time_hours"])
             value = float(record["value"])
@@ -60,15 +64,17 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         expected = (valid - issue).total_seconds() / 3600
         if abs(lead_time - expected) > 1e-6:
             raise WatershedDataError(f"forecast record {index} has inconsistent lead_time_hours")
-        dimensions = {
-            field: str(record[field]).strip()
-            for field in ("member", "variable", "location_or_grid_id", "units")
-        }
-        empty_dimensions = sorted(field for field, value in dimensions.items() if not value)
-        if empty_dimensions:
+        dimension_fields = ("member", "variable", "location_or_grid_id", "units")
+        invalid_dimensions = sorted(
+            field for field in dimension_fields
+            if not isinstance(record[field], str) or not record[field].strip()
+        )
+        if invalid_dimensions:
             raise WatershedDataError(
-                f"forecast record {index} has empty fields: {', '.join(empty_dimensions)}"
+                f"forecast record {index} has invalid string fields: "
+                + ", ".join(invalid_dimensions)
             )
+        dimensions = {field: record[field].strip() for field in dimension_fields}
         record_key = (
             issue, valid, dimensions["member"], dimensions["variable"],
             dimensions["location_or_grid_id"],

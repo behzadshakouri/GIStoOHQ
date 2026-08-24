@@ -241,6 +241,9 @@ UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
 Provider-specific extension fields remain valid native metadata and are ignored by
 the generic derived CSV writer. Provider and product identities are validated
 before any network request.
+Forecast dimensions and units must be non-empty JSON strings; nulls and other types
+are not stringified implicitly. Boolean lead times or values are likewise rejected
+instead of being accepted as the numbers zero or one.
 
 ## Inspect downloaded and derived assets
 

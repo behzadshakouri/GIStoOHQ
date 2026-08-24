@@ -53,7 +53,12 @@ def test_forecast_contract_rejects_inconsistent_units_per_variable():
 def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["member"] = " "
-    with pytest.raises(WatershedDataError, match="empty fields: member"):
+    with pytest.raises(WatershedDataError, match="invalid string fields: member"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["units"] = None
+    with pytest.raises(WatershedDataError, match="invalid string fields: units"):
         validate_forecast_records(records)
 
     with pytest.raises(WatershedDataError, match="record 0 must be an object"):
@@ -62,6 +67,11 @@ def test_forecast_contract_rejects_empty_dimensions_and_nonnumeric_values():
     records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
     records[0]["value"] = "not-a-number"
     with pytest.raises(WatershedDataError, match="must be numeric"):
+        validate_forecast_records(records)
+
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["value"] = True
+    with pytest.raises(WatershedDataError, match="numeric, not boolean"):
         validate_forecast_records(records)
 
 
