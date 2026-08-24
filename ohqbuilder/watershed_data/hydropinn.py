@@ -20,6 +20,10 @@ def export_hydropinn(
         raise WatershedDataError(f"unsupported HydroPINN profile: {profile}")
     root = Path(package).expanduser().resolve()
     package_manifest = validate_package(root)
+    if package_manifest.package_qc_status == "fail":
+        raise WatershedDataError(
+            "HydroPINN export refused because the source package has failed QC"
+        )
     catalog = AssetCatalog(root / "catalog.json").read()
     assets = [
         asset for asset in catalog["assets"]

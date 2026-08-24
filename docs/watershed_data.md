@@ -333,6 +333,9 @@ missingness, preventing an entirely empty forcing or target series from passing 
 a warning-only package.
 NaN and infinite numeric observations are rejected explicitly instead of escaping
 ordinary physical-range comparisons or being written as usable model inputs.
+HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
+passing, and `not_run` packages remain exportable; callers receive the aggregate
+status in one-button pipeline results and can apply stricter policy if required.
 
 ## Graphical interfaces
 
