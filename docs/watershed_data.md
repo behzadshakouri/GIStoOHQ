@@ -225,6 +225,9 @@ before either native acquisition or prediction-time view publication.
 Prediction-time materialization also refuses an empty view when the requested
 cutoff precedes every forecast issue time, rather than publishing a zero-record
 derived asset that cannot drive a model.
+Derived forecast views normalize issue and valid timestamps to UTC and strip
+surrounding whitespace from dimension and unit labels; the transformation metadata
+records both operations.
 
 ## Inspect downloaded and derived assets
 

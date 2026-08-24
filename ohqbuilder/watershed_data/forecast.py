@@ -25,6 +25,10 @@ def _time(value: str, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _utc_text(value: str, field: str) -> str:
+    return _time(value, field).isoformat().replace("+00:00", "Z")
+
+
 def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     required = {"issue_time", "valid_time", "lead_time_hours", "member", "variable",
                 "location_or_grid_id", "value", "units"}
@@ -128,7 +132,16 @@ def materialize_available_forecasts(
     with ObjectStore(object_store).open(source["content_digest"]) as stream:
         records = json.load(stream)
     validate_forecast_records(records)
-    available = [record for record in records if _time(record["issue_time"], "issue_time") <= cutoff]
+    available = []
+    for record in records:
+        if _time(record["issue_time"], "issue_time") > cutoff:
+            continue
+        normalized = dict(record)
+        normalized["issue_time"] = _utc_text(record["issue_time"], "issue_time")
+        normalized["valid_time"] = _utc_text(record["valid_time"], "valid_time")
+        for field in ("member", "variable", "location_or_grid_id", "units"):
+            normalized[field] = str(record[field]).strip()
+        available.append(normalized)
     if not available:
         raise WatershedDataError(
             "forecast archive has no records available by the requested prediction_time"
@@ -140,15 +153,18 @@ def materialize_available_forecasts(
     writer.writeheader()
     writer.writerows(sorted(available, key=lambda row: (row["issue_time"], row["valid_time"], row["member"])))
     stored = ObjectStore(object_store).put(io.BytesIO(buffer.getvalue().encode()))
-    identity = {"parent": asset_id, "prediction_time": cutoff.isoformat()}
+    identity = {
+        "parent": asset_id, "prediction_time": cutoff.isoformat(),
+        "timestamp_normalization": "UTC", "dimension_whitespace": "stripped",
+    }
     return catalog_store.register({
         "provider": source["provider"], "product": "available-forecast-view",
-        "product_version": "1.0", "request_key": hashlib.sha256(
+        "product_version": "1.1", "request_key": hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
         "record_count": len(available), "leakage_rule": "issue_time <= prediction_time",
         "transformation_name": "prediction-time-availability-filter",
-        "transformation_version": "1.0", "transformation_parameters": identity,
+        "transformation_version": "1.1", "transformation_parameters": identity,
     })

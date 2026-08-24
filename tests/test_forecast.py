@@ -67,9 +67,33 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     )
     assert view["record_count"] == 1
     assert view["transformation_name"] == "prediction-time-availability-filter"
+    assert view["transformation_version"] == "1.1"
+    assert view["transformation_parameters"]["timestamp_normalization"] == "UTC"
     with ObjectStore(tmp_path / "store").open(view["content_digest"]) as stream:
         rows = list(csv.DictReader(line.decode() for line in stream.readlines()))
     assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"
+
+
+def test_forecast_view_normalizes_timestamps_and_dimensions(tmp_path):
+    records = json.loads(Path("tests/fixtures/forecast_archive.json").read_text())
+    records[0]["issue_time"] = "2024-12-31T19:00:00-05:00"
+    records[0]["valid_time"] = "2025-01-01T01:00:00-05:00"
+    records[0]["member"] = " member-1 "
+    raw = json.dumps(records).encode()
+    asset = acquire_forecast_archive(
+        url="https://example.test/archive.json", provider="example", product="forecast",
+        cache=tmp_path / "store", catalog=tmp_path / "catalog.json",
+        opener=lambda *args, **kwargs: Response(raw),
+    )
+    view = materialize_available_forecasts(
+        asset_id=asset["asset_id"], prediction_time="2025-01-01T03:00:00Z",
+        catalog=tmp_path / "catalog.json", object_store=tmp_path / "store",
+    )
+    with ObjectStore(tmp_path / "store").open(view["content_digest"]) as stream:
+        rows = list(csv.DictReader(line.decode() for line in stream.readlines()))
+    assert rows[0]["issue_time"] == "2025-01-01T00:00:00Z"
+    assert rows[0]["valid_time"] == "2025-01-01T06:00:00Z"
+    assert rows[0]["member"] == "member-1"
 
 
 def test_forecast_view_rejects_prediction_time_before_archive_availability(tmp_path):
