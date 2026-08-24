@@ -13,6 +13,13 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
         "provider": "example", "product": "weather", "processing_status": "native",
         "content_digest": stored.content_digest, "size": stored.size, "media_type": "text/plain",
         "acquisition_attempts": 2,
+        "variables": ["precipitation"],
+        "issue_time_coverage": {"start": "2025-01-01T00:00:00Z", "end": "2025-01-01T06:00:00Z"},
+        "valid_time_coverage": {"start": "2025-01-01T06:00:00Z", "end": "2025-01-01T12:00:00Z"},
+        "members_by_variable": {"precipitation": ["control"]},
+        "locations_by_variable": {"precipitation": ["grid-1"]},
+        "units_by_variable": {"precipitation": "mm"},
+        "record_counts_by_variable": {"precipitation": 2},
     })
     catalog.register({
         "provider": "example", "product": "derived", "processing_status": "derived",
@@ -29,6 +36,11 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
     assert report["assets"][0]["asset_id"].startswith("sha256:")
     native_status = next(item for item in report["assets"] if item["asset_id"] == native["asset_id"])
     assert native_status["acquisition_attempts"] == 2
+    assert native_status["issue_time_coverage"]["start"] == "2025-01-01T00:00:00Z"
+    assert native_status["valid_time_coverage"]["end"] == "2025-01-01T12:00:00Z"
+    assert native_status["members_by_variable"] == {"precipitation": ["control"]}
+    assert native_status["units_by_variable"] == {"precipitation": "mm"}
+    assert native_status["record_counts_by_variable"] == {"precipitation": 2}
 
     output = write_data_status(
         catalog=catalog.path, object_store=store.root, output=tmp_path / "status"

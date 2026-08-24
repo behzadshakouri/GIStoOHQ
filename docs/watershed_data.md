@@ -258,6 +258,9 @@ This writes `status.json` and `status.md` with every asset ID, provider, product
 native/derived status, parent IDs, coverage, record counts, and object-store
 availability. Use **Inspect Data Status** in either graphical dialog to obtain the
 same report instead of copying opaque IDs directly from console output.
+Forecast entries in `status.json` include issue/valid coverage, prediction time,
+variables, and the per-variable member, location, unit, and record-count summaries
+carried by the catalog.
 
 Before a long run or export, validate the local workspace without contacting a
 provider:
