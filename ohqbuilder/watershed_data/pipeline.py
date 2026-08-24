@@ -118,7 +118,8 @@ def run_watershed_data_pipeline(
     if export_hydropinn_profile:
         if manifest.package_qc_status == "fail":
             raise WatershedDataError(
-                "HydroPINN export refused because the watershed package has failed QC"
+                "HydroPINN export refused because the watershed package has failed QC: "
+                + ", ".join(manifest.failed_qc_rule_ids)
             )
         hydropinn_manifest = export_hydropinn(
             package=package, object_store=cache, output=root / "hydropinn"

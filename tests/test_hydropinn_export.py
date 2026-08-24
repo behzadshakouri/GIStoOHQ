@@ -77,6 +77,8 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
     with pytest.raises(WatershedDataError, match="QC summary does not match"):
         validate_package(package)
     manifest_path.write_text(original_manifest)
-    with pytest.raises(WatershedDataError, match="source package has failed QC"):
+    with pytest.raises(
+        WatershedDataError, match=r"source package has failed QC: temporal\.finite_values"
+    ):
         export_hydropinn(package=package, object_store=store.root, output=tmp_path / "hydropinn")
     assert not (tmp_path / "hydropinn").exists()

@@ -22,7 +22,8 @@ def export_hydropinn(
     package_manifest = validate_package(root)
     if package_manifest.package_qc_status == "fail":
         raise WatershedDataError(
-            "HydroPINN export refused because the source package has failed QC"
+            "HydroPINN export refused because the source package has failed QC: "
+            + ", ".join(package_manifest.failed_qc_rule_ids)
         )
     catalog = AssetCatalog(root / "catalog.json").read()
     assets = [

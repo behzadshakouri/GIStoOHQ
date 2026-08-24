@@ -343,6 +343,8 @@ Package freezing validates every QC result, including successful results, agains
 the QCReport 1.0 contract and requires stable dotted rule identifiers.
 QC aggregation recursively includes JSON reports under `quality_control/`, allowing
 provider or asset subdirectories without omitting their failures from the manifest.
+Workspace doctor and refused HydroPINN export messages include failed rule IDs, so
+users can move directly from a gate failure to the relevant QC sidecar result.
 One-button pipeline harmonization also stops before publishing a derived asset when
 an error-level temporal rule fails. Its QC sidecar remains available for diagnosis,
 but no provenance activity or ordinary derived catalog record is created.
