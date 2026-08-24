@@ -47,6 +47,7 @@ def test_data_doctor_fails_a_package_with_error_level_qc(tmp_path):
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [{
             "rule_id": "temporal.physical_range", "severity": "error", "passed": False,
+            "message": "1 value outside physical range", "asset_ids": [], "details": {},
         }],
     }))
     freeze_package(site_spec=site, catalog=catalog.path, output=package)

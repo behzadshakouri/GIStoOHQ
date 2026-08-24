@@ -219,6 +219,25 @@ ohqbuild data forecast-view --asset-id sha256:... \
 The view enforces `issue_time <= prediction_time`, preserves issue and valid
 times, and rejects inconsistent lead times. It never collapses forecasts to valid
 time alone.
+Forecast validation also rejects duplicate issue/valid/member/variable/location
+keys, empty dimensions or units, nonnumeric values, and NaN or infinite numbers
+before either native acquisition or prediction-time view publication.
+Prediction-time materialization also refuses an empty view when the requested
+cutoff precedes every forecast issue time, rather than publishing a zero-record
+derived asset that cannot drive a model.
+Derived forecast views normalize issue and valid timestamps to UTC and strip
+surrounding whitespace from dimension and unit labels; the transformation metadata
+records both operations.
+Each forecast variable must use one consistent normalized unit throughout an
+archive. The catalog summary records that variable-to-unit mapping for downstream
+profile checks.
+The strengthened archive contract uses product version `forecast-records-v2`, so
+responses cached under the earlier validation contract are not silently reused.
+Derived view catalog records repeat the filtered record count, variables, members,
+locations, units, and issue/valid coverage, so consumers need not inspect the CSV
+to determine whether a prediction-time view fits their profile.
+View materialization revalidates the stored native document and reports malformed
+UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
 
 ## Inspect downloaded and derived assets
 
@@ -340,7 +359,10 @@ Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.
 Package freezing validates every QC result, including successful results, against
-the QCReport 1.0 contract and requires stable dotted rule identifiers.
+the QCReport 1.0 contract and requires stable dotted rule identifiers, a non-empty
+message, an asset-ID array, and an object-valued details payload.
+Every asset ID named by a QC result must exist in the frozen package catalog;
+package-level rules may use an empty asset-ID array.
 QC aggregation recursively includes JSON reports under `quality_control/`, allowing
 provider or asset subdirectories without omitting their failures from the manifest.
 Workspace doctor and refused HydroPINN export messages include failed rule IDs, so

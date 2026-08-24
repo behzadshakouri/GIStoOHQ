@@ -196,7 +196,7 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
         "  end: '2025-01-02T00:00:00Z'\n"
     )
     catalog = AssetCatalog(tmp_path / "catalog.json")
-    catalog.register({
+    asset = catalog.register({
         "provider": "example", "product": "data", "content_digest": "0" * 64,
         "size": 0, "media_type": "application/json",
     })
@@ -205,17 +205,27 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     qc.parent.mkdir(parents=True)
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [
-            {"rule_id": "temporal.missing_values", "severity": "warning", "passed": False}
+            {"rule_id": "temporal.missing_values", "severity": "warning", "passed": False,
+             "message": "1 missing value", "asset_ids": [asset["asset_id"]], "details": {}}
         ],
     }))
     freeze_package(site_spec=site, catalog=catalog.path, output=output)
     assert validate_package(output).package_qc_status == "warning"
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [
-            {"severity": "information", "passed": True}
+            {"severity": "information", "passed": True, "message": "invalid",
+             "asset_ids": [], "details": {}}
         ],
     }))
     with pytest.raises(WatershedDataError, match="stable dotted identifier"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0", "results": [{
+            "rule_id": "temporal.missing_values", "severity": "warning", "passed": False,
+            "message": "unknown asset", "asset_ids": ["sha256:unknown"], "details": {},
+        }],
+    }))
+    with pytest.raises(WatershedDataError, match="outside the package catalog"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
 
 

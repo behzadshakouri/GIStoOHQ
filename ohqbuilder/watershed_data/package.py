@@ -12,7 +12,9 @@ from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
 
 
-def _package_qc_summary(destination: Path) -> tuple[str, tuple[str, ...]]:
+def _package_qc_summary(
+    destination: Path, allowed_asset_ids: set[str] | None = None,
+) -> tuple[str, tuple[str, ...]]:
     """Aggregate stable QC reports already materialized in the package tree."""
     reports = sorted((destination / "quality_control").rglob("*.json"))
     if not reports:
@@ -40,6 +42,22 @@ def _package_qc_summary(destination: Path) -> tuple[str, tuple[str, ...]]:
                     raise ValueError(f"invalid severity {severity!r}")
                 if not isinstance(result["passed"], bool):
                     raise TypeError("passed is not boolean")
+                if not isinstance(result.get("message"), str) or not result["message"]:
+                    raise TypeError("message is not a non-empty string")
+                asset_ids = result.get("asset_ids")
+                if not isinstance(asset_ids, list) or any(
+                    not isinstance(asset_id, str) or not asset_id for asset_id in asset_ids
+                ):
+                    raise TypeError("asset_ids is not an array of non-empty strings")
+                if allowed_asset_ids is not None:
+                    unknown_asset_ids = sorted(set(asset_ids) - allowed_asset_ids)
+                    if unknown_asset_ids:
+                        raise ValueError(
+                            "asset_ids reference assets outside the package catalog: "
+                            + ", ".join(unknown_asset_ids)
+                        )
+                if not isinstance(result.get("details"), dict):
+                    raise TypeError("details is not an object")
                 if not result["passed"]:
                     failed_severities.add(severity)
                     failed_rule_ids.add(rule_id)
@@ -71,7 +89,7 @@ def freeze_package(
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    package_qc_status, failed_qc_rule_ids = _package_qc_summary(destination)
+    package_qc_status, failed_qc_rule_ids = _package_qc_summary(destination, set(asset_ids))
     sidecar_checksums = {
         path.relative_to(destination).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for directory in ("quality_control", "provenance")
@@ -130,6 +148,10 @@ def validate_package(path: str | Path) -> PackageManifest:
     ids = tuple(sorted(asset["asset_id"] for asset in catalog["assets"]))
     if ids != tuple(manifest.included_asset_ids):
         raise WatershedDataError("package asset IDs do not match manifest")
+    actual_qc_status, actual_failed_rules = _package_qc_summary(root, set(ids))
+    if (manifest.package_qc_status != actual_qc_status
+            or manifest.failed_qc_rule_ids != actual_failed_rules):
+        raise WatershedDataError("package QC summary does not match its sidecars")
     identity = {
         "site_spec_digest": manifest.site_spec_digest,
         "catalog_digest": manifest.catalog_digest,
