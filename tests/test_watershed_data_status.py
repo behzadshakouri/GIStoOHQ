@@ -2,7 +2,9 @@ import io
 import json
 
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
+from ohqbuilder.watershed_data.package import freeze_package
 from ohqbuilder.watershed_data.status import build_data_status, write_data_status
+from ohqbuilder.watershed_data.workflow import write_site_spec
 
 
 def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
@@ -52,3 +54,16 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
     assert "## Forecast support" in markdown
     assert "2025-01-01T00:00:00Z → 2025-01-01T06:00:00Z" in markdown
     assert "precipitation" in markdown
+
+    site = write_site_spec(
+        tmp_path / "site.yaml", site_id="status", name="Status", longitude=-77,
+        latitude=39, start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+    )
+    package = tmp_path / "package"
+    freeze_package(site_spec=site, catalog=catalog.path, output=package)
+    packaged = build_data_status(
+        catalog=catalog.path, object_store=store.root, package=package,
+    )
+    assert packaged["schema_version"] == "1.1"
+    assert packaged["package_id"].startswith("sha256:")
+    assert packaged["package_qc_status"] == "not_run"

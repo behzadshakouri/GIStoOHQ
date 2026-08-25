@@ -108,10 +108,12 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         forecast_provider="example",
     )
     assert forecast.argv[2] == "download-forecast"
-    assert watershed_data_command(
+    status = watershed_data_command(
         "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
         status_output="status",
-    ).argv[-2:] == ("--output", "status")
+    )
+    assert ("--output", "status") == status.argv[status.argv.index("--output"):][:2]
+    assert ("--package", "watershed_package") == status.argv[-2:]
     weather_run = watershed_data_command(
         "run-weather", site_spec="site.yaml", workspace="weather_run",
         site_id="demo", longitude=-77, latitude=39,

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
+from .package import validate_package
 
 
 def build_data_status(
     *, catalog: str | Path, object_store: str | Path | None = None,
+    package: str | Path | None = None,
 ) -> dict[str, Any]:
     """Return a stable summary plus every asset ID needed by later commands."""
     data = AssetCatalog(catalog).read()
@@ -46,9 +48,10 @@ def build_data_status(
             "record_count": asset.get("record_count", asset.get("observation_count")),
             "acquisition_attempts": asset.get("acquisition_attempts"),
         })
+    package_manifest = validate_package(package) if package is not None else None
     return {
         "schema_name": "WatershedDataStatus",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "catalog": str(Path(catalog).expanduser().resolve()),
         "catalog_digest": data.get("catalog_digest"),
         "asset_count": len(assets),
@@ -56,6 +59,10 @@ def build_data_status(
         "derived_asset_count": sum(item["processing_status"] == "derived" for item in assets),
         "missing_object_count": missing_objects,
         "products": dict(sorted(Counter(item["product"] for item in assets).items())),
+        "package_id": package_manifest.package_id if package_manifest else None,
+        "package_qc_status": package_manifest.package_qc_status if package_manifest else None,
+        "failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids) if package_manifest else [],
+        "qc_policy_digests": dict(package_manifest.qc_policy_digests) if package_manifest else {},
         "assets": assets,
     }
 
@@ -63,8 +70,9 @@ def build_data_status(
 def write_data_status(
     *, catalog: str | Path, output: str | Path,
     object_store: str | Path | None = None,
+    package: str | Path | None = None,
 ) -> Path:
-    report = build_data_status(catalog=catalog, object_store=object_store)
+    report = build_data_status(catalog=catalog, object_store=object_store, package=package)
     destination = Path(output).expanduser().resolve()
     if destination.suffix.lower() == ".json":
         json_path = destination
@@ -80,6 +88,12 @@ def write_data_status(
         "| Asset ID | Provider | Product | Status | Attempts | Object available |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
+    if report["package_id"] is not None:
+        failed_rules = ", ".join(report["failed_qc_rule_ids"]) or "none"
+        rows[4:4] = [
+            f"Package: `{report['package_id']}`", "",
+            f"Package QC: **{report['package_qc_status']}** (failed rules: {failed_rules})", "",
+        ]
     for asset in report["assets"]:
         available = "not checked" if asset["object_available"] is None else (
             "yes" if asset["object_available"] else "no"

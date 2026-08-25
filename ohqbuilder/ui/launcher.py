@@ -460,7 +460,7 @@ def watershed_data_command(
     if action == "status":
         return WorkflowCommand("Inspect Data Status", (
             "ohqbuild", "data", "status", "--catalog", catalog,
-            "--object-store", cache, "--output", status_output,
+            "--object-store", cache, "--output", status_output, "--package", package,
         ))
     if action == "doctor":
         return WorkflowCommand("Check Data Workspace", (
