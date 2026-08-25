@@ -417,6 +417,8 @@ Package and HydroPINN manifests also require canonical SHA-256 package, catalog,
 SiteSpec, and asset identities; package asset lists must be sorted and unique.
 The desktop/QGIS workflow command builder exposes the same pass-only choice for
 standalone and one-button exports, keeping graphical and terminal policies aligned.
+The standalone watershed-data dialog provides a **Require passing package QC for
+HydroPINN export** checkbox and forwards its value to every export action.
 Exports are assembled in a temporary sibling directory and renamed into place only
 after all assets and manifests are complete. An existing destination is rejected,
 preventing partial failures or reruns from leaving stale observation files.

@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import queue
@@ -10,6 +11,7 @@ import pytest
 from ohqbuilder.ui.launcher import (
     BASEMAP_PROVIDERS,
     CommandRunner,
+    LauncherApp,
     LauncherError,
     LauncherState,
     RunnerFinished,
@@ -912,6 +914,13 @@ def test_ui_launcher_defaults_to_sligo_example_when_available():
     from ohqbuilder.ui.launcher import default_config_path
 
     assert default_config_path() == "examples/SligoCreek/dem_workflow.example.yaml"
+
+
+def test_watershed_dialog_exposes_strict_qc_export_gate():
+    source = inspect.getsource(LauncherApp.configure_watershed_data)
+
+    assert "Require passing package QC for HydroPINN export" in source
+    assert "require_qc_pass=require_qc_pass_var.get()" in source
 
 
 def test_run_dem_ui_shell_wrapper_exists():
