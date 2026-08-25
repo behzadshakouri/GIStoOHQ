@@ -14,12 +14,23 @@ from .schemas import WatershedDataError
 def export_hydropinn(
     *, package: str | Path, object_store: str | Path | None,
     output: str | Path, profile: str = "water-balance-v1",
+    require_qc_pass: bool = False,
 ) -> Path:
     """Export selected generic temporal assets without ML preprocessing."""
     if profile != "water-balance-v1":
         raise WatershedDataError(f"unsupported HydroPINN profile: {profile}")
     root = Path(package).expanduser().resolve()
     package_manifest = validate_package(root)
+    if package_manifest.package_qc_status == "fail":
+        raise WatershedDataError(
+            "HydroPINN export refused because the source package has failed QC: "
+            + ", ".join(package_manifest.failed_qc_rule_ids)
+        )
+    if require_qc_pass and package_manifest.package_qc_status != "pass":
+        raise WatershedDataError(
+            "HydroPINN export requires passing package QC; source status is "
+            + package_manifest.package_qc_status
+        )
     catalog = AssetCatalog(root / "catalog.json").read()
     assets = [
         asset for asset in catalog["assets"]

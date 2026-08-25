@@ -56,6 +56,8 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     assert Path(result["hydropinn_manifest"]).is_file()
     assert validate_package(tmp_path / "run" / "watershed_package").package_id == result["package_id"]
     assert validate_package(tmp_path / "run" / "watershed_package").package_qc_status == "warning"
+    assert result["package_qc_status"] == "warning"
+    assert result["qc_policy_digests"].keys() == {"temporal-qc-v2"}
     assert len(list((tmp_path / "run" / "watershed_package" / "quality_control").glob("*.json"))) == 3
     manifest = validate_package(tmp_path / "run" / "watershed_package")
     assert any(path.startswith("quality_control/") for path in manifest.sidecar_checksums)
@@ -89,6 +91,22 @@ def test_weather_pet_pipeline_does_not_require_station_id(tmp_path):
     )
     assert len(result["native_asset_ids"]) == 2
     assert Path(result["hydropinn_manifest"]).is_file()
+
+
+def test_pipeline_rejects_strict_qc_without_export(tmp_path):
+    site = write_site_spec(
+        tmp_path / "site.yaml", site_id="weather", name="Weather",
+        longitude=-77, latitude=39, start="2025-01-01T00:00:00Z",
+        end="2025-01-02T00:00:00Z",
+    )
+    with pytest.raises(WatershedDataError, match="only valid when HydroPINN export is enabled"):
+        run_watershed_data_pipeline(
+            site_spec=site,
+            station_id="",
+            workspace=tmp_path / "run",
+            include_discharge=False,
+            require_qc_pass=True,
+        )
 
 
 def test_weather_pipeline_bootstraps_missing_site_spec(tmp_path):
