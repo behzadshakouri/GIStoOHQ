@@ -399,6 +399,9 @@ reports are parsed, ensuring validation never reads an external report first.
 Package refresh removes the old manifest before publication and atomically replaces
 the SiteSpec and each checksum-verified raw object, so an interrupted refresh cannot
 leave a stale manifest or a partially copied object that still appears valid.
+Package validation, sidecar inventory, and HydroPINN export checksum files in bounded
+chunks, avoiding whole-file memory growth for long temporal series or packaged raw
+objects.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.

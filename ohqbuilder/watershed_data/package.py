@@ -12,6 +12,14 @@ from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _sidecar_checksums(root: Path) -> dict[str, str]:
     checksums: dict[str, str] = {}
     for directory in ("quality_control", "provenance"):
@@ -27,7 +35,7 @@ def _sidecar_checksums(root: Path) -> dict[str, str]:
                     f"package sidecar paths must not be symbolic links: {relative}"
                 )
             if path.is_file() and path.suffix == ".json":
-                checksums[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+                checksums[relative] = _file_sha256(path)
     return checksums
 
 
@@ -244,7 +252,7 @@ def validate_package(path: str | Path) -> PackageManifest:
         for asset in catalog["assets"]:
             digest = asset["content_digest"]
             raw = root / "raw" / "sha256" / digest[:2] / digest[2:]
-            if not raw.is_file() or hashlib.sha256(raw.read_bytes()).hexdigest() != digest:
+            if not raw.is_file() or _file_sha256(raw) != digest:
                 raise WatershedDataError(f"missing or corrupt packaged raw object: {digest}")
     if manifest.schema_version in {"1.0", "1.1"}:
         manifest = replace(

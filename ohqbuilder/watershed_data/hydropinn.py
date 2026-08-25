@@ -11,6 +11,14 @@ from .package import validate_package
 from .schemas import HydroPINNExportManifest, WatershedDataError
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def export_hydropinn(
     *, package: str | Path, object_store: str | Path | None,
     output: str | Path, profile: str = "water-balance-v1",
@@ -69,7 +77,7 @@ def export_hydropinn(
                     variable_units.setdefault(row["variable"], set()).add(row["native_unit"])
             exported.append({
                 "asset_id": asset["asset_id"], "path": str(target.relative_to(destination)),
-                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                "sha256": _file_sha256(target),
             })
         variables = {
             "schema_name": "HydroPINNVariables", "schema_version": "1.0",
