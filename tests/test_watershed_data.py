@@ -1,3 +1,5 @@
+import ast
+import inspect
 import io
 import json
 import threading
@@ -13,6 +15,7 @@ from ohqbuilder.watershed_data.schemas import (
 )
 from ohqbuilder.watershed_data.workflow import acquire_url
 from ohqbuilder.watershed_data.package import freeze_package, validate_package
+from ohqbuilder.watershed_data import package as package_module
 from ohqbuilder.watershed_data.schemas import ProvenanceActivity, QCResult
 
 
@@ -231,6 +234,28 @@ def test_package_manifest_rejects_unsorted_asset_ids():
             "generated_at": "2025-01-01T00:00:00Z", "raw_inclusion": "none",
             "self_contained": False, "redistributable": False,
         })
+
+
+def test_validate_package_has_one_named_qc_summary_path():
+    """Prevent stale positional QC validation from returning during merges."""
+    tree = ast.parse(inspect.getsource(package_module.validate_package))
+    summary_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_package_qc_summary"
+    ]
+    positional_assignments = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, (ast.Tuple, ast.List)) for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "_package_qc_summary"
+    ]
+
+    assert len(summary_calls) == 1
+    assert positional_assignments == []
 
 
 def test_package_manifest_aggregates_qc_results(tmp_path):
