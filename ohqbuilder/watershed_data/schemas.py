@@ -14,6 +14,17 @@ class WatershedDataError(ValueError):
     """Raised when a watershed-data document violates its contract."""
 
 
+def _is_sha256(value: object, *, prefixed: bool = False) -> bool:
+    if not isinstance(value, str):
+        return False
+    candidate = value.removeprefix("sha256:") if prefixed else value
+    return (
+        (not prefixed or value.startswith("sha256:"))
+        and len(candidate) == 64
+        and all(character in "0123456789abcdef" for character in candidate)
+    )
+
+
 def _utc_timestamp(value: str, field: str) -> str:
     if not isinstance(value, str):
         raise WatershedDataError(f"{field} must be an ISO-8601 timestamp")
@@ -256,6 +267,18 @@ class PackageManifest:
             raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
         if manifest.package_qc_status not in {"pass", "warning", "fail", "not_run"}:
             raise WatershedDataError("package_qc_status must be pass, warning, fail, or not_run")
+        if not _is_sha256(manifest.package_id, prefixed=True):
+            raise WatershedDataError("package_id must be a sha256-prefixed lowercase digest")
+        if not _is_sha256(manifest.site_spec_digest):
+            raise WatershedDataError("site_spec_digest must be a lowercase SHA-256 value")
+        if not _is_sha256(manifest.catalog_digest):
+            raise WatershedDataError("catalog_digest must be a lowercase SHA-256 value")
+        if not manifest.site_id or not manifest.producer or not manifest.producer_version:
+            raise WatershedDataError("site_id, producer, and producer_version must be non-empty")
+        if any(not _is_sha256(asset_id, prefixed=True) for asset_id in manifest.included_asset_ids):
+            raise WatershedDataError("included_asset_ids must be sha256-prefixed digests")
+        if tuple(sorted(set(manifest.included_asset_ids))) != manifest.included_asset_ids:
+            raise WatershedDataError("included_asset_ids must be sorted and unique")
         if any(not isinstance(rule_id, str) or not rule_id for rule_id in manifest.failed_qc_rule_ids):
             raise WatershedDataError("failed_qc_rule_ids must contain non-empty strings")
         if tuple(sorted(set(manifest.failed_qc_rule_ids))) != manifest.failed_qc_rule_ids:
@@ -341,10 +364,7 @@ class HydroPINNExportManifest:
             raise WatershedDataError("invalid HydroPINNExport QC gate")
         if not manifest.profile or not manifest.site_id:
             raise WatershedDataError("HydroPINNExport profile and site_id must be non-empty")
-        package_digest = manifest.source_package_id.removeprefix("sha256:")
-        if (not manifest.source_package_id.startswith("sha256:")
-                or len(package_digest) != 64
-                or any(c not in "0123456789abcdef" for c in package_digest)):
+        if not _is_sha256(manifest.source_package_id, prefixed=True):
             raise WatershedDataError("invalid HydroPINNExport source package ID")
         if any(not isinstance(rule_id, str) or not rule_id
                for rule_id in manifest.source_failed_qc_rule_ids):
@@ -362,7 +382,7 @@ class HydroPINNExportManifest:
         for asset in manifest.assets:
             if not isinstance(asset, dict) or set(asset) != {"asset_id", "path", "sha256"}:
                 raise WatershedDataError("invalid HydroPINNExport asset entry")
-            if not isinstance(asset["asset_id"], str) or not asset["asset_id"]:
+            if not _is_sha256(asset["asset_id"], prefixed=True):
                 raise WatershedDataError("invalid HydroPINNExport asset ID")
             if not isinstance(asset["path"], str) or not asset["path"]:
                 raise WatershedDataError("invalid HydroPINNExport asset path")

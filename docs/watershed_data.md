@@ -413,6 +413,8 @@ and asset checksums, source package IDs, required strings, unique omitted-operat
 labels, and safe relative asset paths before publishing the manifest. Manifest
 policy/checksum validation rejects non-string JSON values with domain errors rather
 than leaking implementation type errors.
+Package and HydroPINN manifests also require canonical SHA-256 package, catalog,
+SiteSpec, and asset identities; package asset lists must be sorted and unique.
 The desktop/QGIS workflow command builder exposes the same pass-only choice for
 standalone and one-button exports, keeping graphical and terminal policies aligned.
 Exports are assembled in a temporary sibling directory and renamed into place only

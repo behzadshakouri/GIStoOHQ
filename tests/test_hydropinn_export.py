@@ -126,7 +126,10 @@ def test_hydropinn_manifest_rejects_unsafe_asset_paths():
             "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
             "source_validation_policy_digests": {},
             "qc_gate": "require_pass",
-            "assets": [{"asset_id": "sha256:test", "path": "../outside.csv", "sha256": "b" * 64}],
+            "assets": [{
+                "asset_id": "sha256:" + "c" * 64,
+                "path": "../outside.csv", "sha256": "b" * 64,
+            }],
             "transformations_not_performed": [],
         })
 
