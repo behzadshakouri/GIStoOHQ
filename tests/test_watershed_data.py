@@ -233,6 +233,17 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     }))
     with pytest.raises(WatershedDataError, match="policy_digest"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "policy_digest": "a" * 64, "results": [],
+    }))
+    conflicting_qc = qc.with_name("conflicting.json")
+    conflicting_qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "policy_digest": "b" * 64, "results": [],
+    }))
+    with pytest.raises(WatershedDataError, match="conflicting digests"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
 
 
 def test_freeze_and_validate_self_contained_package(tmp_path):
