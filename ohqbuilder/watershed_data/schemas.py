@@ -71,7 +71,7 @@ class SiteSpec:
     study_end: str
     target_timestep: str
     sources: dict[str, Any]
-    schema_version: str = "1.1"
+    schema_version: str = "1.0"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SiteSpec":
