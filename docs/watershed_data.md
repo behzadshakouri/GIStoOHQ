@@ -370,12 +370,12 @@ missingness, preventing an entirely empty forcing or target series from passing 
 a warning-only package.
 NaN and infinite numeric observations are rejected explicitly instead of escaping
 ordinary physical-range comparisons or being written as usable model inputs.
-Temporal QC reports declare policy version `temporal-qc-v1`. Published harmonized
-assets record that policy in transformation metadata, so future range or unit-policy
-changes cannot silently reuse an asset admitted under an older policy.
-Reports and derived assets also record the SHA-256 digest of the canonical range and
-unit policy document, distinguishing exact policy content even if a version label is
-accidentally reused.
+Temporal QC reports declare policy version `temporal-qc-v2`. Published harmonized
+assets record that policy in transformation metadata, so future rule, severity,
+range, unit, interval, tolerance, or example-limit changes cannot silently reuse an
+asset admitted under an older policy. Reports and derived assets also record the
+SHA-256 digest of the complete canonical policy document, distinguishing exact
+policy content even if a version label is accidentally reused.
 Package freezing treats policy metadata as an all-or-nothing pair and validates the
 digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 Package manifests and one-button results aggregate policy versions to their exact

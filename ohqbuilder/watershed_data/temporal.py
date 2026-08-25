@@ -12,7 +12,22 @@ from typing import Any
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import ProvenanceActivity, QCResult, WatershedDataError, canonical_json
 
-TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v1"
+TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v2"
+QC_EXAMPLE_LIMIT = 100
+FIXED_RESOLUTIONS = {"hourly": 3600, "daily": 86400}
+QC_RULE_SEVERITIES = {
+    "temporal.duplicate_timestamps": "error",
+    "temporal.missing_values": "warning",
+    "temporal.variable_availability": "error",
+    "temporal.finite_values": "error",
+    "temporal.chronology": "warning",
+    "temporal.physical_range": "error",
+    "temporal.provider_qualifiers": "warning",
+    "temporal.unit_compatibility": "error",
+    "temporal.expected_intervals": "warning",
+    "temporal.timestep_alignment": "warning",
+    "temporal.study_period_coverage": "warning",
+}
 PHYSICAL_RANGES = {
     "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
     "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
@@ -33,6 +48,14 @@ TEMPORAL_QC_POLICY = {
         variable: sorted(unit_values)
         for variable, unit_values in sorted(EXPECTED_UNITS.items())
     },
+    "rule_severities": dict(sorted(QC_RULE_SEVERITIES.items())),
+    "fixed_resolution_seconds": dict(sorted(FIXED_RESOLUTIONS.items())),
+    "example_limit_per_rule": QC_EXAMPLE_LIMIT,
+    "duplicate_key": ["timestamp", "variable"],
+    "chronology_scope": "within_variable_in_native_order",
+    "valid_observation": "value_is_present_and_finite",
+    "study_period_end_tolerance": "one_declared_fixed_interval",
+    "provisional_qualifiers": ["P"],
 }
 TEMPORAL_QC_POLICY_DIGEST = hashlib.sha256(canonical_json(TEMPORAL_QC_POLICY)).hexdigest()
 
@@ -102,9 +125,8 @@ def temporal_qc(
     units: dict[str, str] | None = None,
     expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
-    expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
-        temporal_resolution or ""
-    )
+    resolution_seconds = FIXED_RESOLUTIONS.get(temporal_resolution or "")
+    expected_delta = timedelta(seconds=resolution_seconds) if resolution_seconds else None
     interval_seconds = expected_delta.total_seconds() if expected_delta is not None else None
     alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
     timestamps_by_variable: dict[str, list[datetime]] = {}
@@ -135,7 +157,7 @@ def temporal_qc(
         key = (timestamp, variable)
         if key in seen_keys:
             duplicates += 1
-            if len(duplicate_examples) < 100:
+            if len(duplicate_examples) < QC_EXAMPLE_LIMIT:
                 duplicate_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
@@ -143,7 +165,7 @@ def temporal_qc(
         if row["value"] is None:
             missing += 1
             counts[1] += 1
-            if len(missing_examples) < 100:
+            if len(missing_examples) < QC_EXAMPLE_LIMIT:
                 missing_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
@@ -159,7 +181,7 @@ def temporal_qc(
         previous = previous_timestamp_by_variable.get(variable)
         if previous is not None and timestamp < previous:
             chronology_inversions += 1
-            if len(chronology_examples) < 100:
+            if len(chronology_examples) < QC_EXAMPLE_LIMIT:
                 chronology_examples.append({
                     "variable": variable,
                     "previous_timestamp": previous.isoformat(),
@@ -169,7 +191,7 @@ def temporal_qc(
         bounds = PHYSICAL_RANGES.get(variable)
         if value is not None and not math.isfinite(value):
             nonfinite_count += 1
-            if len(nonfinite_examples) < 100:
+            if len(nonfinite_examples) < QC_EXAMPLE_LIMIT:
                 nonfinite_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                     "value": str(value),
@@ -178,7 +200,7 @@ def temporal_qc(
             minimum, maximum = bounds
             if value < minimum or (maximum is not None and value > maximum):
                 violation_count += 1
-                if len(violations) < 100:
+                if len(violations) < QC_EXAMPLE_LIMIT:
                     violations.append({
                         "timestamp": timestamp.isoformat(), "variable": variable,
                         "value": value, "minimum": minimum, "maximum": maximum,
@@ -187,7 +209,7 @@ def temporal_qc(
             offset_seconds = (timestamp - alignment_origin).total_seconds()
             if offset_seconds % interval_seconds:
                 misaligned_count += 1
-                if len(misaligned) < 100:
+                if len(misaligned) < QC_EXAMPLE_LIMIT:
                     misaligned.append({
                         "timestamp": timestamp.isoformat(), "variable": variable,
                     })
@@ -261,7 +283,7 @@ def temporal_qc(
                     count = max(0, int(gap / expected_delta) - 1)
                     missing_intervals += count
                     variable_missing_intervals += count
-                    if len(gap_examples) < 100:
+                    if len(gap_examples) < QC_EXAMPLE_LIMIT:
                         gap_examples.append({
                             "variable": variable, "after": previous.isoformat(),
                             "before": current.isoformat(), "missing_intervals": count,
@@ -420,18 +442,18 @@ def harmonize_asset(
                       "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
-        "product_version": "1.2", "request_key": hashlib.sha256(
+        "product_version": "1.3", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
-        "transformation_name": "native-to-utc-table", "transformation_version": "1.3",
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.4",
         "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-utc-table", transformation_version="1.3",
+        transformation_name="native-to-utc-table", transformation_version="1.4",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,
