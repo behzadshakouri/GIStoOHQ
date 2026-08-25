@@ -396,7 +396,9 @@ status in one-button pipeline results and can apply stricter policy if required.
 Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data run`
 to reject both warning and `not_run` packages as well. A pipeline run rejects this
 option unless `--export-hydropinn` is also selected, rather than silently ignoring
-the requested gate.
+the requested gate. HydroPINNExport 1.1 manifests record the source package QC
+status, failed rule IDs, policy digests, and the applied `reject_fail` or
+`require_pass` gate, making the export decision auditable after publication.
 Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.

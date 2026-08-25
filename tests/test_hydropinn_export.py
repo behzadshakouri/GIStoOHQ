@@ -26,17 +26,25 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json",
     })
+    package = tmp_path / "package"
     harmonize_asset(
         asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
-        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+        qc_output=package / "quality_control" / "temporal.json",
+        provenance_output=package / "provenance" / "temporal.json",
     )
-    freeze_package(site_spec=site, catalog=catalog.path, output=tmp_path / "package")
+    freeze_package(site_spec=site, catalog=catalog.path, output=package)
     manifest_path = export_hydropinn(
-        package=tmp_path / "package", object_store=store.root, output=tmp_path / "hydropinn"
+        package=package, object_store=store.root, output=tmp_path / "hydropinn",
+        require_qc_pass=True,
     )
     manifest = json.loads(manifest_path.read_text())
     variables = json.loads((tmp_path / "hydropinn" / "variables.json").read_text())
     assert manifest["profile"] == "water-balance-v1"
+    assert manifest["schema_version"] == "1.1"
+    assert manifest["source_package_qc_status"] == "pass"
+    assert manifest["source_failed_qc_rule_ids"] == []
+    assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v2"}
+    assert manifest["qc_gate"] == "require_pass"
     assert "normalization" in manifest["transformations_not_performed"]
     assert {item["name"] for item in variables["variables"]} == {"PRECTOTCORR", "T2M"}
     assert variables["variables"][0]["normalization"] is None

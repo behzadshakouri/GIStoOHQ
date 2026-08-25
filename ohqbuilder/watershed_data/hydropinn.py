@@ -75,9 +75,14 @@ def export_hydropinn(
     }
     _atomic_json(destination / "variables.json", variables)
     manifest: dict[str, Any] = {
-        "schema_name": "HydroPINNExport", "schema_version": "1.0",
+        "schema_name": "HydroPINNExport", "schema_version": "1.1",
         "profile": profile, "source_package_id": package_manifest.package_id,
-        "site_id": package_manifest.site_id, "assets": exported,
+        "site_id": package_manifest.site_id,
+        "source_package_qc_status": package_manifest.package_qc_status,
+        "source_failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids),
+        "source_qc_policy_digests": dict(package_manifest.qc_policy_digests),
+        "qc_gate": "require_pass" if require_qc_pass else "reject_fail",
+        "assets": exported,
         "transformations_not_performed": [
             "normalization", "imputation", "lag_construction", "feature_selection",
             "train_validation_test_partitioning",
