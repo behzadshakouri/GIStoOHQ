@@ -12,7 +12,7 @@ from typing import Any
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import ProvenanceActivity, QCResult, WatershedDataError, canonical_json
 
-TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v3"
+TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v4"
 QC_EXAMPLE_LIMIT = 100
 FIXED_RESOLUTIONS = {"hourly": 3600, "daily": 86400}
 QC_RULE_SEVERITIES = {
@@ -36,7 +36,8 @@ PHYSICAL_RANGES = {
 EXPECTED_UNITS = {
     "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/day", "mm/hour"},
     "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
-    "ALLSKY_SFC_SW_DWN": {"MJ/hr", "kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
+    "ALLSKY_SFC_SW_DWN": {"MJ/hr", "kW-hr/m^2"},
+    "EVPTRNS": {"MJ/m^2/day", "mm/day"},
 }
 TEMPORAL_QC_POLICY = {
     "policy_version": TEMPORAL_QC_POLICY_VERSION,
@@ -459,18 +460,18 @@ def harmonize_asset(
                       "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
-        "product_version": "1.4", "request_key": hashlib.sha256(
+        "product_version": "1.5", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
-        "transformation_name": "native-to-utc-table", "transformation_version": "1.5",
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.6",
         "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-utc-table", transformation_version="1.5",
+        transformation_name="native-to-utc-table", transformation_version="1.6",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,

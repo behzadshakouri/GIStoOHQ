@@ -57,12 +57,12 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     assert Path(result["hydropinn_manifest"]).is_file()
     export_manifest = json.loads(Path(result["hydropinn_manifest"]).read_text())
     assert export_manifest["source_package_qc_status"] == "warning"
-    assert export_manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v3"}
+    assert export_manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v4"}
     assert export_manifest["qc_gate"] == "reject_fail"
     assert validate_package(tmp_path / "run" / "watershed_package").package_id == result["package_id"]
     assert validate_package(tmp_path / "run" / "watershed_package").package_qc_status == "warning"
     assert result["package_qc_status"] == "warning"
-    assert result["qc_policy_digests"].keys() == {"temporal-qc-v3"}
+    assert result["qc_policy_digests"].keys() == {"temporal-qc-v4"}
     assert result["validation_policy_digests"] == {}
     assert len(list((tmp_path / "run" / "watershed_package" / "quality_control").glob("*.json"))) == 3
     manifest = validate_package(tmp_path / "run" / "watershed_package")
