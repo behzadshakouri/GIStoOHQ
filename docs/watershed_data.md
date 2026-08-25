@@ -431,6 +431,10 @@ JSON; the Markdown report includes the package QC summary for operators. Status
 generation rejects a separately supplied catalog whose digest does not match the
 validated package, preventing one package's QC summary from labeling another
 catalog's assets.
+`data doctor` applies the same binding to both the supplied SiteSpec and catalog and
+reports a failing `package_inputs` check when either digest differs. Object-store
+verification hashes large objects incrementally rather than loading them wholly in
+memory.
 Package freezing validates every QC result, including successful results, against
 the QCReport 1.0 contract and requires stable dotted rule identifiers, a non-empty
 message, an asset-ID array, and an object-valued details payload.
