@@ -47,11 +47,13 @@ def test_data_doctor_fails_a_package_with_error_level_qc(tmp_path):
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [{
             "rule_id": "temporal.physical_range", "severity": "error", "passed": False,
+            "message": "1 value outside physical range", "asset_ids": [], "details": {},
         }],
     }))
     freeze_package(site_spec=site, catalog=catalog.path, output=package)
     report = run_data_doctor(site_spec=site, package=package)
     assert report["passed"] is False
     assert report["checks"][-1] == {
-        "name": "package_qc", "passed": False, "message": "package QC status is fail",
+        "name": "package_qc", "passed": False,
+        "message": "package QC status is fail (temporal.physical_range)",
     }
