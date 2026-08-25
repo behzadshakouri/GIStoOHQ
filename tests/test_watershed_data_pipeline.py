@@ -56,6 +56,8 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     assert Path(result["hydropinn_manifest"]).is_file()
     assert validate_package(tmp_path / "run" / "watershed_package").package_id == result["package_id"]
     assert validate_package(tmp_path / "run" / "watershed_package").package_qc_status == "warning"
+    assert result["package_qc_status"] == "warning"
+    assert result["qc_policy_digests"].keys() == {"temporal-qc-v1"}
     assert len(list((tmp_path / "run" / "watershed_package" / "quality_control").glob("*.json"))) == 3
     manifest = validate_package(tmp_path / "run" / "watershed_package")
     assert any(path.startswith("quality_control/") for path in manifest.sidecar_checksums)
