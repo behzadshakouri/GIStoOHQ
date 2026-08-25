@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,25 @@ import yaml
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
+
+
+def _sidecar_checksums(root: Path) -> dict[str, str]:
+    checksums: dict[str, str] = {}
+    for directory in ("quality_control", "provenance"):
+        sidecar_root = root / directory
+        if sidecar_root.is_symlink():
+            raise WatershedDataError(
+                f"package sidecar paths must not be symbolic links: {directory}"
+            )
+        for path in sorted(sidecar_root.rglob("*")):
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise WatershedDataError(
+                    f"package sidecar paths must not be symbolic links: {relative}"
+                )
+            if path.is_file() and path.suffix == ".json":
+                checksums[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return checksums
 
 
 def _package_qc_summary(
@@ -107,12 +127,7 @@ def freeze_package(
     package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
         destination, set(asset_ids)
     )
-    sidecar_checksums = {
-        path.relative_to(destination).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for directory in ("quality_control", "provenance")
-        for path in sorted((destination / directory).rglob("*.json"))
-        if path.is_file()
-    }
+    sidecar_checksums = _sidecar_checksums(destination)
     identity = {
         "site_spec_digest": spec.digest, "catalog_digest": catalog_digest,
         "included_asset_ids": asset_ids, "raw_inclusion": include_raw,
@@ -168,9 +183,13 @@ def validate_package(path: str | Path) -> PackageManifest:
     if ids != tuple(manifest.included_asset_ids):
         raise WatershedDataError("package asset IDs do not match manifest")
     actual_qc_status, actual_failed_rules, actual_qc_policies = _package_qc_summary(root, set(ids))
-    if (manifest.package_qc_status != actual_qc_status
-            or manifest.failed_qc_rule_ids != actual_failed_rules
-            or manifest.qc_policy_digests != actual_qc_policies):
+    summary_mismatch = manifest.package_qc_status != actual_qc_status
+    if manifest.schema_version == "1.1":
+        summary_mismatch = summary_mismatch or (
+            manifest.failed_qc_rule_ids != actual_failed_rules
+            or manifest.qc_policy_digests != actual_qc_policies
+        )
+    if summary_mismatch:
         raise WatershedDataError("package QC summary does not match its sidecars")
     identity = {
         "site_spec_digest": manifest.site_spec_digest,
@@ -182,9 +201,11 @@ def validate_package(path: str | Path) -> PackageManifest:
     expected_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     if manifest.package_id != expected_id:
         raise WatershedDataError("package identity does not match manifest contents")
+    actual_sidecar_checksums = _sidecar_checksums(root)
+    if actual_sidecar_checksums.keys() != manifest.sidecar_checksums.keys():
+        raise WatershedDataError("package sidecar inventory does not match manifest")
     for relative, expected_digest in manifest.sidecar_checksums.items():
-        sidecar = root / relative
-        if not sidecar.is_file() or hashlib.sha256(sidecar.read_bytes()).hexdigest() != expected_digest:
+        if actual_sidecar_checksums[relative] != expected_digest:
             raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     if manifest.self_contained:
         for asset in catalog["assets"]:
@@ -192,4 +213,10 @@ def validate_package(path: str | Path) -> PackageManifest:
             raw = root / "raw" / "sha256" / digest[:2] / digest[2:]
             if not raw.is_file() or hashlib.sha256(raw.read_bytes()).hexdigest() != digest:
                 raise WatershedDataError(f"missing or corrupt packaged raw object: {digest}")
+    if manifest.schema_version == "1.0":
+        manifest = replace(
+            manifest,
+            failed_qc_rule_ids=actual_failed_rules,
+            qc_policy_digests=actual_qc_policies,
+        )
     return manifest

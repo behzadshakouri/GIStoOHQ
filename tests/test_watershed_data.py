@@ -224,8 +224,16 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
              "message": "1 missing value", "asset_ids": [asset["asset_id"]], "details": {}}
         ],
     }))
-    freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    manifest_path = freeze_package(site_spec=site, catalog=catalog.path, output=output)
     assert validate_package(output).package_qc_status == "warning"
+    legacy_manifest = json.loads(manifest_path.read_text())
+    legacy_manifest["schema_version"] = "1.0"
+    legacy_manifest.pop("failed_qc_rule_ids")
+    legacy_manifest.pop("qc_policy_digests")
+    manifest_path.write_text(json.dumps(legacy_manifest))
+    validated_legacy = validate_package(output)
+    assert validated_legacy.failed_qc_rule_ids == ("temporal.missing_values",)
+    assert validated_legacy.qc_policy_digests == {}
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [
             {"severity": "information", "passed": True, "message": "invalid",
@@ -292,6 +300,21 @@ def test_freeze_and_validate_self_contained_package(tmp_path):
         validate_package(tmp_path / "package")
     document["package_id"] = original_id
     manifest_path.write_text(json.dumps(document))
+
+    unexpected_sidecar = tmp_path / "package" / "provenance" / "unexpected.json"
+    unexpected_sidecar.parent.mkdir()
+    unexpected_sidecar.write_text("{}")
+    with pytest.raises(WatershedDataError, match="sidecar inventory"):
+        validate_package(tmp_path / "package")
+    unexpected_sidecar.unlink()
+
+    external_sidecar = tmp_path / "external.json"
+    external_sidecar.write_text("{}")
+    linked_sidecar = tmp_path / "package" / "provenance" / "linked.json"
+    linked_sidecar.symlink_to(external_sidecar)
+    with pytest.raises(WatershedDataError, match="must not be symbolic links"):
+        validate_package(tmp_path / "package")
+    linked_sidecar.unlink()
 
     raw = next((tmp_path / "package" / "raw").rglob("*"))
     while raw.is_dir():
