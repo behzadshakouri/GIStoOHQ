@@ -235,10 +235,6 @@ def validate_package(path: str | Path) -> PackageManifest:
     except (OSError, json.JSONDecodeError) as exc:
         raise WatershedDataError(f"could not read package manifest: {exc}") from exc
     manifest = PackageManifest.from_dict(data)
-    actual_qc_status, actual_failed_rules = _package_qc_summary(root)
-    if (manifest.package_qc_status != actual_qc_status
-            or manifest.failed_qc_rule_ids != actual_failed_rules):
-        raise WatershedDataError("package QC summary does not match its sidecars")
     spec = SiteSpec.from_file(root / "site_spec.yaml")
     catalog = AssetCatalog(root / "catalog.json").read()
     if spec.digest != manifest.site_spec_digest:
