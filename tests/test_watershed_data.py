@@ -227,6 +227,12 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     }))
     with pytest.raises(WatershedDataError, match="outside the package catalog"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "results": [],
+    }))
+    with pytest.raises(WatershedDataError, match="policy_digest"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
 
 
 def test_freeze_and_validate_self_contained_package(tmp_path):

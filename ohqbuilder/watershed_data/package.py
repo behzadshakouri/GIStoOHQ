@@ -28,6 +28,15 @@ def _package_qc_summary(
                 raise ValueError("schema_name is not QCReport")
             if document.get("schema_version") != "1.0":
                 raise ValueError("schema_version is not 1.0")
+            policy_version = document.get("policy_version")
+            policy_digest = document.get("policy_digest")
+            if policy_version is not None or policy_digest is not None:
+                if not isinstance(policy_version, str) or not policy_version:
+                    raise TypeError("policy_version is not a non-empty string")
+                if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
+                    char not in "0123456789abcdef" for char in policy_digest
+                ):
+                    raise TypeError("policy_digest is not a lowercase SHA-256 value")
             results = document["results"]
             if not isinstance(results, list):
                 raise TypeError("results is not a list")

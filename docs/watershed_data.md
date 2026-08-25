@@ -376,6 +376,8 @@ changes cannot silently reuse an asset admitted under an older policy.
 Reports and derived assets also record the SHA-256 digest of the canonical range and
 unit policy document, distinguishing exact policy content even if a version label is
 accidentally reused.
+Package freezing treats policy metadata as an all-or-nothing pair and validates the
+digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.
