@@ -254,6 +254,9 @@ def validate_package(path: str | Path) -> PackageManifest:
     for relative, expected_digest in manifest.sidecar_checksums.items():
         if actual_sidecar_checksums[relative] != expected_digest:
             raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
+    # This is deliberately the only package-QC aggregation in validation.  Keep it
+    # after catalog/sidecar validation so asset references can be checked, and use
+    # the named summary contract rather than the removed positional tuple contract.
     qc_summary = _package_qc_summary(root, set(ids))
     actual_validation_policies = _validation_policy_summary(catalog["assets"])
     if not _qc_summary_matches_manifest(manifest, qc_summary):
