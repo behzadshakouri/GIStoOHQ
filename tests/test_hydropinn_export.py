@@ -129,3 +129,15 @@ def test_hydropinn_manifest_rejects_unsafe_asset_paths():
             "assets": [{"asset_id": "sha256:test", "path": "../outside.csv", "sha256": "b" * 64}],
             "transformations_not_performed": [],
         })
+
+
+def test_hydropinn_manifest_rejects_invalid_source_package_id():
+    with pytest.raises(WatershedDataError, match="source package ID"):
+        HydroPINNExportManifest.from_dict({
+            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "profile": "water-balance-v1", "source_package_id": "not-a-digest",
+            "site_id": "test", "source_package_qc_status": "pass",
+            "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+            "source_validation_policy_digests": {}, "qc_gate": "require_pass",
+            "assets": [], "transformations_not_performed": [],
+        })

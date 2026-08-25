@@ -261,25 +261,27 @@ class PackageManifest:
         if tuple(sorted(set(manifest.failed_qc_rule_ids))) != manifest.failed_qc_rule_ids:
             raise WatershedDataError("failed_qc_rule_ids must be sorted and unique")
         for policy_version, policy_digest in manifest.qc_policy_digests.items():
-            if not policy_version:
+            if not isinstance(policy_version, str) or not policy_version:
                 raise WatershedDataError("qc_policy_digests keys must be non-empty")
-            if len(policy_digest) != 64 or any(
+            if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
                 char not in "0123456789abcdef" for char in policy_digest
             ):
                 raise WatershedDataError("qc_policy_digests values must be lowercase SHA-256")
         for policy_version, policy_digest in manifest.validation_policy_digests.items():
-            if not policy_version:
+            if not isinstance(policy_version, str) or not policy_version:
                 raise WatershedDataError("validation_policy_digests keys must be non-empty")
-            if len(policy_digest) != 64 or any(
+            if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
                 char not in "0123456789abcdef" for char in policy_digest
             ):
                 raise WatershedDataError(
                     "validation_policy_digests values must be lowercase SHA-256"
                 )
         for path, digest in manifest.sidecar_checksums.items():
-            if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+            if (not isinstance(path, str) or not path or Path(path).is_absolute()
+                    or ".." in Path(path).parts):
                 raise WatershedDataError("sidecar checksum paths must be safe relative paths")
-            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(char not in "0123456789abcdef" for char in digest)):
                 raise WatershedDataError("sidecar checksums must be lowercase SHA-256 values")
         return manifest
 
@@ -337,23 +339,47 @@ class HydroPINNExportManifest:
             raise WatershedDataError("invalid HydroPINNExport source QC status")
         if manifest.qc_gate not in {"reject_fail", "require_pass"}:
             raise WatershedDataError("invalid HydroPINNExport QC gate")
+        if not manifest.profile or not manifest.site_id:
+            raise WatershedDataError("HydroPINNExport profile and site_id must be non-empty")
+        package_digest = manifest.source_package_id.removeprefix("sha256:")
+        if (not manifest.source_package_id.startswith("sha256:")
+                or len(package_digest) != 64
+                or any(c not in "0123456789abcdef" for c in package_digest)):
+            raise WatershedDataError("invalid HydroPINNExport source package ID")
+        if any(not isinstance(rule_id, str) or not rule_id
+               for rule_id in manifest.source_failed_qc_rule_ids):
+            raise WatershedDataError("HydroPINNExport failed rule IDs must be non-empty strings")
         if tuple(sorted(set(manifest.source_failed_qc_rule_ids))) != manifest.source_failed_qc_rule_ids:
             raise WatershedDataError("HydroPINNExport failed rule IDs must be sorted and unique")
         for version, digest in manifest.source_qc_policy_digests.items():
-            if not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            if (not isinstance(version, str) or not version or not isinstance(digest, str)
+                    or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
                 raise WatershedDataError("invalid HydroPINNExport policy digest")
         for version, digest in manifest.source_validation_policy_digests.items():
-            if not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            if (not isinstance(version, str) or not version or not isinstance(digest, str)
+                    or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
                 raise WatershedDataError("invalid HydroPINNExport validation policy digest")
         for asset in manifest.assets:
             if not isinstance(asset, dict) or set(asset) != {"asset_id", "path", "sha256"}:
                 raise WatershedDataError("invalid HydroPINNExport asset entry")
+            if not isinstance(asset["asset_id"], str) or not asset["asset_id"]:
+                raise WatershedDataError("invalid HydroPINNExport asset ID")
+            if not isinstance(asset["path"], str) or not asset["path"]:
+                raise WatershedDataError("invalid HydroPINNExport asset path")
             path = Path(asset["path"])
             if path.is_absolute() or ".." in path.parts:
                 raise WatershedDataError("HydroPINNExport asset paths must be safe and relative")
             digest = asset["sha256"]
-            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
                 raise WatershedDataError("invalid HydroPINNExport asset checksum")
+        if (any(not isinstance(item, str) or not item
+                for item in manifest.transformations_not_performed)
+                or len(set(manifest.transformations_not_performed))
+                != len(manifest.transformations_not_performed)):
+            raise WatershedDataError(
+                "HydroPINNExport transformations_not_performed must be unique strings"
+            )
         return manifest
 
     def to_dict(self) -> dict[str, Any]:

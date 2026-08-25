@@ -203,6 +203,21 @@ def test_qc_and_provenance_contracts_reject_invalid_values():
         )
 
 
+def test_package_manifest_rejects_non_string_policy_digest():
+    from ohqbuilder.watershed_data.schemas import PackageManifest
+
+    with pytest.raises(WatershedDataError, match="validation_policy_digests"):
+        PackageManifest.from_dict({
+            "schema_name": "PackageManifest", "schema_version": "1.2",
+            "package_id": "sha256:" + "a" * 64, "site_id": "test",
+            "site_spec_digest": "b" * 64, "catalog_digest": "c" * 64,
+            "included_asset_ids": [], "producer": "test", "producer_version": "1",
+            "generated_at": "2025-01-01T00:00:00Z", "raw_inclusion": "none",
+            "self_contained": False, "redistributable": False,
+            "validation_policy_digests": {"forecast-validation-v1": 1},
+        })
+
+
 def test_package_manifest_aggregates_qc_results(tmp_path):
     site = tmp_path / "site.yaml"
     site.write_text(
