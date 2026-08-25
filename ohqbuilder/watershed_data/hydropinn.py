@@ -5,11 +5,10 @@ import hashlib
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .package import validate_package
-from .schemas import WatershedDataError
+from .schemas import HydroPINNExportManifest, WatershedDataError
 
 
 def export_hydropinn(
@@ -81,7 +80,7 @@ def export_hydropinn(
             ],
         }
         _atomic_json(destination / "variables.json", variables)
-        manifest: dict[str, Any] = {
+        manifest = HydroPINNExportManifest.from_dict({
             "schema_name": "HydroPINNExport", "schema_version": "1.1",
             "profile": profile, "source_package_id": package_manifest.package_id,
             "site_id": package_manifest.site_id,
@@ -94,7 +93,7 @@ def export_hydropinn(
                 "normalization", "imputation", "lag_construction", "feature_selection",
                 "train_validation_test_partitioning",
             ],
-        }
-        _atomic_json(destination / "manifest.json", manifest)
+        })
+        _atomic_json(destination / "manifest.json", manifest.to_dict())
         destination.replace(final_destination)
     return final_destination / "manifest.json"

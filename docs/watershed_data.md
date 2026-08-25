@@ -407,6 +407,8 @@ option unless `--export-hydropinn` is also selected, rather than silently ignori
 the requested gate. HydroPINNExport 1.1 manifests record the source package QC
 status, failed rule IDs, policy digests, and the applied `reject_fail` or
 `require_pass` gate, making the export decision auditable after publication.
+The HydroPINNExport 1.1 schema validates QC enums, sorted failed-rule IDs, policy
+and asset checksums, and safe relative asset paths before publishing the manifest.
 The desktop/QGIS workflow command builder exposes the same pass-only choice for
 standalone and one-button exports, keeping graphical and terminal policies aligned.
 Exports are assembled in a temporary sibling directory and renamed into place only

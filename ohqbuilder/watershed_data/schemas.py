@@ -286,3 +286,64 @@ class PackageManifest:
             "qc_policy_digests": dict(sorted(self.qc_policy_digests.items())),
             "sidecar_checksums": dict(sorted(self.sidecar_checksums.items())),
         }
+
+
+@dataclass(frozen=True)
+class HydroPINNExportManifest:
+    profile: str
+    source_package_id: str
+    site_id: str
+    source_package_qc_status: Literal["pass", "warning", "fail", "not_run"]
+    source_failed_qc_rule_ids: tuple[str, ...]
+    source_qc_policy_digests: dict[str, str]
+    qc_gate: Literal["reject_fail", "require_pass"]
+    assets: tuple[dict[str, str], ...]
+    transformations_not_performed: tuple[str, ...]
+    schema_version: str = "1.1"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "HydroPINNExportManifest":
+        if data.get("schema_name") != "HydroPINNExport" or data.get("schema_version") != "1.1":
+            raise WatershedDataError("HydroPINNExport schema must be version 1.1")
+        try:
+            manifest = cls(
+                profile=str(data["profile"]), source_package_id=str(data["source_package_id"]),
+                site_id=str(data["site_id"]),
+                source_package_qc_status=data["source_package_qc_status"],
+                source_failed_qc_rule_ids=tuple(data["source_failed_qc_rule_ids"]),
+                source_qc_policy_digests=dict(data["source_qc_policy_digests"]),
+                qc_gate=data["qc_gate"], assets=tuple(data["assets"]),
+                transformations_not_performed=tuple(data["transformations_not_performed"]),
+            )
+        except (KeyError, TypeError) as exc:
+            raise WatershedDataError(f"invalid HydroPINNExport manifest: {exc}") from exc
+        if manifest.source_package_qc_status not in {"pass", "warning", "fail", "not_run"}:
+            raise WatershedDataError("invalid HydroPINNExport source QC status")
+        if manifest.qc_gate not in {"reject_fail", "require_pass"}:
+            raise WatershedDataError("invalid HydroPINNExport QC gate")
+        if tuple(sorted(set(manifest.source_failed_qc_rule_ids))) != manifest.source_failed_qc_rule_ids:
+            raise WatershedDataError("HydroPINNExport failed rule IDs must be sorted and unique")
+        for version, digest in manifest.source_qc_policy_digests.items():
+            if not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise WatershedDataError("invalid HydroPINNExport policy digest")
+        for asset in manifest.assets:
+            if not isinstance(asset, dict) or set(asset) != {"asset_id", "path", "sha256"}:
+                raise WatershedDataError("invalid HydroPINNExport asset entry")
+            path = Path(asset["path"])
+            if path.is_absolute() or ".." in path.parts:
+                raise WatershedDataError("HydroPINNExport asset paths must be safe and relative")
+            digest = asset["sha256"]
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise WatershedDataError("invalid HydroPINNExport asset checksum")
+        return manifest
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_name": "HydroPINNExport", "schema_version": self.schema_version,
+            "profile": self.profile, "source_package_id": self.source_package_id,
+            "site_id": self.site_id, "source_package_qc_status": self.source_package_qc_status,
+            "source_failed_qc_rule_ids": list(self.source_failed_qc_rule_ids),
+            "source_qc_policy_digests": dict(sorted(self.source_qc_policy_digests.items())),
+            "qc_gate": self.qc_gate, "assets": list(self.assets),
+            "transformations_not_performed": list(self.transformations_not_performed),
+        }

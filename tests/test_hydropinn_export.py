@@ -7,7 +7,7 @@ import pytest
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.hydropinn import export_hydropinn
 from ohqbuilder.watershed_data.package import freeze_package, validate_package
-from ohqbuilder.watershed_data.schemas import WatershedDataError
+from ohqbuilder.watershed_data.schemas import HydroPINNExportManifest, WatershedDataError
 from ohqbuilder.watershed_data.temporal import harmonize_asset
 from ohqbuilder.watershed_data.workflow import write_site_spec
 
@@ -114,3 +114,16 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
             require_qc_pass=True,
         )
     assert not (tmp_path / "strict-hydropinn").exists()
+
+
+def test_hydropinn_manifest_rejects_unsafe_asset_paths():
+    with pytest.raises(WatershedDataError, match="safe and relative"):
+        HydroPINNExportManifest.from_dict({
+            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "profile": "water-balance-v1", "source_package_id": "sha256:" + "a" * 64,
+            "site_id": "test", "source_package_qc_status": "pass",
+            "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+            "qc_gate": "require_pass",
+            "assets": [{"asset_id": "sha256:test", "path": "../outside.csv", "sha256": "b" * 64}],
+            "transformations_not_performed": [],
+        })
