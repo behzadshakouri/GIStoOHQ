@@ -10,7 +10,31 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
-from .schemas import ProvenanceActivity, QCResult, WatershedDataError
+from .schemas import ProvenanceActivity, QCResult, WatershedDataError, canonical_json
+
+TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v1"
+PHYSICAL_RANGES = {
+    "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
+    "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
+    "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
+}
+EXPECTED_UNITS = {
+    "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
+    "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
+    "ALLSKY_SFC_SW_DWN": {"kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
+}
+TEMPORAL_QC_POLICY = {
+    "policy_version": TEMPORAL_QC_POLICY_VERSION,
+    "physical_ranges": {
+        variable: {"minimum": bounds[0], "maximum": bounds[1]}
+        for variable, bounds in sorted(PHYSICAL_RANGES.items())
+    },
+    "expected_units": {
+        variable: sorted(unit_values)
+        for variable, unit_values in sorted(EXPECTED_UNITS.items())
+    },
+}
+TEMPORAL_QC_POLICY_DIGEST = hashlib.sha256(canonical_json(TEMPORAL_QC_POLICY)).hexdigest()
 
 
 def _utc(value: str) -> datetime:
@@ -78,11 +102,6 @@ def temporal_qc(
     units: dict[str, str] | None = None,
     expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
-    ranges = {
-        "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
-        "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
-        "EVPTRNS": (0.0, None), "T2M": (-100.0, 70.0),
-    }
     expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
         temporal_resolution or ""
     )
@@ -147,7 +166,7 @@ def temporal_qc(
                     "current_timestamp": timestamp.isoformat(),
                 })
         previous_timestamp_by_variable[variable] = timestamp
-        bounds = ranges.get(variable)
+        bounds = PHYSICAL_RANGES.get(variable)
         if value is not None and not math.isfinite(value):
             nonfinite_count += 1
             if len(nonfinite_examples) < 100:
@@ -248,15 +267,10 @@ def temporal_qc(
                             "before": current.isoformat(), "missing_intervals": count,
                         })
             missing_intervals_by_variable[variable] = variable_missing_intervals
-    expected_units = {
-        "00060": {"ft3/s", "m3/s"}, "PRECTOTCORR": {"mm/hour"},
-        "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
-        "ALLSKY_SFC_SW_DWN": {"kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
-    }
     unit_mismatches = []
     observed_variables = sorted({row["variable"] for row in rows})
     for variable in observed_variables:
-        allowed = expected_units.get(variable)
+        allowed = EXPECTED_UNITS.get(variable)
         if allowed is None:
             continue
         actual = (units or {}).get(variable, "unknown")
@@ -315,7 +329,7 @@ def temporal_qc(
             (asset_id,), {
                 "mismatch_count": len(unit_mismatches), "mismatches": unit_mismatches,
                 "unknown_variables_not_evaluated": sorted(
-                    set(observed_variables) - set(expected_units)
+                    set(observed_variables) - set(EXPECTED_UNITS)
                 ),
             },
         ),
@@ -381,6 +395,8 @@ def harmonize_asset(
         expected_start, expected_end,
     )
     _atomic_json(Path(qc_output), {"schema_name": "QCReport", "schema_version": "1.0",
+                                  "policy_version": TEMPORAL_QC_POLICY_VERSION,
+                                  "policy_digest": TEMPORAL_QC_POLICY_DIGEST,
                                   "results": [item.to_dict() for item in qc]})
     failed_error_rules = [
         item.rule_id for item in qc if item.severity == "error" and not item.passed
@@ -399,21 +415,23 @@ def harmonize_asset(
     stored = ObjectStore(object_store).put(io.BytesIO(buffer.getvalue().encode("utf-8")))
     started = completed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     transformation = {"target_timezone": "UTC", "ordering": "timestamp_then_variable",
-                      "missing_values": "preserved", "unit_conversion": "none"}
+                      "missing_values": "preserved", "unit_conversion": "none",
+                      "qc_policy_version": TEMPORAL_QC_POLICY_VERSION,
+                      "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
-        "product_version": "1.0", "request_key": hashlib.sha256(
+        "product_version": "1.2", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
-        "transformation_name": "native-to-utc-table", "transformation_version": "1.1",
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.3",
         "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-utc-table", transformation_version="1.1",
+        transformation_name="native-to-utc-table", transformation_version="1.3",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,

@@ -14,13 +14,14 @@ from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_js
 
 def _package_qc_summary(
     destination: Path, allowed_asset_ids: set[str] | None = None,
-) -> tuple[str, tuple[str, ...]]:
+) -> tuple[str, tuple[str, ...], dict[str, str]]:
     """Aggregate stable QC reports already materialized in the package tree."""
     reports = sorted((destination / "quality_control").rglob("*.json"))
     if not reports:
-        return "not_run", ()
+        return "not_run", (), {}
     failed_severities: set[str] = set()
     failed_rule_ids: set[str] = set()
+    qc_policies: dict[str, str] = {}
     for report in reports:
         try:
             document = json.loads(report.read_text(encoding="utf-8"))
@@ -28,6 +29,20 @@ def _package_qc_summary(
                 raise ValueError("schema_name is not QCReport")
             if document.get("schema_version") != "1.0":
                 raise ValueError("schema_version is not 1.0")
+            policy_version = document.get("policy_version")
+            policy_digest = document.get("policy_digest")
+            if policy_version is not None or policy_digest is not None:
+                if not isinstance(policy_version, str) or not policy_version:
+                    raise TypeError("policy_version is not a non-empty string")
+                if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
+                    char not in "0123456789abcdef" for char in policy_digest
+                ):
+                    raise TypeError("policy_digest is not a lowercase SHA-256 value")
+                previous_digest = qc_policies.setdefault(policy_version, policy_digest)
+                if previous_digest != policy_digest:
+                    raise ValueError(
+                        f"policy_version {policy_version!r} has conflicting digests"
+                    )
             results = document["results"]
             if not isinstance(results, list):
                 raise TypeError("results is not a list")
@@ -69,7 +84,7 @@ def _package_qc_summary(
         status = "warning"
     else:
         status = "pass"
-    return status, tuple(sorted(failed_rule_ids))
+    return status, tuple(sorted(failed_rule_ids)), dict(sorted(qc_policies.items()))
 
 
 def freeze_package(
@@ -89,7 +104,9 @@ def freeze_package(
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    package_qc_status, failed_qc_rule_ids = _package_qc_summary(destination, set(asset_ids))
+    package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
+        destination, set(asset_ids)
+    )
     sidecar_checksums = {
         path.relative_to(destination).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for directory in ("quality_control", "provenance")
@@ -115,6 +132,7 @@ def freeze_package(
             with store.open(digest) as source, target.open("wb") as sink:
                 shutil.copyfileobj(source, sink)
     manifest = PackageManifest.from_dict({
+        "schema_name": "PackageManifest", "schema_version": "1.1",
         "package_id": package_id, "site_id": spec.site_id, "site_spec_digest": spec.digest,
         "catalog_digest": catalog_digest, "included_asset_ids": asset_ids,
         "producer": "GIStoOHQ", "producer_version": producer_version,
@@ -122,6 +140,7 @@ def freeze_package(
         "raw_inclusion": include_raw, "self_contained": include_raw == "all",
         "redistributable": redistributable, "package_qc_status": package_qc_status,
         "failed_qc_rule_ids": failed_qc_rule_ids,
+        "qc_policy_digests": qc_policy_digests,
         "sidecar_checksums": sidecar_checksums,
     })
     _atomic_json(destination / "manifest.json", manifest.to_dict())
@@ -148,9 +167,10 @@ def validate_package(path: str | Path) -> PackageManifest:
     ids = tuple(sorted(asset["asset_id"] for asset in catalog["assets"]))
     if ids != tuple(manifest.included_asset_ids):
         raise WatershedDataError("package asset IDs do not match manifest")
-    actual_qc_status, actual_failed_rules = _package_qc_summary(root, set(ids))
+    actual_qc_status, actual_failed_rules, actual_qc_policies = _package_qc_summary(root, set(ids))
     if (manifest.package_qc_status != actual_qc_status
-            or manifest.failed_qc_rule_ids != actual_failed_rules):
+            or manifest.failed_qc_rule_ids != actual_failed_rules
+            or manifest.qc_policy_digests != actual_qc_policies):
         raise WatershedDataError("package QC summary does not match its sidecars")
     identity = {
         "site_spec_digest": manifest.site_spec_digest,

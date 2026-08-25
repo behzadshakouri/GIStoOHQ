@@ -36,6 +36,21 @@ def test_site_spec_requires_timezone_and_valid_period():
         )
 
 
+def test_site_spec_default_schema_version_remains_1_0():
+    spec = SiteSpec(
+        site_id="test",
+        name="Test",
+        longitude=-77.0,
+        latitude=39.0,
+        study_start="2020-01-01T00:00:00Z",
+        study_end="2021-01-01T00:00:00Z",
+        target_timestep="1h",
+        sources={},
+    )
+
+    assert spec.schema_version == "1.0"
+
+
 def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     store = ObjectStore(tmp_path / "cache")
     first = store.put(io.BytesIO(b"weather data"))
@@ -226,6 +241,23 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
         }],
     }))
     with pytest.raises(WatershedDataError, match="outside the package catalog"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "results": [],
+    }))
+    with pytest.raises(WatershedDataError, match="policy_digest"):
+        freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "policy_digest": "a" * 64, "results": [],
+    }))
+    conflicting_qc = qc.with_name("conflicting.json")
+    conflicting_qc.write_text(json.dumps({
+        "schema_name": "QCReport", "schema_version": "1.0",
+        "policy_version": "temporal-qc-v1", "policy_digest": "b" * 64, "results": [],
+    }))
+    with pytest.raises(WatershedDataError, match="conflicting digests"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
 
 

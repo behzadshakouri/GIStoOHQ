@@ -32,12 +32,18 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     assert output["processing_status"] == "derived"
     assert output["parent_asset_ids"] == [native["asset_id"]]
     assert output["transformation_name"] == "native-to-utc-table"
+    assert output["transformation_version"] == "1.3"
+    assert output["product_version"] == "1.2"
     assert output["transformation_parameters"]["unit_conversion"] == "none"
+    assert output["transformation_parameters"]["qc_policy_version"] == "temporal-qc-v1"
+    assert len(output["transformation_parameters"]["qc_policy_digest"]) == 64
     with store.open(output["content_digest"]) as stream:
         rows = list(csv.DictReader(io.TextIOWrapper(stream, encoding="utf-8")))
     assert rows[0]["timestamp_utc"] == "2025-01-01T00:00:00Z"
     assert {row["variable"] for row in rows} == {"PRECTOTCORR", "T2M"}
     qc = json.loads((tmp_path / "qc.json").read_text())
+    assert qc["policy_version"] == "temporal-qc-v1"
+    assert qc["policy_digest"] == output["transformation_parameters"]["qc_policy_digest"]
     assert {item["rule_id"] for item in qc["results"]} == {
         "temporal.duplicate_timestamps", "temporal.missing_values", "temporal.chronology",
         "temporal.physical_range",

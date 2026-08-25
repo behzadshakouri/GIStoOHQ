@@ -72,6 +72,12 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
     ]
     original_manifest = manifest_path.read_text()
     edited_manifest = json.loads(original_manifest)
+    edited_manifest["schema_version"] = "9.0"
+    manifest_path.write_text(json.dumps(edited_manifest))
+    with pytest.raises(WatershedDataError, match="schema must be version"):
+        validate_package(package)
+    manifest_path.write_text(original_manifest)
+    edited_manifest = json.loads(original_manifest)
     edited_manifest["failed_qc_rule_ids"] = []
     manifest_path.write_text(json.dumps(edited_manifest))
     with pytest.raises(WatershedDataError, match="QC summary does not match"):
