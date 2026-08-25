@@ -427,7 +427,10 @@ rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.
 `data status --package PATH` validates that package and publishes its package ID,
 aggregate QC status, failed rule IDs, and policy digests in WatershedDataStatus 1.1
-JSON; the Markdown report includes the package QC summary for operators.
+JSON; the Markdown report includes the package QC summary for operators. Status
+generation rejects a separately supplied catalog whose digest does not match the
+validated package, preventing one package's QC summary from labeling another
+catalog's assets.
 Package freezing validates every QC result, including successful results, against
 the QCReport 1.0 contract and requires stable dotted rule identifiers, a non-empty
 message, an asset-ID array, and an object-valued details payload.

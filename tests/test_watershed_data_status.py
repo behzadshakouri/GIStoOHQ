@@ -1,9 +1,12 @@
 import io
 import json
 
+import pytest
+
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.package import freeze_package
 from ohqbuilder.watershed_data.status import build_data_status, write_data_status
+from ohqbuilder.watershed_data.schemas import WatershedDataError
 from ohqbuilder.watershed_data.workflow import write_site_spec
 
 
@@ -68,3 +71,11 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
     assert packaged["package_id"].startswith("sha256:")
     assert packaged["package_qc_status"] == "not_run"
     assert packaged["validation_policy_digests"] == {}
+
+    other_catalog = AssetCatalog(tmp_path / "other-catalog.json")
+    other_catalog.register({
+        "provider": "other", "product": "other", "processing_status": "native",
+        "content_digest": "a" * 64, "size": 0, "media_type": "text/plain",
+    })
+    with pytest.raises(WatershedDataError, match="does not match the validated package"):
+        build_data_status(catalog=other_catalog.path, package=package)

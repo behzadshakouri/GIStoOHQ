@@ -6,6 +6,7 @@ from typing import Any
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .package import validate_package
+from .schemas import WatershedDataError
 
 
 def build_data_status(
@@ -49,6 +50,9 @@ def build_data_status(
             "acquisition_attempts": asset.get("acquisition_attempts"),
         })
     package_manifest = validate_package(package) if package is not None else None
+    if (package_manifest is not None
+            and package_manifest.catalog_digest != data.get("catalog_digest")):
+        raise WatershedDataError("status catalog does not match the validated package catalog")
     return {
         "schema_name": "WatershedDataStatus",
         "schema_version": "1.1",
