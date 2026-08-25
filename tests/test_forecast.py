@@ -7,7 +7,10 @@ import pytest
 
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.forecast import (
-    acquire_forecast_archive, materialize_available_forecasts, validate_forecast_records,
+    FORECAST_VALIDATION_POLICY,
+    acquire_forecast_archive,
+    materialize_available_forecasts,
+    validate_forecast_records,
 )
 from ohqbuilder.watershed_data.schemas import WatershedDataError
 
@@ -88,6 +91,8 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
         opener=lambda *args, **kwargs: Response(raw),
     )
     assert asset["product_version"] == "forecast-records-v2"
+    assert asset["validation_policy_version"] == "forecast-validation-v1"
+    assert len(asset["validation_policy_digest"]) == 64
     assert asset["temporal_dimensions"] == ["issue_time", "valid_time", "lead_time_hours", "member"]
     view = materialize_available_forecasts(
         asset_id=asset["asset_id"], prediction_time="2025-01-01T03:00:00Z",
@@ -95,9 +100,17 @@ def test_forecast_acquisition_and_leakage_safe_view(tmp_path):
     )
     assert view["record_count"] == 1
     assert view["transformation_name"] == "prediction-time-availability-filter"
-    assert view["transformation_version"] == "1.2"
+    assert view["product_version"] == "1.3"
+    assert view["transformation_version"] == "1.3"
     assert view["transformation_parameters"]["timestamp_normalization"] == "UTC"
     assert view["transformation_parameters"]["numeric_normalization"] == "float"
+    assert view["transformation_parameters"]["validation_policy_version"] == (
+        "forecast-validation-v1"
+    )
+    assert view["transformation_parameters"]["validation_policy_digest"] == (
+        asset["validation_policy_digest"]
+    )
+    assert FORECAST_VALIDATION_POLICY["lead_time_tolerance_hours"] == 1e-6
     assert view["variables"] == ["precipitation"]
     assert view["members"] == ["control"]
     assert view["units_by_variable"] == {"precipitation": "mm"}

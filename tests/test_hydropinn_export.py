@@ -7,7 +7,7 @@ import pytest
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
 from ohqbuilder.watershed_data.hydropinn import export_hydropinn
 from ohqbuilder.watershed_data.package import freeze_package, validate_package
-from ohqbuilder.watershed_data.schemas import WatershedDataError
+from ohqbuilder.watershed_data.schemas import HydroPINNExportManifest, WatershedDataError
 from ohqbuilder.watershed_data.temporal import harmonize_asset
 from ohqbuilder.watershed_data.workflow import write_site_spec
 
@@ -26,21 +26,35 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
         "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "application/json",
     })
+    package = tmp_path / "package"
     harmonize_asset(
         asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
-        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+        qc_output=package / "quality_control" / "temporal.json",
+        provenance_output=package / "provenance" / "temporal.json",
     )
-    freeze_package(site_spec=site, catalog=catalog.path, output=tmp_path / "package")
+    freeze_package(site_spec=site, catalog=catalog.path, output=package)
     manifest_path = export_hydropinn(
-        package=tmp_path / "package", object_store=store.root, output=tmp_path / "hydropinn"
+        package=package, object_store=store.root, output=tmp_path / "hydropinn",
+        require_qc_pass=True,
     )
     manifest = json.loads(manifest_path.read_text())
     variables = json.loads((tmp_path / "hydropinn" / "variables.json").read_text())
     assert manifest["profile"] == "water-balance-v1"
+    assert manifest["schema_version"] == "1.1"
+    assert manifest["source_package_qc_status"] == "pass"
+    assert manifest["source_failed_qc_rule_ids"] == []
+    assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v2"}
+    assert manifest["source_validation_policy_digests"] == {}
+    assert manifest["qc_gate"] == "require_pass"
     assert "normalization" in manifest["transformations_not_performed"]
     assert {item["name"] for item in variables["variables"]} == {"PRECTOTCORR", "T2M"}
     assert variables["variables"][0]["normalization"] is None
     assert (tmp_path / "hydropinn" / "observations" / "temporal_1.csv").is_file()
+    with pytest.raises(WatershedDataError, match="destination already exists"):
+        export_hydropinn(
+            package=package, object_store=store.root, output=tmp_path / "hydropinn",
+            require_qc_pass=True,
+        )
 
 
 def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
@@ -101,3 +115,32 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
             require_qc_pass=True,
         )
     assert not (tmp_path / "strict-hydropinn").exists()
+
+
+def test_hydropinn_manifest_rejects_unsafe_asset_paths():
+    with pytest.raises(WatershedDataError, match="safe and relative"):
+        HydroPINNExportManifest.from_dict({
+            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "profile": "water-balance-v1", "source_package_id": "sha256:" + "a" * 64,
+            "site_id": "test", "source_package_qc_status": "pass",
+            "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+            "source_validation_policy_digests": {},
+            "qc_gate": "require_pass",
+            "assets": [{
+                "asset_id": "sha256:" + "c" * 64,
+                "path": "../outside.csv", "sha256": "b" * 64,
+            }],
+            "transformations_not_performed": [],
+        })
+
+
+def test_hydropinn_manifest_rejects_invalid_source_package_id():
+    with pytest.raises(WatershedDataError, match="source package ID"):
+        HydroPINNExportManifest.from_dict({
+            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "profile": "water-balance-v1", "source_package_id": "not-a-digest",
+            "site_id": "test", "source_package_qc_status": "pass",
+            "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+            "source_validation_policy_digests": {}, "qc_gate": "require_pass",
+            "assets": [], "transformations_not_performed": [],
+        })

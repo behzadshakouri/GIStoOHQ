@@ -203,6 +203,36 @@ def test_qc_and_provenance_contracts_reject_invalid_values():
         )
 
 
+def test_package_manifest_rejects_non_string_policy_digest():
+    from ohqbuilder.watershed_data.schemas import PackageManifest
+
+    with pytest.raises(WatershedDataError, match="validation_policy_digests"):
+        PackageManifest.from_dict({
+            "schema_name": "PackageManifest", "schema_version": "1.2",
+            "package_id": "sha256:" + "a" * 64, "site_id": "test",
+            "site_spec_digest": "b" * 64, "catalog_digest": "c" * 64,
+            "included_asset_ids": [], "producer": "test", "producer_version": "1",
+            "generated_at": "2025-01-01T00:00:00Z", "raw_inclusion": "none",
+            "self_contained": False, "redistributable": False,
+            "validation_policy_digests": {"forecast-validation-v1": 1},
+        })
+
+
+def test_package_manifest_rejects_unsorted_asset_ids():
+    from ohqbuilder.watershed_data.schemas import PackageManifest
+
+    with pytest.raises(WatershedDataError, match="sorted and unique"):
+        PackageManifest.from_dict({
+            "schema_name": "PackageManifest", "schema_version": "1.2",
+            "package_id": "sha256:" + "a" * 64, "site_id": "test",
+            "site_spec_digest": "b" * 64, "catalog_digest": "c" * 64,
+            "included_asset_ids": ["sha256:" + "f" * 64, "sha256:" + "d" * 64],
+            "producer": "test", "producer_version": "1",
+            "generated_at": "2025-01-01T00:00:00Z", "raw_inclusion": "none",
+            "self_contained": False, "redistributable": False,
+        })
+
+
 def test_package_manifest_aggregates_qc_results(tmp_path):
     site = tmp_path / "site.yaml"
     site.write_text(
@@ -214,6 +244,8 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     asset = catalog.register({
         "provider": "example", "product": "data", "content_digest": "0" * 64,
         "size": 0, "media_type": "application/json",
+        "validation_policy_version": "forecast-validation-v1",
+        "validation_policy_digest": "c" * 64,
     })
     output = tmp_path / "package"
     qc = output / "quality_control" / "providers" / "temporal.json"
@@ -225,11 +257,16 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
         ],
     }))
     manifest_path = freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert json.loads(manifest_path.read_text())["schema_version"] == "1.2"
+    assert validate_package(output).validation_policy_digests == {
+        "forecast-validation-v1": "c" * 64,
+    }
     assert validate_package(output).package_qc_status == "warning"
     legacy_manifest = json.loads(manifest_path.read_text())
     legacy_manifest["schema_version"] = "1.0"
     legacy_manifest.pop("failed_qc_rule_ids")
     legacy_manifest.pop("qc_policy_digests")
+    legacy_manifest.pop("validation_policy_digests")
     manifest_path.write_text(json.dumps(legacy_manifest))
     validated_legacy = validate_package(output)
     assert validated_legacy.failed_qc_rule_ids == ("temporal.missing_values",)
@@ -242,6 +279,7 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     }))
     with pytest.raises(WatershedDataError, match="stable dotted identifier"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert not manifest_path.exists()
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [{
             "rule_id": "temporal.missing_values", "severity": "warning", "passed": False,

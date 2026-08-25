@@ -15,12 +15,15 @@ def run_data_doctor(
 ) -> dict[str, Any]:
     """Check a local watershed-data workspace without contacting providers."""
     checks = []
+    spec_digest: str | None = None
+    catalog_digest: str | None = None
 
     def record(name: str, passed: bool, message: str) -> None:
         checks.append({"name": name, "passed": passed, "message": message})
 
     try:
         spec = SiteSpec.from_file(site_spec)
+        spec_digest = spec.digest
         record("site_spec", True, f"valid SiteSpec for {spec.site_id}")
     except WatershedDataError as exc:
         record("site_spec", False, str(exc))
@@ -28,6 +31,7 @@ def run_data_doctor(
     if catalog is not None:
         try:
             data = AssetCatalog(catalog).read()
+            catalog_digest = data["catalog_digest"]
             record("catalog", True, f"catalog contains {len(data['assets'])} assets")
             if object_store is not None:
                 store = ObjectStore(object_store)
@@ -36,7 +40,10 @@ def run_data_doctor(
                     digest = asset["content_digest"]
                     try:
                         with store.open(digest) as stream:
-                            actual = hashlib.sha256(stream.read()).hexdigest()
+                            hasher = hashlib.sha256()
+                            while chunk := stream.read(1024 * 1024):
+                                hasher.update(chunk)
+                            actual = hasher.hexdigest()
                         if actual != digest:
                             corrupt.append(asset["asset_id"])
                     except OSError:
@@ -53,6 +60,17 @@ def run_data_doctor(
         try:
             manifest = validate_package(package)
             record("package", True, f"valid package {manifest.package_id}")
+            input_mismatches = []
+            if spec_digest is not None and manifest.site_spec_digest != spec_digest:
+                input_mismatches.append("SiteSpec")
+            if catalog_digest is not None and manifest.catalog_digest != catalog_digest:
+                input_mismatches.append("catalog")
+            record(
+                "package_inputs", not input_mismatches,
+                "package matches the supplied SiteSpec and catalog"
+                if not input_mismatches else
+                "package does not match supplied " + " and ".join(input_mismatches),
+            )
             record(
                 "package_qc", manifest.package_qc_status != "fail",
                 f"package QC status is {manifest.package_qc_status}"

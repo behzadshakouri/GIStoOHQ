@@ -204,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_status = data_sub.add_parser("status", help="List catalog assets and object availability.")
     data_status.add_argument("--catalog", required=True)
     data_status.add_argument("--object-store", default=None)
+    data_status.add_argument("--package", default=None)
     data_status.add_argument("--output", required=True)
     data_doctor = data_sub.add_parser("doctor", help="Validate a local watershed-data workspace.")
     data_doctor.add_argument("--site-spec", required=True)
@@ -1282,7 +1283,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Cataloged leakage-safe forecast view: {asset['asset_id']}")
             elif args.data_command == "status":
                 report = write_data_status(
-                    catalog=args.catalog, object_store=args.object_store, output=args.output
+                    catalog=args.catalog, object_store=args.object_store, output=args.output,
+                    package=args.package,
                 )
                 print(f"Wrote watershed data status: {report}")
             elif args.data_command == "doctor":

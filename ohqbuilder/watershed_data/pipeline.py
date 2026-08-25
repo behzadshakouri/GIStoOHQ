@@ -51,6 +51,10 @@ def run_watershed_data_pipeline(
         raise WatershedDataError("forecast URL and provider must be supplied together")
     if prediction_time and not forecast_url:
         raise WatershedDataError("prediction time requires a forecast URL and provider")
+    if require_qc_pass and not export_hydropinn_profile:
+        raise WatershedDataError(
+            "require_qc_pass is only valid when HydroPINN export is enabled"
+        )
     site_path = Path(site_spec).expanduser().resolve()
     if not site_path.exists() and init_if_missing:
         missing = [
@@ -137,6 +141,7 @@ def run_watershed_data_pipeline(
         "package_qc_status": manifest.package_qc_status,
         "failed_qc_rule_ids": list(manifest.failed_qc_rule_ids),
         "qc_policy_digests": dict(manifest.qc_policy_digests),
+        "validation_policy_digests": dict(manifest.validation_policy_digests),
         "hydropinn_manifest": str(hydropinn_manifest) if hydropinn_manifest else None,
         "forecast_asset_id": forecast_asset["asset_id"] if forecast_asset else None,
         "forecast_view_asset_id": forecast_view["asset_id"] if forecast_view else None,

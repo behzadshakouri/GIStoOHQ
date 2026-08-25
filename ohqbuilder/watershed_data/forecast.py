@@ -12,9 +12,35 @@ from typing import Any, Callable
 
 from .catalog import AssetCatalog, ObjectStore
 from .network import download_bytes
-from .schemas import WatershedDataError, canonical_request_key
+from .schemas import WatershedDataError, canonical_json, canonical_request_key
 
 FORECAST_RECORDS_VERSION = "forecast-records-v2"
+FORECAST_VALIDATION_POLICY_VERSION = "forecast-validation-v1"
+FORECAST_REQUIRED_FIELDS = (
+    "issue_time", "valid_time", "lead_time_hours", "member", "variable",
+    "location_or_grid_id", "value", "units",
+)
+FORECAST_DIMENSION_FIELDS = ("member", "variable", "location_or_grid_id", "units")
+FORECAST_NUMERIC_FIELDS = ("lead_time_hours", "value")
+FORECAST_LEAD_TOLERANCE_HOURS = 1e-6
+FORECAST_VALIDATION_POLICY = {
+    "policy_version": FORECAST_VALIDATION_POLICY_VERSION,
+    "required_fields": list(FORECAST_REQUIRED_FIELDS),
+    "numeric_fields": list(FORECAST_NUMERIC_FIELDS),
+    "dimension_fields": list(FORECAST_DIMENSION_FIELDS),
+    "duplicate_key": [
+        "issue_time", "valid_time", "member", "variable", "location_or_grid_id",
+    ],
+    "timestamps": "timezone_required_and_normalized_to_utc",
+    "issue_valid_order": "issue_time_must_not_exceed_valid_time",
+    "lead_time_tolerance_hours": FORECAST_LEAD_TOLERANCE_HOURS,
+    "numbers": "json_number_non_boolean_and_finite",
+    "dimensions": "non_empty_string_after_stripping",
+    "units": "one_unit_per_variable",
+}
+FORECAST_VALIDATION_POLICY_DIGEST = hashlib.sha256(
+    canonical_json(FORECAST_VALIDATION_POLICY)
+).hexdigest()
 
 
 def _time(value: str, field: str) -> datetime:
@@ -32,8 +58,7 @@ def _utc_text(value: str, field: str) -> str:
 
 
 def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
-    required = {"issue_time", "valid_time", "lead_time_hours", "member", "variable",
-                "location_or_grid_id", "value", "units"}
+    required = set(FORECAST_REQUIRED_FIELDS)
     if not records:
         raise WatershedDataError("forecast archive contains no records")
     issues, valids, variables, members, locations = [], [], set(), set(), set()
@@ -53,7 +78,7 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             raise WatershedDataError(f"forecast record {index} has issue_time after valid_time")
         if any(
             isinstance(record[field], bool) or not isinstance(record[field], (int, float))
-            for field in ("lead_time_hours", "value")
+            for field in FORECAST_NUMERIC_FIELDS
         ):
             raise WatershedDataError(
                 f"forecast record {index} lead_time_hours and value must be JSON numbers"
@@ -63,11 +88,10 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         if not math.isfinite(lead_time) or not math.isfinite(value):
             raise WatershedDataError(f"forecast record {index} contains a non-finite number")
         expected = (valid - issue).total_seconds() / 3600
-        if abs(lead_time - expected) > 1e-6:
+        if abs(lead_time - expected) > FORECAST_LEAD_TOLERANCE_HOURS:
             raise WatershedDataError(f"forecast record {index} has inconsistent lead_time_hours")
-        dimension_fields = ("member", "variable", "location_or_grid_id", "units")
         invalid_dimensions = sorted(
-            field for field in dimension_fields
+            field for field in FORECAST_DIMENSION_FIELDS
             if not isinstance(record[field], str) or not record[field].strip()
         )
         if invalid_dimensions:
@@ -75,7 +99,7 @@ def validate_forecast_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 f"forecast record {index} has invalid string fields: "
                 + ", ".join(invalid_dimensions)
             )
-        dimensions = {field: record[field].strip() for field in dimension_fields}
+        dimensions = {field: record[field].strip() for field in FORECAST_DIMENSION_FIELDS}
         record_key = (
             issue, valid, dimensions["member"], dimensions["variable"],
             dimensions["location_or_grid_id"],
@@ -141,7 +165,10 @@ def acquire_forecast_archive(
     if not provider.strip() or not product.strip():
         raise WatershedDataError("forecast provider and product must be non-empty")
     parameters = {"url": url}
-    request_key = canonical_request_key(provider, url, parameters, FORECAST_RECORDS_VERSION)
+    request_key = canonical_request_key(
+        provider, url, parameters,
+        f"{FORECAST_RECORDS_VERSION}:{FORECAST_VALIDATION_POLICY_DIGEST}",
+    )
     catalog_store = AssetCatalog(catalog)
     if not refresh and (cached := catalog_store.cached_request(request_key, cache)) is not None:
         return cached
@@ -158,6 +185,8 @@ def acquire_forecast_archive(
     stored = ObjectStore(cache).put(io.BytesIO(raw))
     return catalog_store.register({
         "provider": provider, "product": product, "product_version": FORECAST_RECORDS_VERSION,
+        "validation_policy_version": FORECAST_VALIDATION_POLICY_VERSION,
+        "validation_policy_digest": FORECAST_VALIDATION_POLICY_DIGEST,
         "request_key": request_key,
         "request_parameters": parameters, "content_digest": stored.content_digest,
         "size": stored.size, "media_type": "application/json", "source_url": url,
@@ -214,15 +243,17 @@ def materialize_available_forecasts(
         "parent": asset_id, "prediction_time": cutoff.isoformat(),
         "timestamp_normalization": "UTC", "dimension_whitespace": "stripped",
         "numeric_normalization": "float",
+        "validation_policy_version": FORECAST_VALIDATION_POLICY_VERSION,
+        "validation_policy_digest": FORECAST_VALIDATION_POLICY_DIGEST,
     }
     return catalog_store.register({
         "provider": source["provider"], "product": "available-forecast-view",
-        "product_version": "1.2", "request_key": hashlib.sha256(
+        "product_version": "1.3", "request_key": hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "prediction_time": cutoff.isoformat(),
         "leakage_rule": "issue_time <= prediction_time", **available_summary,
         "transformation_name": "prediction-time-availability-filter",
-        "transformation_version": "1.2", "transformation_parameters": identity,
+        "transformation_version": "1.3", "transformation_parameters": identity,
     })

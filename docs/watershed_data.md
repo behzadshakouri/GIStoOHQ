@@ -233,6 +233,11 @@ archive. The catalog summary records that variable-to-unit mapping for downstrea
 profile checks.
 The strengthened archive contract uses product version `forecast-records-v2`, so
 responses cached under the earlier validation contract are not silently reused.
+Native catalog records also carry the `forecast-validation-v1` policy version and
+the SHA-256 digest of its complete required-field, numeric, timestamp, duplicate,
+dimension, lead-time, and unit rules. Request identity includes that digest, and
+derived forecast view 1.3 records the same fingerprint in transformation metadata,
+so a policy-content change cannot reuse a cached archive or derived view silently.
 Derived view catalog records repeat the filtered record count, variables, members,
 locations, units, and issue/valid coverage, so consumers need not inspect the CSV
 to determine whether a prediction-time view fits their profile.
@@ -382,22 +387,57 @@ Package freezing treats policy metadata as an all-or-nothing pair and validates 
 digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 Package manifests and one-button results aggregate policy versions to their exact
 digests. Reusing one version label with conflicting digests is rejected.
-New packages use PackageManifest 1.1 for QC rule and policy summaries. Validation
-accepts legacy 1.0 manifests, recomputes the rule and policy summaries that were not
-stored by that contract, and rejects unknown schema names or versions. Validation
+New packages use PackageManifest 1.2 for QC and input-validation policy summaries.
+Validation accepts legacy 1.0 and 1.1 manifests, recomputes summaries not stored by
+those contracts, and rejects unknown schema names or versions. Forecast validation
+policy digests are aggregated from catalog assets and checked for conflicts. Validation
 also requires the checksummed sidecar inventory to exactly match every JSON report
 under `quality_control/` and `provenance/`; undeclared additions are rejected. Those
 trees cannot contain symbolic links, so a frozen package cannot validate sidecar
 content located outside its own directory. Link and inventory checks run before QC
 reports are parsed, ensuring validation never reads an external report first.
+Package refresh removes the old manifest before publication and atomically replaces
+the SiteSpec and each checksum-verified raw object, so an interrupted refresh cannot
+leave a stale manifest or a partially copied object that still appears valid.
+Package validation, sidecar inventory, and HydroPINN export checksum files in bounded
+chunks, avoiding whole-file memory growth for long temporal series or packaged raw
+objects.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.
 Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data run`
-to reject both warning and `not_run` packages as well.
+to reject both warning and `not_run` packages as well. A pipeline run rejects this
+option unless `--export-hydropinn` is also selected, rather than silently ignoring
+the requested gate. HydroPINNExport 1.1 manifests record the source package QC
+status, failed rule IDs, policy digests, and the applied `reject_fail` or
+`require_pass` gate, making the export decision auditable after publication.
+The HydroPINNExport 1.1 schema validates QC enums, sorted failed-rule IDs, policy
+and asset checksums, source package IDs, required strings, unique omitted-operation
+labels, and safe relative asset paths before publishing the manifest. Manifest
+policy/checksum validation rejects non-string JSON values with domain errors rather
+than leaking implementation type errors.
+Package and HydroPINN manifests also require canonical SHA-256 package, catalog,
+SiteSpec, and asset identities; package asset lists must be sorted and unique.
+The desktop/QGIS workflow command builder exposes the same pass-only choice for
+standalone and one-button exports, keeping graphical and terminal policies aligned.
+The standalone watershed-data dialog provides a **Require passing package QC for
+HydroPINN export** checkbox and forwards its value to every export action.
+Exports are assembled in a temporary sibling directory and renamed into place only
+after all assets and manifests are complete. An existing destination is rejected,
+preventing partial failures or reruns from leaving stale observation files.
 Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.
+`data status --package PATH` validates that package and publishes its package ID,
+aggregate QC status, failed rule IDs, and policy digests in WatershedDataStatus 1.1
+JSON; the Markdown report includes the package QC summary for operators. Status
+generation rejects a separately supplied catalog whose digest does not match the
+validated package, preventing one package's QC summary from labeling another
+catalog's assets.
+`data doctor` applies the same binding to both the supplied SiteSpec and catalog and
+reports a failing `package_inputs` check when either digest differs. Object-store
+verification hashes large objects incrementally rather than loading them wholly in
+memory.
 Package freezing validates every QC result, including successful results, against
 the QCReport 1.0 contract and requires stable dotted rule identifiers, a non-empty
 message, an asset-ID array, and an object-valued details payload.

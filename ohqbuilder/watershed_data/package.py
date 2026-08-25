@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +10,14 @@ import yaml
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _sidecar_checksums(root: Path) -> dict[str, str]:
@@ -28,7 +35,7 @@ def _sidecar_checksums(root: Path) -> dict[str, str]:
                     f"package sidecar paths must not be symbolic links: {relative}"
                 )
             if path.is_file() and path.suffix == ".json":
-                checksums[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+                checksums[relative] = _file_sha256(path)
     return checksums
 
 
@@ -107,6 +114,25 @@ def _package_qc_summary(
     return status, tuple(sorted(failed_rule_ids)), dict(sorted(qc_policies.items()))
 
 
+def _validation_policy_summary(assets: list[dict[str, object]]) -> dict[str, str]:
+    policies: dict[str, str] = {}
+    for asset in assets:
+        version = asset.get("validation_policy_version")
+        digest = asset.get("validation_policy_digest")
+        if version is None and digest is None:
+            continue
+        if not isinstance(version, str) or not version:
+            raise WatershedDataError("asset validation policy version must be non-empty")
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            character not in "0123456789abcdef" for character in digest
+        ):
+            raise WatershedDataError("asset validation policy digest must be lowercase SHA-256")
+        previous = policies.setdefault(version, digest)
+        if previous != digest:
+            raise WatershedDataError(f"validation policy {version!r} has conflicting digests")
+    return dict(sorted(policies.items()))
+
+
 def freeze_package(
     *, site_spec: str | Path, catalog: str | Path, output: str | Path,
     include_raw: str = "referenced", object_store: str | Path | None = None,
@@ -122,8 +148,11 @@ def freeze_package(
         canonical_json(catalog_data["assets"])
     ).hexdigest()
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
+    validation_policy_digests = _validation_policy_summary(catalog_data["assets"])
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    # A failed refresh must never leave an older manifest claiming the new tree.
+    (destination / "manifest.json").unlink(missing_ok=True)
     sidecar_checksums = _sidecar_checksums(destination)
     package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
         destination, set(asset_ids)
@@ -134,9 +163,12 @@ def freeze_package(
         "sidecar_checksums": sidecar_checksums,
     }
     package_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
-    (destination / "site_spec.yaml").write_text(
+    site_spec_target = destination / "site_spec.yaml"
+    site_spec_temporary = site_spec_target.with_suffix(".yaml.tmp")
+    site_spec_temporary.write_text(
         yaml.safe_dump(spec.to_dict(), sort_keys=False), encoding="utf-8"
     )
+    site_spec_temporary.replace(site_spec_target)
     _atomic_json(destination / "catalog.json", catalog_data)
     if include_raw == "all":
         store = ObjectStore(object_store)
@@ -144,10 +176,18 @@ def freeze_package(
             digest = asset["content_digest"]
             target = destination / "raw" / "sha256" / digest[:2] / digest[2:]
             target.parent.mkdir(parents=True, exist_ok=True)
-            with store.open(digest) as source, target.open("wb") as sink:
-                shutil.copyfileobj(source, sink)
+            temporary = target.with_name(target.name + ".tmp")
+            copied_digest = hashlib.sha256()
+            with store.open(digest) as source, temporary.open("wb") as sink:
+                while chunk := source.read(1024 * 1024):
+                    sink.write(chunk)
+                    copied_digest.update(chunk)
+            if copied_digest.hexdigest() != digest:
+                temporary.unlink(missing_ok=True)
+                raise WatershedDataError(f"copied raw object failed checksum: {digest}")
+            temporary.replace(target)
     manifest = PackageManifest.from_dict({
-        "schema_name": "PackageManifest", "schema_version": "1.1",
+        "schema_name": "PackageManifest", "schema_version": "1.2",
         "package_id": package_id, "site_id": spec.site_id, "site_spec_digest": spec.digest,
         "catalog_digest": catalog_digest, "included_asset_ids": asset_ids,
         "producer": "GIStoOHQ", "producer_version": producer_version,
@@ -156,6 +196,7 @@ def freeze_package(
         "redistributable": redistributable, "package_qc_status": package_qc_status,
         "failed_qc_rule_ids": failed_qc_rule_ids,
         "qc_policy_digests": qc_policy_digests,
+        "validation_policy_digests": validation_policy_digests,
         "sidecar_checksums": sidecar_checksums,
     })
     _atomic_json(destination / "manifest.json", manifest.to_dict())
@@ -189,14 +230,18 @@ def validate_package(path: str | Path) -> PackageManifest:
         if actual_sidecar_checksums[relative] != expected_digest:
             raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     actual_qc_status, actual_failed_rules, actual_qc_policies = _package_qc_summary(root, set(ids))
+    actual_validation_policies = _validation_policy_summary(catalog["assets"])
     summary_mismatch = manifest.package_qc_status != actual_qc_status
-    if manifest.schema_version == "1.1":
+    if manifest.schema_version in {"1.1", "1.2"}:
         summary_mismatch = summary_mismatch or (
             manifest.failed_qc_rule_ids != actual_failed_rules
             or manifest.qc_policy_digests != actual_qc_policies
         )
     if summary_mismatch:
         raise WatershedDataError("package QC summary does not match its sidecars")
+    if (manifest.schema_version == "1.2"
+            and manifest.validation_policy_digests != actual_validation_policies):
+        raise WatershedDataError("package validation policy summary does not match its catalog")
     identity = {
         "site_spec_digest": manifest.site_spec_digest,
         "catalog_digest": manifest.catalog_digest,
@@ -211,12 +256,13 @@ def validate_package(path: str | Path) -> PackageManifest:
         for asset in catalog["assets"]:
             digest = asset["content_digest"]
             raw = root / "raw" / "sha256" / digest[:2] / digest[2:]
-            if not raw.is_file() or hashlib.sha256(raw.read_bytes()).hexdigest() != digest:
+            if not raw.is_file() or _file_sha256(raw) != digest:
                 raise WatershedDataError(f"missing or corrupt packaged raw object: {digest}")
-    if manifest.schema_version == "1.0":
+    if manifest.schema_version in {"1.0", "1.1"}:
         manifest = replace(
             manifest,
             failed_qc_rule_ids=actual_failed_rules,
             qc_policy_digests=actual_qc_policies,
+            validation_policy_digests=actual_validation_policies,
         )
     return manifest
