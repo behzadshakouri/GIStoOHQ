@@ -43,7 +43,7 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     assert manifest["schema_version"] == "1.1"
     assert manifest["source_package_qc_status"] == "pass"
     assert manifest["source_failed_qc_rule_ids"] == []
-    assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v4"}
+    assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v5"}
     assert manifest["source_validation_policy_digests"] == {}
     assert manifest["qc_gate"] == "require_pass"
     assert "normalization" in manifest["transformations_not_performed"]

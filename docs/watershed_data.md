@@ -375,7 +375,7 @@ missingness, preventing an entirely empty forcing or target series from passing 
 a warning-only package.
 NaN and infinite numeric observations are rejected explicitly instead of escaping
 ordinary physical-range comparisons or being written as usable model inputs.
-Temporal QC reports declare policy version `temporal-qc-v4`. Published harmonized
+Temporal QC reports declare policy version `temporal-qc-v5`. Published harmonized
 assets record that policy in transformation metadata, so future rule, severity,
 range, unit, interval, tolerance, or example-limit changes cannot silently reuse an
 asset admitted under an older policy. Reports and derived assets also record the
@@ -383,13 +383,17 @@ SHA-256 digest of the complete canonical policy document, distinguishing exact
 policy content even if a version label is accidentally reused. QC results obtain
 their severities directly from that policy document, preventing report behavior
 from drifting away from the fingerprinted severity map.
-Policy v4 accepts the native NASA POWER labels observed from the provider:
+Policy v5 accepts the native NASA POWER labels observed from the provider:
 `mm/day` for `PRECTOTCORR` and `MJ/hr` for `ALLSKY_SFC_SW_DWN`, alongside the
 previous `mm/hour` and `kW-hr/m^2` labels. These are preserved as native units; the
 harmonizer does not claim a numerical unit conversion.
 NASA POWER `EVPTRNS` is likewise accepted as either `MJ/m^2/day` or `mm/day`.
 The energy-flux label is preserved exactly and is not silently converted into water
 depth; downstream profiles can therefore choose and document an explicit conversion.
+It also recognizes the provider's daily solar-energy label `MJ/m^2/day` and common
+notation-only aliases such as `mm/hr`, `ft^3/s`, `degC`, and `kWh/m^2`. No alias
+performs a numerical conversion. Error messages now include the actual and allowed
+unit labels directly, avoiding a separate QC-sidecar inspection for future mismatches.
 Package freezing treats policy metadata as an all-or-nothing pair and validates the
 digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 Package manifests and one-button results aggregate policy versions to their exact

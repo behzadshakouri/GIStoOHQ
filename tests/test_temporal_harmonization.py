@@ -36,17 +36,17 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     assert output["processing_status"] == "derived"
     assert output["parent_asset_ids"] == [native["asset_id"]]
     assert output["transformation_name"] == "native-to-utc-table"
-    assert output["transformation_version"] == "1.6"
-    assert output["product_version"] == "1.5"
+    assert output["transformation_version"] == "1.7"
+    assert output["product_version"] == "1.6"
     assert output["transformation_parameters"]["unit_conversion"] == "none"
-    assert output["transformation_parameters"]["qc_policy_version"] == "temporal-qc-v4"
+    assert output["transformation_parameters"]["qc_policy_version"] == "temporal-qc-v5"
     assert len(output["transformation_parameters"]["qc_policy_digest"]) == 64
     with store.open(output["content_digest"]) as stream:
         rows = list(csv.DictReader(io.TextIOWrapper(stream, encoding="utf-8")))
     assert rows[0]["timestamp_utc"] == "2025-01-01T00:00:00Z"
     assert {row["variable"] for row in rows} == {"PRECTOTCORR", "T2M"}
     qc = json.loads((tmp_path / "qc.json").read_text())
-    assert qc["policy_version"] == "temporal-qc-v4"
+    assert qc["policy_version"] == "temporal-qc-v5"
     assert qc["policy_digest"] == output["transformation_parameters"]["qc_policy_digest"]
     assert TEMPORAL_QC_POLICY["example_limit_per_rule"] == 100
     assert TEMPORAL_QC_POLICY["study_period_end_tolerance"] == (
@@ -370,7 +370,7 @@ def test_temporal_qc_rejects_incompatible_known_unit(tmp_path):
     result = next(item for item in qc["results"] if item["rule_id"] == "temporal.unit_compatibility")
     assert result["passed"] is False
     assert result["details"]["mismatches"][0] == {
-        "actual_unit": "kelvin", "allowed_units": ["C"], "variable": "T2M",
+        "actual_unit": "kelvin", "allowed_units": ["C", "degC", "°C"], "variable": "T2M",
     }
 
 
@@ -410,6 +410,43 @@ def test_temporal_qc_accepts_nasa_power_evapotranspiration_energy_unit():
     )
     assert unit_result.passed is True
     assert unit_result.details["mismatches"] == []
+
+
+def test_temporal_qc_accepts_daily_solar_and_common_equivalent_unit_labels():
+    timestamp = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"timestamp": timestamp, "variable": "ALLSKY_SFC_SW_DWN", "value": 10.0,
+         "qualifiers": ""},
+        {"timestamp": timestamp, "variable": "00060", "value": 2.0, "qualifiers": ""},
+        {"timestamp": timestamp, "variable": "T2M", "value": 12.0, "qualifiers": ""},
+    ]
+    results = temporal_qc(
+        rows, "sha256:test", "daily",
+        {"ALLSKY_SFC_SW_DWN": "MJ/m^2/day", "00060": "ft^3/s", "T2M": "degC"},
+    )
+    unit_result = next(
+        result for result in results if result.rule_id == "temporal.unit_compatibility"
+    )
+    assert unit_result.passed is True
+
+
+def test_harmonization_unit_failure_message_includes_mismatch(tmp_path):
+    document = json.loads(Path("tests/fixtures/nasa_power_hourly.json").read_text())
+    document["parameters"]["T2M"]["units"] = "kelvin"
+    store = ObjectStore(tmp_path / "store")
+    stored = store.put(io.BytesIO(json.dumps(document).encode()))
+    catalog = AssetCatalog(tmp_path / "catalog.json")
+    native = catalog.register({
+        "provider": "nasa-power", "product": "historical-meteorology",
+        "content_digest": stored.content_digest, "size": stored.size,
+        "media_type": "application/json", "temporal_resolution": "hourly",
+    })
+    with pytest.raises(WatershedDataError, match=r"T2M=kelvin \(allowed: C, degC, °C\)"):
+        harmonize_asset(
+            asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+            qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+            fail_on_qc_error=True,
+        )
 
 
 def test_harmonization_can_fail_before_publishing_asset_on_qc_error(tmp_path):
