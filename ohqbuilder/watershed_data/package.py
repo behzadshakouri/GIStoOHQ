@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +10,13 @@ import yaml
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_json
+
+
+@dataclass(frozen=True)
+class _PackageQCSummary:
+    status: str
+    failed_rule_ids: tuple[str, ...]
+    policy_digests: dict[str, str]
 
 
 def _file_sha256(path: Path) -> str:
@@ -41,11 +48,11 @@ def _sidecar_checksums(root: Path) -> dict[str, str]:
 
 def _package_qc_summary(
     destination: Path, allowed_asset_ids: set[str] | None = None,
-) -> tuple[str, tuple[str, ...], dict[str, str]]:
+) -> _PackageQCSummary:
     """Aggregate stable QC reports already materialized in the package tree."""
     reports = sorted((destination / "quality_control").rglob("*.json"))
     if not reports:
-        return "not_run", (), {}
+        return _PackageQCSummary("not_run", (), {})
     failed_severities: set[str] = set()
     failed_rule_ids: set[str] = set()
     qc_policies: dict[str, str] = {}
@@ -111,7 +118,11 @@ def _package_qc_summary(
         status = "warning"
     else:
         status = "pass"
-    return status, tuple(sorted(failed_rule_ids)), dict(sorted(qc_policies.items()))
+    return _PackageQCSummary(
+        status,
+        tuple(sorted(failed_rule_ids)),
+        dict(sorted(qc_policies.items())),
+    )
 
 
 def _validation_policy_summary(assets: list[dict[str, object]]) -> dict[str, str]:
@@ -154,7 +165,7 @@ def freeze_package(
     # A failed refresh must never leave an older manifest claiming the new tree.
     (destination / "manifest.json").unlink(missing_ok=True)
     sidecar_checksums = _sidecar_checksums(destination)
-    package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
+    qc_summary = _package_qc_summary(
         destination, set(asset_ids)
     )
     identity = {
@@ -193,9 +204,9 @@ def freeze_package(
         "producer": "GIStoOHQ", "producer_version": producer_version,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "raw_inclusion": include_raw, "self_contained": include_raw == "all",
-        "redistributable": redistributable, "package_qc_status": package_qc_status,
-        "failed_qc_rule_ids": failed_qc_rule_ids,
-        "qc_policy_digests": qc_policy_digests,
+        "redistributable": redistributable, "package_qc_status": qc_summary.status,
+        "failed_qc_rule_ids": qc_summary.failed_rule_ids,
+        "qc_policy_digests": qc_summary.policy_digests,
         "validation_policy_digests": validation_policy_digests,
         "sidecar_checksums": sidecar_checksums,
     })
@@ -229,13 +240,13 @@ def validate_package(path: str | Path) -> PackageManifest:
     for relative, expected_digest in manifest.sidecar_checksums.items():
         if actual_sidecar_checksums[relative] != expected_digest:
             raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
-    actual_qc_status, actual_failed_rules, actual_qc_policies = _package_qc_summary(root, set(ids))
+    qc_summary = _package_qc_summary(root, set(ids))
     actual_validation_policies = _validation_policy_summary(catalog["assets"])
-    summary_mismatch = manifest.package_qc_status != actual_qc_status
+    summary_mismatch = manifest.package_qc_status != qc_summary.status
     if manifest.schema_version in {"1.1", "1.2"}:
         summary_mismatch = summary_mismatch or (
-            manifest.failed_qc_rule_ids != actual_failed_rules
-            or manifest.qc_policy_digests != actual_qc_policies
+            manifest.failed_qc_rule_ids != qc_summary.failed_rule_ids
+            or manifest.qc_policy_digests != qc_summary.policy_digests
         )
     if summary_mismatch:
         raise WatershedDataError("package QC summary does not match its sidecars")
@@ -261,8 +272,8 @@ def validate_package(path: str | Path) -> PackageManifest:
     if manifest.schema_version in {"1.0", "1.1"}:
         manifest = replace(
             manifest,
-            failed_qc_rule_ids=actual_failed_rules,
-            qc_policy_digests=actual_qc_policies,
+            failed_qc_rule_ids=qc_summary.failed_rule_ids,
+            qc_policy_digests=qc_summary.policy_digests,
             validation_policy_digests=actual_validation_policies,
         )
     return manifest
