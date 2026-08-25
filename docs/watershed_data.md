@@ -384,7 +384,9 @@ New packages use PackageManifest 1.1 for QC rule and policy summaries. Validatio
 accepts legacy 1.0 manifests, recomputes the rule and policy summaries that were not
 stored by that contract, and rejects unknown schema names or versions. Validation
 also requires the checksummed sidecar inventory to exactly match every JSON report
-under `quality_control/` and `provenance/`; undeclared additions are rejected.
+under `quality_control/` and `provenance/`; undeclared additions are rejected. Those
+trees cannot contain symbolic links, so a frozen package cannot validate sidecar
+content located outside its own directory.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.

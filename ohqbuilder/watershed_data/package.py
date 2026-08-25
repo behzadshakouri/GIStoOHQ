@@ -14,12 +14,22 @@ from .schemas import PackageManifest, SiteSpec, WatershedDataError, canonical_js
 
 
 def _sidecar_checksums(root: Path) -> dict[str, str]:
-    return {
-        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for directory in ("quality_control", "provenance")
-        for path in sorted((root / directory).rglob("*.json"))
-        if path.is_file()
-    }
+    checksums: dict[str, str] = {}
+    for directory in ("quality_control", "provenance"):
+        sidecar_root = root / directory
+        if sidecar_root.is_symlink():
+            raise WatershedDataError(
+                f"package sidecar paths must not be symbolic links: {directory}"
+            )
+        for path in sorted(sidecar_root.rglob("*")):
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise WatershedDataError(
+                    f"package sidecar paths must not be symbolic links: {relative}"
+                )
+            if path.is_file() and path.suffix == ".json":
+                checksums[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return checksums
 
 
 def _package_qc_summary(

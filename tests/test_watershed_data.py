@@ -308,6 +308,14 @@ def test_freeze_and_validate_self_contained_package(tmp_path):
         validate_package(tmp_path / "package")
     unexpected_sidecar.unlink()
 
+    external_sidecar = tmp_path / "external.json"
+    external_sidecar.write_text("{}")
+    linked_sidecar = tmp_path / "package" / "provenance" / "linked.json"
+    linked_sidecar.symlink_to(external_sidecar)
+    with pytest.raises(WatershedDataError, match="must not be symbolic links"):
+        validate_package(tmp_path / "package")
+    linked_sidecar.unlink()
+
     raw = next((tmp_path / "package" / "raw").rglob("*"))
     while raw.is_dir():
         raw = next(raw.iterdir())
