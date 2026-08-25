@@ -67,3 +67,4 @@ def test_status_lists_asset_ids_counts_and_object_availability(tmp_path):
     assert packaged["schema_version"] == "1.1"
     assert packaged["package_id"].startswith("sha256:")
     assert packaged["package_qc_status"] == "not_run"
+    assert packaged["validation_policy_digests"] == {}

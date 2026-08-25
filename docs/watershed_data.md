@@ -387,9 +387,10 @@ Package freezing treats policy metadata as an all-or-nothing pair and validates 
 digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 Package manifests and one-button results aggregate policy versions to their exact
 digests. Reusing one version label with conflicting digests is rejected.
-New packages use PackageManifest 1.1 for QC rule and policy summaries. Validation
-accepts legacy 1.0 manifests, recomputes the rule and policy summaries that were not
-stored by that contract, and rejects unknown schema names or versions. Validation
+New packages use PackageManifest 1.2 for QC and input-validation policy summaries.
+Validation accepts legacy 1.0 and 1.1 manifests, recomputes summaries not stored by
+those contracts, and rejects unknown schema names or versions. Forecast validation
+policy digests are aggregated from catalog assets and checked for conflicts. Validation
 also requires the checksummed sidecar inventory to exactly match every JSON report
 under `quality_control/` and `provenance/`; undeclared additions are rejected. Those
 trees cannot contain symbolic links, so a frozen package cannot validate sidecar

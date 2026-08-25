@@ -221,15 +221,16 @@ class PackageManifest:
     package_qc_status: Literal["pass", "warning", "fail", "not_run"] = "not_run"
     failed_qc_rule_ids: tuple[str, ...] = ()
     qc_policy_digests: dict[str, str] = field(default_factory=dict)
+    validation_policy_digests: dict[str, str] = field(default_factory=dict)
     sidecar_checksums: dict[str, str] = field(default_factory=dict)
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PackageManifest":
         if data.get("schema_name") != "PackageManifest" or data.get("schema_version") not in {
-            "1.0", "1.1",
+            "1.0", "1.1", "1.2",
         }:
-            raise WatershedDataError("PackageManifest schema must be version 1.0 or 1.1")
+            raise WatershedDataError("PackageManifest schema must be version 1.0, 1.1, or 1.2")
         try:
             manifest = cls(
                 package_id=str(data["package_id"]), site_id=str(data["site_id"]),
@@ -243,6 +244,7 @@ class PackageManifest:
                 package_qc_status=data.get("package_qc_status", "not_run"),
                 failed_qc_rule_ids=tuple(data.get("failed_qc_rule_ids", ())),
                 qc_policy_digests=dict(data.get("qc_policy_digests", {})),
+                validation_policy_digests=dict(data.get("validation_policy_digests", {})),
                 sidecar_checksums=dict(data.get("sidecar_checksums", {})),
                 schema_version=str(data["schema_version"]),
             )
@@ -265,6 +267,15 @@ class PackageManifest:
                 char not in "0123456789abcdef" for char in policy_digest
             ):
                 raise WatershedDataError("qc_policy_digests values must be lowercase SHA-256")
+        for policy_version, policy_digest in manifest.validation_policy_digests.items():
+            if not policy_version:
+                raise WatershedDataError("validation_policy_digests keys must be non-empty")
+            if len(policy_digest) != 64 or any(
+                char not in "0123456789abcdef" for char in policy_digest
+            ):
+                raise WatershedDataError(
+                    "validation_policy_digests values must be lowercase SHA-256"
+                )
         for path, digest in manifest.sidecar_checksums.items():
             if not path or Path(path).is_absolute() or ".." in Path(path).parts:
                 raise WatershedDataError("sidecar checksum paths must be safe relative paths")
@@ -284,6 +295,7 @@ class PackageManifest:
             "package_qc_status": self.package_qc_status,
             "failed_qc_rule_ids": list(self.failed_qc_rule_ids),
             "qc_policy_digests": dict(sorted(self.qc_policy_digests.items())),
+            "validation_policy_digests": dict(sorted(self.validation_policy_digests.items())),
             "sidecar_checksums": dict(sorted(self.sidecar_checksums.items())),
         }
 
@@ -296,6 +308,7 @@ class HydroPINNExportManifest:
     source_package_qc_status: Literal["pass", "warning", "fail", "not_run"]
     source_failed_qc_rule_ids: tuple[str, ...]
     source_qc_policy_digests: dict[str, str]
+    source_validation_policy_digests: dict[str, str]
     qc_gate: Literal["reject_fail", "require_pass"]
     assets: tuple[dict[str, str], ...]
     transformations_not_performed: tuple[str, ...]
@@ -312,6 +325,9 @@ class HydroPINNExportManifest:
                 source_package_qc_status=data["source_package_qc_status"],
                 source_failed_qc_rule_ids=tuple(data["source_failed_qc_rule_ids"]),
                 source_qc_policy_digests=dict(data["source_qc_policy_digests"]),
+                source_validation_policy_digests=dict(
+                    data["source_validation_policy_digests"]
+                ),
                 qc_gate=data["qc_gate"], assets=tuple(data["assets"]),
                 transformations_not_performed=tuple(data["transformations_not_performed"]),
             )
@@ -326,6 +342,9 @@ class HydroPINNExportManifest:
         for version, digest in manifest.source_qc_policy_digests.items():
             if not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
                 raise WatershedDataError("invalid HydroPINNExport policy digest")
+        for version, digest in manifest.source_validation_policy_digests.items():
+            if not version or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise WatershedDataError("invalid HydroPINNExport validation policy digest")
         for asset in manifest.assets:
             if not isinstance(asset, dict) or set(asset) != {"asset_id", "path", "sha256"}:
                 raise WatershedDataError("invalid HydroPINNExport asset entry")
@@ -344,6 +363,9 @@ class HydroPINNExportManifest:
             "site_id": self.site_id, "source_package_qc_status": self.source_package_qc_status,
             "source_failed_qc_rule_ids": list(self.source_failed_qc_rule_ids),
             "source_qc_policy_digests": dict(sorted(self.source_qc_policy_digests.items())),
+            "source_validation_policy_digests": dict(
+                sorted(self.source_validation_policy_digests.items())
+            ),
             "qc_gate": self.qc_gate, "assets": list(self.assets),
             "transformations_not_performed": list(self.transformations_not_performed),
         }

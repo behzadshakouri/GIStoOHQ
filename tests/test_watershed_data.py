@@ -214,6 +214,8 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     asset = catalog.register({
         "provider": "example", "product": "data", "content_digest": "0" * 64,
         "size": 0, "media_type": "application/json",
+        "validation_policy_version": "forecast-validation-v1",
+        "validation_policy_digest": "c" * 64,
     })
     output = tmp_path / "package"
     qc = output / "quality_control" / "providers" / "temporal.json"
@@ -225,11 +227,16 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
         ],
     }))
     manifest_path = freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert json.loads(manifest_path.read_text())["schema_version"] == "1.2"
+    assert validate_package(output).validation_policy_digests == {
+        "forecast-validation-v1": "c" * 64,
+    }
     assert validate_package(output).package_qc_status == "warning"
     legacy_manifest = json.loads(manifest_path.read_text())
     legacy_manifest["schema_version"] = "1.0"
     legacy_manifest.pop("failed_qc_rule_ids")
     legacy_manifest.pop("qc_policy_digests")
+    legacy_manifest.pop("validation_policy_digests")
     manifest_path.write_text(json.dumps(legacy_manifest))
     validated_legacy = validate_package(output)
     assert validated_legacy.failed_qc_rule_ids == ("temporal.missing_values",)

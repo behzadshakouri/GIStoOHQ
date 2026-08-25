@@ -44,6 +44,7 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     assert manifest["source_package_qc_status"] == "pass"
     assert manifest["source_failed_qc_rule_ids"] == []
     assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v2"}
+    assert manifest["source_validation_policy_digests"] == {}
     assert manifest["qc_gate"] == "require_pass"
     assert "normalization" in manifest["transformations_not_performed"]
     assert {item["name"] for item in variables["variables"]} == {"PRECTOTCORR", "T2M"}
@@ -123,6 +124,7 @@ def test_hydropinn_manifest_rejects_unsafe_asset_paths():
             "profile": "water-balance-v1", "source_package_id": "sha256:" + "a" * 64,
             "site_id": "test", "source_package_qc_status": "pass",
             "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+            "source_validation_policy_digests": {},
             "qc_gate": "require_pass",
             "assets": [{"asset_id": "sha256:test", "path": "../outside.csv", "sha256": "b" * 64}],
             "transformations_not_performed": [],

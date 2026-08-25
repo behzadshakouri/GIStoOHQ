@@ -87,6 +87,9 @@ def export_hydropinn(
             "source_package_qc_status": package_manifest.package_qc_status,
             "source_failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids),
             "source_qc_policy_digests": dict(package_manifest.qc_policy_digests),
+            "source_validation_policy_digests": dict(
+                package_manifest.validation_policy_digests
+            ),
             "qc_gate": "require_pass" if require_qc_pass else "reject_fail",
             "assets": exported,
             "transformations_not_performed": [

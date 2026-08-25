@@ -63,6 +63,9 @@ def build_data_status(
         "package_qc_status": package_manifest.package_qc_status if package_manifest else None,
         "failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids) if package_manifest else [],
         "qc_policy_digests": dict(package_manifest.qc_policy_digests) if package_manifest else {},
+        "validation_policy_digests": (
+            dict(package_manifest.validation_policy_digests) if package_manifest else {}
+        ),
         "assets": assets,
     }
 
