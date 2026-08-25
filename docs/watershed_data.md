@@ -233,6 +233,11 @@ archive. The catalog summary records that variable-to-unit mapping for downstrea
 profile checks.
 The strengthened archive contract uses product version `forecast-records-v2`, so
 responses cached under the earlier validation contract are not silently reused.
+Native catalog records also carry the `forecast-validation-v1` policy version and
+the SHA-256 digest of its complete required-field, numeric, timestamp, duplicate,
+dimension, lead-time, and unit rules. Request identity includes that digest, and
+derived forecast view 1.3 records the same fingerprint in transformation metadata,
+so a policy-content change cannot reuse a cached archive or derived view silently.
 Derived view catalog records repeat the filtered record count, variables, members,
 locations, units, and issue/valid coverage, so consumers need not inspect the CSV
 to determine whether a prediction-time view fits their profile.
