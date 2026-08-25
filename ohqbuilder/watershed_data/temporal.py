@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
-from .schemas import ProvenanceActivity, QCResult, WatershedDataError
+from .schemas import ProvenanceActivity, QCResult, WatershedDataError, canonical_json
 
 TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v1"
 PHYSICAL_RANGES = {
@@ -23,6 +23,18 @@ EXPECTED_UNITS = {
     "T2M": {"C"}, "RH2M": {"%"}, "WS2M": {"m/s"},
     "ALLSKY_SFC_SW_DWN": {"kW-hr/m^2"}, "EVPTRNS": {"mm/day"},
 }
+TEMPORAL_QC_POLICY = {
+    "policy_version": TEMPORAL_QC_POLICY_VERSION,
+    "physical_ranges": {
+        variable: {"minimum": bounds[0], "maximum": bounds[1]}
+        for variable, bounds in sorted(PHYSICAL_RANGES.items())
+    },
+    "expected_units": {
+        variable: sorted(unit_values)
+        for variable, unit_values in sorted(EXPECTED_UNITS.items())
+    },
+}
+TEMPORAL_QC_POLICY_DIGEST = hashlib.sha256(canonical_json(TEMPORAL_QC_POLICY)).hexdigest()
 
 
 def _utc(value: str) -> datetime:
@@ -384,6 +396,7 @@ def harmonize_asset(
     )
     _atomic_json(Path(qc_output), {"schema_name": "QCReport", "schema_version": "1.0",
                                   "policy_version": TEMPORAL_QC_POLICY_VERSION,
+                                  "policy_digest": TEMPORAL_QC_POLICY_DIGEST,
                                   "results": [item.to_dict() for item in qc]})
     failed_error_rules = [
         item.rule_id for item in qc if item.severity == "error" and not item.passed
@@ -403,21 +416,22 @@ def harmonize_asset(
     started = completed = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     transformation = {"target_timezone": "UTC", "ordering": "timestamp_then_variable",
                       "missing_values": "preserved", "unit_conversion": "none",
-                      "qc_policy_version": TEMPORAL_QC_POLICY_VERSION}
+                      "qc_policy_version": TEMPORAL_QC_POLICY_VERSION,
+                      "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
-        "product_version": "1.1", "request_key": hashlib.sha256(
+        "product_version": "1.2", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
-        "transformation_name": "native-to-utc-table", "transformation_version": "1.2",
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.3",
         "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-utc-table", transformation_version="1.2",
+        transformation_name="native-to-utc-table", transformation_version="1.3",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,
