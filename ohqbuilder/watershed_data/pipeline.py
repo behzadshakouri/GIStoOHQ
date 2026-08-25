@@ -100,6 +100,8 @@ def run_watershed_data_pipeline(
             asset_id=asset["asset_id"], catalog=catalog, object_store=cache,
             qc_output=qc_dir / f"{safe_id}.json",
             provenance_output=provenance_dir / f"{safe_id}.json",
+            expected_start=spec.study_start, expected_end=spec.study_end,
+            fail_on_qc_error=True,
         ))
     if forecast_asset is not None and prediction_time:
         forecast_view = forecast_view_builder(
@@ -125,6 +127,9 @@ def run_watershed_data_pipeline(
         "derived_asset_ids": [asset["asset_id"] for asset in derived_assets],
         "package_manifest": str(manifest_path),
         "package_id": manifest.package_id,
+        "package_qc_status": manifest.package_qc_status,
+        "failed_qc_rule_ids": list(manifest.failed_qc_rule_ids),
+        "qc_policy_digests": dict(manifest.qc_policy_digests),
         "hydropinn_manifest": str(hydropinn_manifest) if hydropinn_manifest else None,
         "forecast_asset_id": forecast_asset["asset_id"] if forecast_asset else None,
         "forecast_view_asset_id": forecast_view["asset_id"] if forecast_view else None,
