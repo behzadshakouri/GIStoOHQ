@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import queue
@@ -10,6 +11,7 @@ import pytest
 from ohqbuilder.ui.launcher import (
     BASEMAP_PROVIDERS,
     CommandRunner,
+    LauncherApp,
     LauncherError,
     LauncherState,
     RunnerFinished,
@@ -73,12 +75,17 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "export-hydropinn", site_spec="site.yaml", package="package",
         cache="cache", hydropinn_output="export",
     ).argv[-2:] == ("--output", "export")
+    assert watershed_data_command(
+        "export-hydropinn", site_spec="site.yaml", require_qc_pass=True,
+    ).argv[-1] == "--require-qc-pass"
     run = watershed_data_command(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,
         study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
+        require_qc_pass=True,
     )
     assert "--init-if-missing" in run.argv
+    assert "--require-qc-pass" in run.argv
     refreshed = watershed_data_command(
         "download-weather", site_spec="site.yaml", refresh=True
     )
@@ -103,10 +110,12 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         forecast_provider="example",
     )
     assert forecast.argv[2] == "download-forecast"
-    assert watershed_data_command(
+    status = watershed_data_command(
         "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
         status_output="status",
-    ).argv[-2:] == ("--output", "status")
+    )
+    assert ("--output", "status") == status.argv[status.argv.index("--output"):][:2]
+    assert ("--package", "watershed_package") == status.argv[-2:]
     weather_run = watershed_data_command(
         "run-weather", site_spec="site.yaml", workspace="weather_run",
         site_id="demo", longitude=-77, latitude=39,
@@ -905,6 +914,13 @@ def test_ui_launcher_defaults_to_sligo_example_when_available():
     from ohqbuilder.ui.launcher import default_config_path
 
     assert default_config_path() == "examples/SligoCreek/dem_workflow.example.yaml"
+
+
+def test_watershed_dialog_exposes_strict_qc_export_gate():
+    source = inspect.getsource(LauncherApp.configure_watershed_data)
+
+    assert "Require passing package QC for HydroPINN export" in source
+    assert "require_qc_pass=require_qc_pass_var.get()" in source
 
 
 def test_run_dem_ui_shell_wrapper_exists():
