@@ -23,6 +23,7 @@ def run_watershed_data_pipeline(
     include_weather: bool = True,
     include_pet: bool = True,
     export_hydropinn_profile: bool = False,
+    require_qc_pass: bool = False,
     discharge_acquirer: Callable = acquire_observed_discharge,
     weather_acquirer: Callable = acquire_historical_meteorology,
     pet_acquirer: Callable = acquire_pet_et,
@@ -122,7 +123,8 @@ def run_watershed_data_pipeline(
                 + ", ".join(manifest.failed_qc_rule_ids)
             )
         hydropinn_manifest = export_hydropinn(
-            package=package, object_store=cache, output=root / "hydropinn"
+            package=package, object_store=cache, output=root / "hydropinn",
+            require_qc_pass=require_qc_pass,
         )
     return {
         "site_id": spec.site_id,

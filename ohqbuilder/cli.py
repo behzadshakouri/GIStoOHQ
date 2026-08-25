@@ -163,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_export.add_argument("--object-store", default=None)
     data_export.add_argument("--output", required=True)
     data_export.add_argument("--profile", default="water-balance-v1")
+    data_export.add_argument("--require-qc-pass", action="store_true")
     data_run = data_sub.add_parser(
         "run", help="Download selected products, harmonize/QC, and freeze a package."
     )
@@ -173,6 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     data_run.add_argument("--no-weather", action="store_true")
     data_run.add_argument("--no-pet", action="store_true")
     data_run.add_argument("--export-hydropinn", action="store_true")
+    data_run.add_argument("--require-qc-pass", action="store_true")
     data_run.add_argument("--init-if-missing", action="store_true")
     data_run.add_argument("--site-id", default="")
     data_run.add_argument("--name", default=None)
@@ -1247,6 +1249,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest = export_hydropinn(
                     package=args.package, object_store=args.object_store,
                     output=args.output, profile=args.profile,
+                    require_qc_pass=args.require_qc_pass,
                 )
                 print(f"Exported HydroPINN profile: {manifest}")
             elif args.data_command == "run":
@@ -1255,6 +1258,7 @@ def main(argv: list[str] | None = None) -> int:
                     workspace=args.workspace, include_discharge=not args.no_discharge,
                     include_weather=not args.no_weather, include_pet=not args.no_pet,
                     export_hydropinn_profile=args.export_hydropinn,
+                    require_qc_pass=args.require_qc_pass,
                     init_if_missing=args.init_if_missing, site_id=args.site_id,
                     name=args.name, longitude=args.lon, latitude=args.lat,
                     study_start=args.start, study_end=args.end,

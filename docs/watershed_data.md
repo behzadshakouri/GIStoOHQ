@@ -370,12 +370,14 @@ missingness, preventing an entirely empty forcing or target series from passing 
 a warning-only package.
 NaN and infinite numeric observations are rejected explicitly instead of escaping
 ordinary physical-range comparisons or being written as usable model inputs.
-Temporal QC reports declare policy version `temporal-qc-v1`. Published harmonized
-assets record that policy in transformation metadata, so future range or unit-policy
-changes cannot silently reuse an asset admitted under an older policy.
-Reports and derived assets also record the SHA-256 digest of the canonical range and
-unit policy document, distinguishing exact policy content even if a version label is
-accidentally reused.
+Temporal QC reports declare policy version `temporal-qc-v2`. Published harmonized
+assets record that policy in transformation metadata, so future rule, severity,
+range, unit, interval, tolerance, or example-limit changes cannot silently reuse an
+asset admitted under an older policy. Reports and derived assets also record the
+SHA-256 digest of the complete canonical policy document, distinguishing exact
+policy content even if a version label is accidentally reused. QC results obtain
+their severities directly from that policy document, preventing report behavior
+from drifting away from the fingerprinted severity map.
 Package freezing treats policy metadata as an all-or-nothing pair and validates the
 digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
 Package manifests and one-button results aggregate policy versions to their exact
@@ -386,10 +388,13 @@ stored by that contract, and rejects unknown schema names or versions. Validatio
 also requires the checksummed sidecar inventory to exactly match every JSON report
 under `quality_control/` and `provenance/`; undeclared additions are rejected. Those
 trees cannot contain symbolic links, so a frozen package cannot validate sidecar
-content located outside its own directory.
+content located outside its own directory. Link and inventory checks run before QC
+reports are parsed, ensuring validation never reads an external report first.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.
+Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data run`
+to reject both warning and `not_run` packages as well.
 Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.

@@ -12,7 +12,22 @@ from typing import Any
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .schemas import ProvenanceActivity, QCResult, WatershedDataError, canonical_json
 
-TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v1"
+TEMPORAL_QC_POLICY_VERSION = "temporal-qc-v2"
+QC_EXAMPLE_LIMIT = 100
+FIXED_RESOLUTIONS = {"hourly": 3600, "daily": 86400}
+QC_RULE_SEVERITIES = {
+    "temporal.duplicate_timestamps": "error",
+    "temporal.missing_values": "warning",
+    "temporal.variable_availability": "error",
+    "temporal.finite_values": "error",
+    "temporal.chronology": "warning",
+    "temporal.physical_range": "error",
+    "temporal.provider_qualifiers": "warning",
+    "temporal.unit_compatibility": "error",
+    "temporal.expected_intervals": "warning",
+    "temporal.timestep_alignment": "warning",
+    "temporal.study_period_coverage": "warning",
+}
 PHYSICAL_RANGES = {
     "00060": (0.0, None), "PRECTOTCORR": (0.0, None), "RH2M": (0.0, 100.0),
     "WS2M": (0.0, None), "ALLSKY_SFC_SW_DWN": (0.0, None),
@@ -33,8 +48,33 @@ TEMPORAL_QC_POLICY = {
         variable: sorted(unit_values)
         for variable, unit_values in sorted(EXPECTED_UNITS.items())
     },
+    "rule_severities": dict(sorted(QC_RULE_SEVERITIES.items())),
+    "fixed_resolution_seconds": dict(sorted(FIXED_RESOLUTIONS.items())),
+    "example_limit_per_rule": QC_EXAMPLE_LIMIT,
+    "duplicate_key": ["timestamp", "variable"],
+    "chronology_scope": "within_variable_in_native_order",
+    "valid_observation": "value_is_present_and_finite",
+    "study_period_end_tolerance": "one_declared_fixed_interval",
+    "provisional_qualifiers": ["P"],
 }
 TEMPORAL_QC_POLICY_DIGEST = hashlib.sha256(canonical_json(TEMPORAL_QC_POLICY)).hexdigest()
+
+
+def _policy_result(
+    rule_id: str,
+    passed: bool,
+    message: str,
+    asset_ids: tuple[str, ...] = (),
+    details: dict[str, Any] | None = None,
+) -> QCResult:
+    return QCResult(
+        rule_id,
+        QC_RULE_SEVERITIES[rule_id],
+        passed,
+        message,
+        asset_ids,
+        details or {},
+    )
 
 
 def _utc(value: str) -> datetime:
@@ -102,9 +142,8 @@ def temporal_qc(
     units: dict[str, str] | None = None,
     expected_start: str | None = None, expected_end: str | None = None,
 ) -> list[QCResult]:
-    expected_delta = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}.get(
-        temporal_resolution or ""
-    )
+    resolution_seconds = FIXED_RESOLUTIONS.get(temporal_resolution or "")
+    expected_delta = timedelta(seconds=resolution_seconds) if resolution_seconds else None
     interval_seconds = expected_delta.total_seconds() if expected_delta is not None else None
     alignment_origin = datetime(1970, 1, 1, tzinfo=timezone.utc)
     timestamps_by_variable: dict[str, list[datetime]] = {}
@@ -135,7 +174,7 @@ def temporal_qc(
         key = (timestamp, variable)
         if key in seen_keys:
             duplicates += 1
-            if len(duplicate_examples) < 100:
+            if len(duplicate_examples) < QC_EXAMPLE_LIMIT:
                 duplicate_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
@@ -143,7 +182,7 @@ def temporal_qc(
         if row["value"] is None:
             missing += 1
             counts[1] += 1
-            if len(missing_examples) < 100:
+            if len(missing_examples) < QC_EXAMPLE_LIMIT:
                 missing_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                 })
@@ -159,7 +198,7 @@ def temporal_qc(
         previous = previous_timestamp_by_variable.get(variable)
         if previous is not None and timestamp < previous:
             chronology_inversions += 1
-            if len(chronology_examples) < 100:
+            if len(chronology_examples) < QC_EXAMPLE_LIMIT:
                 chronology_examples.append({
                     "variable": variable,
                     "previous_timestamp": previous.isoformat(),
@@ -169,7 +208,7 @@ def temporal_qc(
         bounds = PHYSICAL_RANGES.get(variable)
         if value is not None and not math.isfinite(value):
             nonfinite_count += 1
-            if len(nonfinite_examples) < 100:
+            if len(nonfinite_examples) < QC_EXAMPLE_LIMIT:
                 nonfinite_examples.append({
                     "timestamp": timestamp.isoformat(), "variable": variable,
                     "value": str(value),
@@ -178,7 +217,7 @@ def temporal_qc(
             minimum, maximum = bounds
             if value < minimum or (maximum is not None and value > maximum):
                 violation_count += 1
-                if len(violations) < 100:
+                if len(violations) < QC_EXAMPLE_LIMIT:
                     violations.append({
                         "timestamp": timestamp.isoformat(), "variable": variable,
                         "value": value, "minimum": minimum, "maximum": maximum,
@@ -187,7 +226,7 @@ def temporal_qc(
             offset_seconds = (timestamp - alignment_origin).total_seconds()
             if offset_seconds % interval_seconds:
                 misaligned_count += 1
-                if len(misaligned) < 100:
+                if len(misaligned) < QC_EXAMPLE_LIMIT:
                     misaligned.append({
                         "timestamp": timestamp.isoformat(), "variable": variable,
                     })
@@ -261,7 +300,7 @@ def temporal_qc(
                     count = max(0, int(gap / expected_delta) - 1)
                     missing_intervals += count
                     variable_missing_intervals += count
-                    if len(gap_examples) < 100:
+                    if len(gap_examples) < QC_EXAMPLE_LIMIT:
                         gap_examples.append({
                             "variable": variable, "after": previous.isoformat(),
                             "before": current.isoformat(), "missing_intervals": count,
@@ -279,29 +318,29 @@ def temporal_qc(
                 "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
             })
     return [
-        QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
+        _policy_result("temporal.duplicate_timestamps", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
                  {"duplicate_count": duplicates, "examples": duplicate_examples}),
-        QCResult("temporal.missing_values", "warning", missing == 0,
+        _policy_result("temporal.missing_values", missing == 0,
                  f"{missing} missing values", (asset_id,), {
                      "missing_count": missing,
                      "completeness_by_variable": completeness_by_variable,
                      "examples": missing_examples,
                  }),
-        QCResult(
-            "temporal.variable_availability", "error", not unavailable_variables,
+        _policy_result(
+            "temporal.variable_availability", not unavailable_variables,
             f"{len(unavailable_variables)} variables contain no valid observations",
             (asset_id,), {"unavailable_variables": unavailable_variables},
         ),
-        QCResult(
-            "temporal.finite_values", "error", nonfinite_count == 0,
+        _policy_result(
+            "temporal.finite_values", nonfinite_count == 0,
             f"{nonfinite_count} non-finite numeric observations",
             (asset_id,), {
                 "nonfinite_count": nonfinite_count, "examples": nonfinite_examples,
             },
         ),
-        QCResult(
-            "temporal.chronology", "warning", chronology_inversions == 0,
+        _policy_result(
+            "temporal.chronology", chronology_inversions == 0,
             "each variable is chronologically ordered" if chronology_inversions == 0 else
             f"{chronology_inversions} within-variable chronology inversions",
             (asset_id,), {
@@ -309,13 +348,13 @@ def temporal_qc(
                 "examples": chronology_examples,
             },
         ),
-        QCResult(
-            "temporal.physical_range", "error", violation_count == 0,
+        _policy_result(
+            "temporal.physical_range", violation_count == 0,
             f"{violation_count} values outside declared physical ranges", (asset_id,),
             {"violation_count": violation_count, "violations": violations},
         ),
-        QCResult(
-            "temporal.provider_qualifiers", "warning", provisional_records == 0,
+        _policy_result(
+            "temporal.provider_qualifiers", provisional_records == 0,
             f"{provisional_records} records carry the USGS provisional qualifier",
             (asset_id,), {
                 "provisional_record_count": provisional_records,
@@ -323,8 +362,8 @@ def temporal_qc(
                 "interpretation": {"A": "approved", "P": "provisional"},
             },
         ),
-        QCResult(
-            "temporal.unit_compatibility", "error", not unit_mismatches,
+        _policy_result(
+            "temporal.unit_compatibility", not unit_mismatches,
             f"{len(unit_mismatches)} known variables have incompatible native units",
             (asset_id,), {
                 "mismatch_count": len(unit_mismatches), "mismatches": unit_mismatches,
@@ -333,8 +372,8 @@ def temporal_qc(
                 ),
             },
         ),
-        QCResult(
-            "temporal.expected_intervals", "warning",
+        _policy_result(
+            "temporal.expected_intervals",
             expected_delta is None or missing_intervals == 0,
             "native temporal resolution is not fixed" if expected_delta is None else
             f"{missing_intervals} expected internal intervals are missing",
@@ -346,8 +385,8 @@ def temporal_qc(
                 "gaps": gap_examples,
             },
         ),
-        QCResult(
-            "temporal.timestep_alignment", "warning",
+        _policy_result(
+            "temporal.timestep_alignment",
             expected_delta is None or misaligned_count == 0,
             "native temporal resolution is not fixed" if expected_delta is None else
             f"{misaligned_count} records are not aligned to the {temporal_resolution} UTC grid",
@@ -358,8 +397,8 @@ def temporal_qc(
                 "examples": misaligned,
             },
         ),
-        QCResult(
-            "temporal.study_period_coverage", "warning", not coverage_gaps,
+        _policy_result(
+            "temporal.study_period_coverage", not coverage_gaps,
             "study-period bounds were not supplied" if not (requested_start or requested_end)
             else (f"{len(coverage_gaps)} variable boundaries do not cover the study period"
                   if coverage_gaps else "all variables cover the requested study period"),
@@ -420,18 +459,18 @@ def harmonize_asset(
                       "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
-        "product_version": "1.2", "request_key": hashlib.sha256(
+        "product_version": "1.3", "request_key": hashlib.sha256(
             json.dumps({"parent": asset_id, **transformation}, sort_keys=True).encode()
         ).hexdigest(), "content_digest": stored.content_digest, "size": stored.size,
         "media_type": "text/csv", "processing_status": "derived",
         "parent_asset_ids": [asset_id], "native_units": units,
         "temporal_resolution": source.get("temporal_resolution", "native_support"),
-        "transformation_name": "native-to-utc-table", "transformation_version": "1.3",
+        "transformation_name": "native-to-utc-table", "transformation_version": "1.4",
         "transformation_parameters": transformation,
     })
     activity = ProvenanceActivity(
         activity_id="sha256:" + hashlib.sha256(f"{asset_id}:{output['asset_id']}".encode()).hexdigest(),
-        transformation_name="native-to-utc-table", transformation_version="1.3",
+        transformation_name="native-to-utc-table", transformation_version="1.4",
         parent_asset_ids=(asset_id,), output_asset_ids=(output["asset_id"],),
         parameters=transformation, software_version="GIStoOHQ-0.1.0",
         started_at=started, completed_at=completed,

@@ -124,10 +124,10 @@ def freeze_package(
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    sidecar_checksums = _sidecar_checksums(destination)
     package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
         destination, set(asset_ids)
     )
-    sidecar_checksums = _sidecar_checksums(destination)
     identity = {
         "site_spec_digest": spec.digest, "catalog_digest": catalog_digest,
         "included_asset_ids": asset_ids, "raw_inclusion": include_raw,
@@ -182,6 +182,12 @@ def validate_package(path: str | Path) -> PackageManifest:
     ids = tuple(sorted(asset["asset_id"] for asset in catalog["assets"]))
     if ids != tuple(manifest.included_asset_ids):
         raise WatershedDataError("package asset IDs do not match manifest")
+    actual_sidecar_checksums = _sidecar_checksums(root)
+    if actual_sidecar_checksums.keys() != manifest.sidecar_checksums.keys():
+        raise WatershedDataError("package sidecar inventory does not match manifest")
+    for relative, expected_digest in manifest.sidecar_checksums.items():
+        if actual_sidecar_checksums[relative] != expected_digest:
+            raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     actual_qc_status, actual_failed_rules, actual_qc_policies = _package_qc_summary(root, set(ids))
     summary_mismatch = manifest.package_qc_status != actual_qc_status
     if manifest.schema_version == "1.1":
@@ -201,12 +207,6 @@ def validate_package(path: str | Path) -> PackageManifest:
     expected_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
     if manifest.package_id != expected_id:
         raise WatershedDataError("package identity does not match manifest contents")
-    actual_sidecar_checksums = _sidecar_checksums(root)
-    if actual_sidecar_checksums.keys() != manifest.sidecar_checksums.keys():
-        raise WatershedDataError("package sidecar inventory does not match manifest")
-    for relative, expected_digest in manifest.sidecar_checksums.items():
-        if actual_sidecar_checksums[relative] != expected_digest:
-            raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     if manifest.self_contained:
         for asset in catalog["assets"]:
             digest = asset["content_digest"]
