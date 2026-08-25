@@ -60,6 +60,23 @@ TEMPORAL_QC_POLICY = {
 TEMPORAL_QC_POLICY_DIGEST = hashlib.sha256(canonical_json(TEMPORAL_QC_POLICY)).hexdigest()
 
 
+def _policy_result(
+    rule_id: str,
+    passed: bool,
+    message: str,
+    asset_ids: tuple[str, ...] = (),
+    details: dict[str, Any] | None = None,
+) -> QCResult:
+    return QCResult(
+        rule_id,
+        QC_RULE_SEVERITIES[rule_id],
+        passed,
+        message,
+        asset_ids,
+        details or {},
+    )
+
+
 def _utc(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -301,29 +318,29 @@ def temporal_qc(
                 "variable": variable, "actual_unit": actual, "allowed_units": sorted(allowed),
             })
     return [
-        QCResult("temporal.duplicate_timestamps", "error", duplicates == 0,
+        _policy_result("temporal.duplicate_timestamps", duplicates == 0,
                  f"{duplicates} duplicate timestamp-variable records", (asset_id,),
                  {"duplicate_count": duplicates, "examples": duplicate_examples}),
-        QCResult("temporal.missing_values", "warning", missing == 0,
+        _policy_result("temporal.missing_values", missing == 0,
                  f"{missing} missing values", (asset_id,), {
                      "missing_count": missing,
                      "completeness_by_variable": completeness_by_variable,
                      "examples": missing_examples,
                  }),
-        QCResult(
-            "temporal.variable_availability", "error", not unavailable_variables,
+        _policy_result(
+            "temporal.variable_availability", not unavailable_variables,
             f"{len(unavailable_variables)} variables contain no valid observations",
             (asset_id,), {"unavailable_variables": unavailable_variables},
         ),
-        QCResult(
-            "temporal.finite_values", "error", nonfinite_count == 0,
+        _policy_result(
+            "temporal.finite_values", nonfinite_count == 0,
             f"{nonfinite_count} non-finite numeric observations",
             (asset_id,), {
                 "nonfinite_count": nonfinite_count, "examples": nonfinite_examples,
             },
         ),
-        QCResult(
-            "temporal.chronology", "warning", chronology_inversions == 0,
+        _policy_result(
+            "temporal.chronology", chronology_inversions == 0,
             "each variable is chronologically ordered" if chronology_inversions == 0 else
             f"{chronology_inversions} within-variable chronology inversions",
             (asset_id,), {
@@ -331,13 +348,13 @@ def temporal_qc(
                 "examples": chronology_examples,
             },
         ),
-        QCResult(
-            "temporal.physical_range", "error", violation_count == 0,
+        _policy_result(
+            "temporal.physical_range", violation_count == 0,
             f"{violation_count} values outside declared physical ranges", (asset_id,),
             {"violation_count": violation_count, "violations": violations},
         ),
-        QCResult(
-            "temporal.provider_qualifiers", "warning", provisional_records == 0,
+        _policy_result(
+            "temporal.provider_qualifiers", provisional_records == 0,
             f"{provisional_records} records carry the USGS provisional qualifier",
             (asset_id,), {
                 "provisional_record_count": provisional_records,
@@ -345,8 +362,8 @@ def temporal_qc(
                 "interpretation": {"A": "approved", "P": "provisional"},
             },
         ),
-        QCResult(
-            "temporal.unit_compatibility", "error", not unit_mismatches,
+        _policy_result(
+            "temporal.unit_compatibility", not unit_mismatches,
             f"{len(unit_mismatches)} known variables have incompatible native units",
             (asset_id,), {
                 "mismatch_count": len(unit_mismatches), "mismatches": unit_mismatches,
@@ -355,8 +372,8 @@ def temporal_qc(
                 ),
             },
         ),
-        QCResult(
-            "temporal.expected_intervals", "warning",
+        _policy_result(
+            "temporal.expected_intervals",
             expected_delta is None or missing_intervals == 0,
             "native temporal resolution is not fixed" if expected_delta is None else
             f"{missing_intervals} expected internal intervals are missing",
@@ -368,8 +385,8 @@ def temporal_qc(
                 "gaps": gap_examples,
             },
         ),
-        QCResult(
-            "temporal.timestep_alignment", "warning",
+        _policy_result(
+            "temporal.timestep_alignment",
             expected_delta is None or misaligned_count == 0,
             "native temporal resolution is not fixed" if expected_delta is None else
             f"{misaligned_count} records are not aligned to the {temporal_resolution} UTC grid",
@@ -380,8 +397,8 @@ def temporal_qc(
                 "examples": misaligned,
             },
         ),
-        QCResult(
-            "temporal.study_period_coverage", "warning", not coverage_gaps,
+        _policy_result(
+            "temporal.study_period_coverage", not coverage_gaps,
             "study-period bounds were not supplied" if not (requested_start or requested_end)
             else (f"{len(coverage_gaps)} variable boundaries do not cover the study period"
                   if coverage_gaps else "all variables cover the requested study period"),

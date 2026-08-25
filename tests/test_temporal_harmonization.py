@@ -52,6 +52,9 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     assert TEMPORAL_QC_POLICY["study_period_end_tolerance"] == (
         "one_declared_fixed_interval"
     )
+    assert {
+        item["rule_id"]: item["severity"] for item in qc["results"]
+    } == TEMPORAL_QC_POLICY["rule_severities"]
     assert {item["rule_id"] for item in qc["results"]} == {
         "temporal.duplicate_timestamps", "temporal.missing_values", "temporal.chronology",
         "temporal.physical_range",
