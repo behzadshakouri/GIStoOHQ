@@ -12,6 +12,7 @@ from .temporal import harmonize_asset, temporal_qc
 from .status import build_data_status, write_data_status
 from .doctor import run_data_doctor
 from .schemas import (
+    HydroPINNExportManifest,
     PackageManifest,
     ProvenanceActivity,
     QCResult,
@@ -22,6 +23,7 @@ from .schemas import (
 
 __all__ = [
     "AssetCatalog",
+    "HydroPINNExportManifest",
     "ObjectStore",
     "PackageManifest",
     "ProvenanceActivity",
