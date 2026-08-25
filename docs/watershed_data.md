@@ -393,6 +393,8 @@ reports are parsed, ensuring validation never reads an external report first.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.
+Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data run`
+to reject both warning and `not_run` packages as well.
 Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.

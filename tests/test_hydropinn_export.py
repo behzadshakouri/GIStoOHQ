@@ -88,3 +88,16 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
     ):
         export_hydropinn(package=package, object_store=store.root, output=tmp_path / "hydropinn")
     assert not (tmp_path / "hydropinn").exists()
+
+    qc_report = json.loads((qc_dir / "failed.json").read_text())
+    qc_report["results"][0]["severity"] = "warning"
+    (qc_dir / "failed.json").write_text(json.dumps(qc_report))
+    freeze_package(site_spec=site, catalog=catalog.path, output=package)
+    with pytest.raises(WatershedDataError, match="requires passing package QC"):
+        export_hydropinn(
+            package=package,
+            object_store=store.root,
+            output=tmp_path / "strict-hydropinn",
+            require_qc_pass=True,
+        )
+    assert not (tmp_path / "strict-hydropinn").exists()
