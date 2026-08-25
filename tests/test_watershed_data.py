@@ -242,6 +242,7 @@ def test_package_manifest_aggregates_qc_results(tmp_path):
     }))
     with pytest.raises(WatershedDataError, match="stable dotted identifier"):
         freeze_package(site_spec=site, catalog=catalog.path, output=output)
+    assert not manifest_path.exists()
     qc.write_text(json.dumps({
         "schema_name": "QCReport", "schema_version": "1.0", "results": [{
             "rule_id": "temporal.missing_values", "severity": "warning", "passed": False,

@@ -395,6 +395,9 @@ under `quality_control/` and `provenance/`; undeclared additions are rejected. T
 trees cannot contain symbolic links, so a frozen package cannot validate sidecar
 content located outside its own directory. Link and inventory checks run before QC
 reports are parsed, ensuring validation never reads an external report first.
+Package refresh removes the old manifest before publication and atomically replaces
+the SiteSpec and each checksum-verified raw object, so an interrupted refresh cannot
+leave a stale manifest or a partially copied object that still appears valid.
 HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
 passing, and `not_run` packages remain exportable; callers receive the aggregate
 status in one-button pipeline results and can apply stricter policy if required.
@@ -404,6 +407,11 @@ option unless `--export-hydropinn` is also selected, rather than silently ignori
 the requested gate. HydroPINNExport 1.1 manifests record the source package QC
 status, failed rule IDs, policy digests, and the applied `reject_fail` or
 `require_pass` gate, making the export decision auditable after publication.
+The desktop/QGIS workflow command builder exposes the same pass-only choice for
+standalone and one-button exports, keeping graphical and terminal policies aligned.
+Exports are assembled in a temporary sibling directory and renamed into place only
+after all assets and manifests are complete. An existing destination is rejected,
+preventing partial failures or reruns from leaving stale observation files.
 Package manifests and one-button results list the stable IDs of every failed QC
 rule. Package validation recomputes both the aggregate status and this rule list
 from the checksummed sidecars, rejecting a stale or edited summary.

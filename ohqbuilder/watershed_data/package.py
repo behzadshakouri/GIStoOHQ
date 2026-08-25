@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,6 +123,8 @@ def freeze_package(
     asset_ids = tuple(sorted(asset["asset_id"] for asset in catalog_data["assets"]))
     destination = Path(output).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    # A failed refresh must never leave an older manifest claiming the new tree.
+    (destination / "manifest.json").unlink(missing_ok=True)
     sidecar_checksums = _sidecar_checksums(destination)
     package_qc_status, failed_qc_rule_ids, qc_policy_digests = _package_qc_summary(
         destination, set(asset_ids)
@@ -134,9 +135,12 @@ def freeze_package(
         "sidecar_checksums": sidecar_checksums,
     }
     package_id = "sha256:" + hashlib.sha256(canonical_json(identity)).hexdigest()
-    (destination / "site_spec.yaml").write_text(
+    site_spec_target = destination / "site_spec.yaml"
+    site_spec_temporary = site_spec_target.with_suffix(".yaml.tmp")
+    site_spec_temporary.write_text(
         yaml.safe_dump(spec.to_dict(), sort_keys=False), encoding="utf-8"
     )
+    site_spec_temporary.replace(site_spec_target)
     _atomic_json(destination / "catalog.json", catalog_data)
     if include_raw == "all":
         store = ObjectStore(object_store)
@@ -144,8 +148,16 @@ def freeze_package(
             digest = asset["content_digest"]
             target = destination / "raw" / "sha256" / digest[:2] / digest[2:]
             target.parent.mkdir(parents=True, exist_ok=True)
-            with store.open(digest) as source, target.open("wb") as sink:
-                shutil.copyfileobj(source, sink)
+            temporary = target.with_name(target.name + ".tmp")
+            copied_digest = hashlib.sha256()
+            with store.open(digest) as source, temporary.open("wb") as sink:
+                while chunk := source.read(1024 * 1024):
+                    sink.write(chunk)
+                    copied_digest.update(chunk)
+            if copied_digest.hexdigest() != digest:
+                temporary.unlink(missing_ok=True)
+                raise WatershedDataError(f"copied raw object failed checksum: {digest}")
+            temporary.replace(target)
     manifest = PackageManifest.from_dict({
         "schema_name": "PackageManifest", "schema_version": "1.1",
         "package_id": package_id, "site_id": spec.site_id, "site_spec_digest": spec.digest,

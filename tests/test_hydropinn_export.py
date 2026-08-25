@@ -49,6 +49,11 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     assert {item["name"] for item in variables["variables"]} == {"PRECTOTCORR", "T2M"}
     assert variables["variables"][0]["normalization"] is None
     assert (tmp_path / "hydropinn" / "observations" / "temporal_1.csv").is_file()
+    with pytest.raises(WatershedDataError, match="destination already exists"):
+        export_hydropinn(
+            package=package, object_store=store.root, output=tmp_path / "hydropinn",
+            require_qc_pass=True,
+        )
 
 
 def test_hydropinn_export_refuses_failed_package_qc(tmp_path):

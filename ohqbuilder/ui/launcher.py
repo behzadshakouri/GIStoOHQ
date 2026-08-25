@@ -308,6 +308,7 @@ def watershed_data_command(
     study_start: str = "",
     study_end: str = "",
     refresh: bool = False,
+    require_qc_pass: bool = False,
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -399,7 +400,8 @@ def watershed_data_command(
         return WorkflowCommand(
             "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
                                   "--package", package, "--object-store", cache,
-                                  "--output", hydropinn_output)
+                                  "--output", hydropinn_output,
+                                  *(("--require-qc-pass",) if require_qc_pass else ()))
         )
     if action == "run":
         if not station_id:
@@ -415,7 +417,9 @@ def watershed_data_command(
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
-                "--export-hydropinn", *(("--refresh",) if refresh else ()),
+                "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
+                *(("--refresh",) if refresh else ()),
                 *forecast_args, *bootstrap,
             ),
         )
@@ -432,6 +436,7 @@ def watershed_data_command(
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", "", "--workspace", workspace,
                 "--no-discharge", "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
                 *(("--refresh",) if refresh else ()), *forecast_args, *bootstrap,
             ),
         )

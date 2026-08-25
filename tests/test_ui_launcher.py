@@ -73,12 +73,17 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "export-hydropinn", site_spec="site.yaml", package="package",
         cache="cache", hydropinn_output="export",
     ).argv[-2:] == ("--output", "export")
+    assert watershed_data_command(
+        "export-hydropinn", site_spec="site.yaml", require_qc_pass=True,
+    ).argv[-1] == "--require-qc-pass"
     run = watershed_data_command(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,
         study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
+        require_qc_pass=True,
     )
     assert "--init-if-missing" in run.argv
+    assert "--require-qc-pass" in run.argv
     refreshed = watershed_data_command(
         "download-weather", site_spec="site.yaml", refresh=True
     )
