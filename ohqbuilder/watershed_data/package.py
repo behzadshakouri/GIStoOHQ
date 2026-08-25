@@ -132,6 +132,7 @@ def freeze_package(
             with store.open(digest) as source, target.open("wb") as sink:
                 shutil.copyfileobj(source, sink)
     manifest = PackageManifest.from_dict({
+        "schema_name": "PackageManifest", "schema_version": "1.1",
         "package_id": package_id, "site_id": spec.site_id, "site_spec_digest": spec.digest,
         "catalog_digest": catalog_digest, "included_asset_ids": asset_ids,
         "producer": "GIStoOHQ", "producer_version": producer_version,

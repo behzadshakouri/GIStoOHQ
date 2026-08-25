@@ -71,7 +71,7 @@ class SiteSpec:
     study_end: str
     target_timestep: str
     sources: dict[str, Any]
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SiteSpec":
@@ -222,10 +222,14 @@ class PackageManifest:
     failed_qc_rule_ids: tuple[str, ...] = ()
     qc_policy_digests: dict[str, str] = field(default_factory=dict)
     sidecar_checksums: dict[str, str] = field(default_factory=dict)
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PackageManifest":
+        if data.get("schema_name") != "PackageManifest" or data.get("schema_version") not in {
+            "1.0", "1.1",
+        }:
+            raise WatershedDataError("PackageManifest schema must be version 1.0 or 1.1")
         try:
             manifest = cls(
                 package_id=str(data["package_id"]), site_id=str(data["site_id"]),
@@ -240,7 +244,7 @@ class PackageManifest:
                 failed_qc_rule_ids=tuple(data.get("failed_qc_rule_ids", ())),
                 qc_policy_digests=dict(data.get("qc_policy_digests", {})),
                 sidecar_checksums=dict(data.get("sidecar_checksums", {})),
-                schema_version=str(data.get("schema_version", "1.0")),
+                schema_version=str(data["schema_version"]),
             )
         except (KeyError, TypeError) as exc:
             raise WatershedDataError(f"invalid PackageManifest: missing {exc}") from exc
