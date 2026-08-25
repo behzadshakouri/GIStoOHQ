@@ -19,6 +19,20 @@ class _PackageQCSummary:
     policy_digests: dict[str, str]
 
 
+def _qc_summary_matches_manifest(
+    manifest: PackageManifest, summary: _PackageQCSummary,
+) -> bool:
+    """Compare a manifest with the current, named QC summary contract."""
+    if manifest.package_qc_status != summary.status:
+        return False
+    if manifest.schema_version in {"1.1", "1.2"}:
+        return (
+            manifest.failed_qc_rule_ids == summary.failed_rule_ids
+            and manifest.qc_policy_digests == summary.policy_digests
+        )
+    return True
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -242,13 +256,7 @@ def validate_package(path: str | Path) -> PackageManifest:
             raise WatershedDataError(f"missing or corrupt package sidecar: {relative}")
     qc_summary = _package_qc_summary(root, set(ids))
     actual_validation_policies = _validation_policy_summary(catalog["assets"])
-    summary_mismatch = manifest.package_qc_status != qc_summary.status
-    if manifest.schema_version in {"1.1", "1.2"}:
-        summary_mismatch = summary_mismatch or (
-            manifest.failed_qc_rule_ids != qc_summary.failed_rule_ids
-            or manifest.qc_policy_digests != qc_summary.policy_digests
-        )
-    if summary_mismatch:
+    if not _qc_summary_matches_manifest(manifest, qc_summary):
         raise WatershedDataError("package QC summary does not match its sidecars")
     if (manifest.schema_version == "1.2"
             and manifest.validation_policy_digests != actual_validation_policies):
