@@ -308,6 +308,7 @@ def watershed_data_command(
     study_start: str = "",
     study_end: str = "",
     refresh: bool = False,
+    require_qc_pass: bool = False,
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -399,7 +400,8 @@ def watershed_data_command(
         return WorkflowCommand(
             "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
                                   "--package", package, "--object-store", cache,
-                                  "--output", hydropinn_output)
+                                  "--output", hydropinn_output,
+                                  *(("--require-qc-pass",) if require_qc_pass else ()))
         )
     if action == "run":
         if not station_id:
@@ -415,7 +417,9 @@ def watershed_data_command(
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
-                "--export-hydropinn", *(("--refresh",) if refresh else ()),
+                "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
+                *(("--refresh",) if refresh else ()),
                 *forecast_args, *bootstrap,
             ),
         )
@@ -432,6 +436,7 @@ def watershed_data_command(
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", "", "--workspace", workspace,
                 "--no-discharge", "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
                 *(("--refresh",) if refresh else ()), *forecast_args, *bootstrap,
             ),
         )
@@ -455,7 +460,7 @@ def watershed_data_command(
     if action == "status":
         return WorkflowCommand("Inspect Data Status", (
             "ohqbuild", "data", "status", "--catalog", catalog,
-            "--object-store", cache, "--output", status_output,
+            "--object-store", cache, "--output", status_output, "--package", package,
         ))
     if action == "doctor":
         return WorkflowCommand("Check Data Workspace", (
@@ -1904,6 +1909,11 @@ class LauncherApp:
             content, text="Refresh provider responses (ignore reusable cache)",
             variable=refresh_var,
         ).grid(row=len(variables) + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
+        require_qc_pass_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            content, text="Require passing package QC for HydroPINN export",
+            variable=require_qc_pass_var,
+        ).grid(row=len(variables) + 2, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
             if action == "use-recon-selection":
@@ -1945,6 +1955,7 @@ class LauncherApp:
                     study_start=variables["Study start (UTC)"].get(),
                     study_end=variables["Study end (UTC)"].get(),
                     refresh=refresh_var.get(),
+                    require_qc_pass=require_qc_pass_var.get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1972,7 +1983,7 @@ class LauncherApp:
             ("Check Data Workspace", "doctor"),
             ("Inspect Cache Garbage", "gc"),
         )
-        row = len(variables) + 2
+        row = len(variables) + 3
         action_frame = tk.LabelFrame(content, text="Actions")
         action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         for index, (label, action) in enumerate(actions):

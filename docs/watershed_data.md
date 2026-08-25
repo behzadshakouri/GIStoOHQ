@@ -219,6 +219,43 @@ ohqbuild data forecast-view --asset-id sha256:... \
 The view enforces `issue_time <= prediction_time`, preserves issue and valid
 times, and rejects inconsistent lead times. It never collapses forecasts to valid
 time alone.
+Forecast validation also rejects duplicate issue/valid/member/variable/location
+keys, empty dimensions or units, nonnumeric values, and NaN or infinite numbers
+before either native acquisition or prediction-time view publication.
+Prediction-time materialization also refuses an empty view when the requested
+cutoff precedes every forecast issue time, rather than publishing a zero-record
+derived asset that cannot drive a model.
+Derived forecast views normalize issue and valid timestamps to UTC and strip
+surrounding whitespace from dimension and unit labels; the transformation metadata
+records both operations.
+Each forecast variable must use one consistent normalized unit throughout an
+archive. The catalog summary records that variable-to-unit mapping for downstream
+profile checks.
+The strengthened archive contract uses product version `forecast-records-v2`, so
+responses cached under the earlier validation contract are not silently reused.
+Native catalog records also carry the `forecast-validation-v1` policy version and
+the SHA-256 digest of its complete required-field, numeric, timestamp, duplicate,
+dimension, lead-time, and unit rules. Request identity includes that digest, and
+derived forecast view 1.3 records the same fingerprint in transformation metadata,
+so a policy-content change cannot reuse a cached archive or derived view silently.
+Derived view catalog records repeat the filtered record count, variables, members,
+locations, units, and issue/valid coverage, so consumers need not inspect the CSV
+to determine whether a prediction-time view fits their profile.
+Per-variable record counts, member sets, and location sets preserve the relationship
+between forecast dimensions instead of exposing only archive-wide unions.
+View materialization revalidates the stored native document and reports malformed
+UTF-8 JSON or a non-array top level as watershed-data errors before filtering.
+Provider-specific extension fields remain valid native metadata and are ignored by
+the generic derived CSV writer. Provider and product identities are validated
+before any network request.
+Forecast dimensions and units must be non-empty JSON strings; nulls and other types
+are not stringified implicitly. Lead times and values must be JSON numbers; numeric
+strings and booleans are rejected instead of being coerced.
+Derived rows are sorted by every forecast key dimension, making view content
+digests independent of provider record order.
+Lead times and values are normalized to floating-point CSV text, so equivalent JSON
+integer and floating-point representations produce the same derived content. This
+normalization is recorded in version 1.2 transformation metadata.
 
 ## Inspect downloaded and derived assets
 
@@ -231,6 +268,11 @@ This writes `status.json` and `status.md` with every asset ID, provider, product
 native/derived status, parent IDs, coverage, record counts, and object-store
 availability. Use **Inspect Data Status** in either graphical dialog to obtain the
 same report instead of copying opaque IDs directly from console output.
+Forecast entries in `status.json` include issue/valid coverage, prediction time,
+variables, and the per-variable member, location, unit, and record-count summaries
+carried by the catalog.
+When forecasts are present, `status.md` adds a forecast-support table with issue and
+valid coverage, prediction-time cutoffs, and variables for quick human review.
 
 Before a long run or export, validate the local workspace without contacting a
 provider:
@@ -315,6 +357,106 @@ set it only after checking every provider license.
 QC and provenance JSON sidecars are listed in the package manifest with SHA-256
 checksums and contribute to package identity. Validation rejects missing or changed
 sidecars, including edits made after a package was frozen.
+Temporal QC also compares each variable's first and last non-missing observation
+with the SiteSpec study period during a one-button pipeline run. An incomplete
+leading or trailing window is reported separately from gaps inside a
+fixed-resolution series; daily products receive one daily interval of end-boundary
+tolerance. Fixed-resolution products are also checked for timestamps that fall
+off their declared hourly or daily UTC grid. Missing-value QC includes per-variable
+record, valid, and missing counts and a bounded sample of affected timestamps.
+Duplicate timestamp-variable records likewise include bounded examples for direct
+diagnosis without making large QC reports grow without limit. Chronology is
+evaluated within each variable, so provider grouping of otherwise ordered series
+does not produce a false warning; actual inversions include bounded examples.
+Internal gap QC reports missing interval totals by variable as well as bounded gap
+examples, making a multi-variable product's incomplete series directly identifiable.
+A variable containing no valid observations is an error rather than ordinary
+missingness, preventing an entirely empty forcing or target series from passing as
+a warning-only package.
+NaN and infinite numeric observations are rejected explicitly instead of escaping
+ordinary physical-range comparisons or being written as usable model inputs.
+Temporal QC reports declare policy version `temporal-qc-v4`. Published harmonized
+assets record that policy in transformation metadata, so future rule, severity,
+range, unit, interval, tolerance, or example-limit changes cannot silently reuse an
+asset admitted under an older policy. Reports and derived assets also record the
+SHA-256 digest of the complete canonical policy document, distinguishing exact
+policy content even if a version label is accidentally reused. QC results obtain
+their severities directly from that policy document, preventing report behavior
+from drifting away from the fingerprinted severity map.
+Policy v4 accepts the native NASA POWER labels observed from the provider:
+`mm/day` for `PRECTOTCORR` and `MJ/hr` for `ALLSKY_SFC_SW_DWN`, alongside the
+previous `mm/hour` and `kW-hr/m^2` labels. These are preserved as native units; the
+harmonizer does not claim a numerical unit conversion.
+NASA POWER `EVPTRNS` is likewise accepted as either `MJ/m^2/day` or `mm/day`.
+The energy-flux label is preserved exactly and is not silently converted into water
+depth; downstream profiles can therefore choose and document an explicit conversion.
+Package freezing treats policy metadata as an all-or-nothing pair and validates the
+digest as lowercase SHA-256, preventing incomplete policy claims in QC sidecars.
+Package manifests and one-button results aggregate policy versions to their exact
+digests. Reusing one version label with conflicting digests is rejected.
+New packages use PackageManifest 1.2 for QC and input-validation policy summaries.
+Validation accepts legacy 1.0 and 1.1 manifests, recomputes summaries not stored by
+those contracts, and rejects unknown schema names or versions. Forecast validation
+policy digests are aggregated from catalog assets and checked for conflicts. Validation
+also requires the checksummed sidecar inventory to exactly match every JSON report
+under `quality_control/` and `provenance/`; undeclared additions are rejected. Those
+trees cannot contain symbolic links, so a frozen package cannot validate sidecar
+content located outside its own directory. Link and inventory checks run before QC
+reports are parsed, ensuring validation never reads an external report first.
+Package refresh removes the old manifest before publication and atomically replaces
+the SiteSpec and each checksum-verified raw object, so an interrupted refresh cannot
+leave a stale manifest or a partially copied object that still appears valid.
+Package validation, sidecar inventory, and HydroPINN export checksum files in bounded
+chunks, avoiding whole-file memory growth for long temporal series or packaged raw
+objects.
+HydroPINN export refuses a package whose aggregated QC status is `fail`. Warning,
+passing, and `not_run` packages remain exportable; callers receive the aggregate
+status in one-button pipeline results and can apply stricter policy if required.
+Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data run`
+to reject both warning and `not_run` packages as well. A pipeline run rejects this
+option unless `--export-hydropinn` is also selected, rather than silently ignoring
+the requested gate. HydroPINNExport 1.1 manifests record the source package QC
+status, failed rule IDs, policy digests, and the applied `reject_fail` or
+`require_pass` gate, making the export decision auditable after publication.
+The HydroPINNExport 1.1 schema validates QC enums, sorted failed-rule IDs, policy
+and asset checksums, source package IDs, required strings, unique omitted-operation
+labels, and safe relative asset paths before publishing the manifest. Manifest
+policy/checksum validation rejects non-string JSON values with domain errors rather
+than leaking implementation type errors.
+Package and HydroPINN manifests also require canonical SHA-256 package, catalog,
+SiteSpec, and asset identities; package asset lists must be sorted and unique.
+The desktop/QGIS workflow command builder exposes the same pass-only choice for
+standalone and one-button exports, keeping graphical and terminal policies aligned.
+The standalone watershed-data dialog provides a **Require passing package QC for
+HydroPINN export** checkbox and forwards its value to every export action.
+Exports are assembled in a temporary sibling directory and renamed into place only
+after all assets and manifests are complete. An existing destination is rejected,
+preventing partial failures or reruns from leaving stale observation files.
+Package manifests and one-button results list the stable IDs of every failed QC
+rule. Package validation recomputes both the aggregate status and this rule list
+from the checksummed sidecars, rejecting a stale or edited summary.
+`data status --package PATH` validates that package and publishes its package ID,
+aggregate QC status, failed rule IDs, and policy digests in WatershedDataStatus 1.1
+JSON; the Markdown report includes the package QC summary for operators. Status
+generation rejects a separately supplied catalog whose digest does not match the
+validated package, preventing one package's QC summary from labeling another
+catalog's assets.
+`data doctor` applies the same binding to both the supplied SiteSpec and catalog and
+reports a failing `package_inputs` check when either digest differs. Object-store
+verification hashes large objects incrementally rather than loading them wholly in
+memory.
+Package freezing validates every QC result, including successful results, against
+the QCReport 1.0 contract and requires stable dotted rule identifiers, a non-empty
+message, an asset-ID array, and an object-valued details payload.
+Every asset ID named by a QC result must exist in the frozen package catalog;
+package-level rules may use an empty asset-ID array.
+QC aggregation recursively includes JSON reports under `quality_control/`, allowing
+provider or asset subdirectories without omitting their failures from the manifest.
+Workspace doctor and refused HydroPINN export messages include failed rule IDs, so
+users can move directly from a gate failure to the relevant QC sidecar result.
+One-button pipeline harmonization also stops before publishing a derived asset when
+an error-level temporal rule fails. Its QC sidecar remains available for diagnosis,
+but no provenance activity or ordinary derived catalog record is created.
 
 ## Graphical interfaces
 
