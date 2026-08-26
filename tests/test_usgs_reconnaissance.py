@@ -10,7 +10,9 @@ from ohqbuilder.watershed_data.reconnaissance import (
     run_reconnaissance, selected_station_from_report,
 )
 from ohqbuilder.watershed_data.schemas import SiteSpec, WatershedDataError
-from ohqbuilder.watershed_data.usgs import build_site_query, parse_site_rdb
+from ohqbuilder.watershed_data.usgs import (
+    build_series_catalog_query, build_site_query, discover_gauges, parse_site_rdb,
+)
 
 
 def _spec():
@@ -24,13 +26,28 @@ def _spec():
     })
 
 
+class _Response:
+    def __init__(self, body: bytes):
+        self.body = body
+        self.headers = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def read(self):
+        return self.body
+
+
 def test_usgs_site_query_and_rdb_parsing_are_deterministic():
     spec = _spec()
     url = build_site_query(spec, 25)
     assert url.startswith("https://waterservices.usgs.gov/nwis/site/")
     assert "parameterCd=00060" in url
     query = parse_qs(urlparse(url).query)
-    assert query["seriesCatalogOutput"] == ["true"]
+    assert "seriesCatalogOutput" not in query
     coordinates = query["bBox"][0].split(",")
     assert len(coordinates) == 4
     assert all(len(value.partition(".")[2]) == 6 for value in coordinates)
@@ -45,6 +62,16 @@ def test_usgs_site_query_rejects_invalid_radius():
         build_site_query(_spec(), 0)
 
 
+def test_usgs_series_catalog_query_is_bounded_and_uses_station_ids():
+    url = build_series_catalog_query(["01649500", "01651000"])
+    query = parse_qs(urlparse(url).query)
+
+    assert query["seriesCatalogOutput"] == ["true"]
+    assert query["sites"] == ["01649500,01651000"]
+    with pytest.raises(WatershedDataError, match="1-25"):
+        build_series_catalog_query([])
+
+
 def test_usgs_series_catalog_rows_are_merged_per_station():
     fixture = Path("tests/fixtures/usgs_sites.rdb").read_text()
     duplicate = fixture.splitlines()[3].replace("1938-10-01", "2001-01-01")
@@ -53,6 +80,23 @@ def test_usgs_series_catalog_rows_are_merged_per_station():
     assert [candidate.station_id for candidate in candidates].count("01649500") == 1
     merged = next(candidate for candidate in candidates if candidate.station_id == "01649500")
     assert merged.record_start == "1938-10-01"
+
+
+def test_usgs_discovery_fetches_coverage_for_nearest_candidates():
+    full = Path("tests/fixtures/usgs_sites.rdb").read_bytes()
+    calls = []
+
+    def opener(url, **kwargs):
+        calls.append(url)
+        return _Response(full)
+
+    query_url, candidates = discover_gauges(_spec(), radius_km=25, opener=opener)
+
+    assert len(calls) == 2
+    assert "bBox=" in calls[0]
+    assert "seriesCatalogOutput=true" in calls[1]
+    assert query_url == calls[0]
+    assert candidates[0].record_start == "1938-10-01"
 
 
 def test_reconnaissance_writes_json_and_markdown_and_selects_clear_best(tmp_path):

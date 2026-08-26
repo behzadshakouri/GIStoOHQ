@@ -6,7 +6,7 @@ import json
 import math
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +17,7 @@ from .schemas import canonical_request_key
 
 USGS_SITE_SERVICE = "https://waterservices.usgs.gov/nwis/site/"
 USGS_INSTANTANEOUS_VALUES_SERVICE = "https://waterservices.usgs.gov/nwis/iv/"
+USGS_SERIES_CATALOG_LIMIT = 25
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,21 @@ def build_site_query(spec: SiteSpec, radius_km: float) -> str:
         "format": "rdb", "bBox": _bounding_box(spec, radius_km),
         "parameterCd": "00060", "siteStatus": "all", "siteOutput": "expanded",
         "seriesCatalogOutput": "true",
+    }
+    return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
+
+
+def build_series_catalog_query(station_ids: list[str]) -> str:
+    """Build a bounded follow-up query for station record coverage metadata."""
+    if not station_ids or len(station_ids) > USGS_SERIES_CATALOG_LIMIT:
+        raise WatershedDataError(
+            f"USGS series catalog query requires 1-{USGS_SERIES_CATALOG_LIMIT} stations"
+        )
+    if any(not station_id.isdigit() for station_id in station_ids):
+        raise WatershedDataError("USGS station IDs must contain digits only")
+    parameters = {
+        "format": "rdb", "sites": ",".join(station_ids), "parameterCd": "00060",
+        "siteStatus": "all", "seriesCatalogOutput": "true",
     }
     return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
 
@@ -128,8 +144,35 @@ def discover_gauges(
     raw, _, _ = download_bytes(
         url, opener=opener, timeout=60.0, label="USGS gauge discovery"
     )
-    text = raw.decode("utf-8")
-    return url, parse_site_rdb(text, spec)
+    candidates = parse_site_rdb(raw.decode("utf-8"), spec)
+    nearest_ids = [
+        candidate.station_id for candidate in candidates[:USGS_SERIES_CATALOG_LIMIT]
+    ]
+    if not nearest_ids:
+        return url, candidates
+    coverage_url = build_series_catalog_query(nearest_ids)
+    coverage_raw, _, _ = download_bytes(
+        coverage_url, opener=opener, timeout=60.0, label="USGS gauge record coverage"
+    )
+    coverage = {
+        candidate.station_id: candidate
+        for candidate in parse_site_rdb(coverage_raw.decode("utf-8"), spec)
+    }
+    enriched = [
+        replace(
+            candidate,
+            drainage_area_km2=(
+                candidate.drainage_area_km2
+                if candidate.drainage_area_km2 is not None
+                else coverage[candidate.station_id].drainage_area_km2
+            ),
+            record_start=coverage[candidate.station_id].record_start,
+            record_end=coverage[candidate.station_id].record_end,
+            status=coverage[candidate.station_id].status,
+        ) if candidate.station_id in coverage else candidate
+        for candidate in candidates
+    ]
+    return url, enriched
 
 
 def build_discharge_query(spec: SiteSpec, station_id: str) -> tuple[str, dict[str, str]]:
