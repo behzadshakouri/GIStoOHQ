@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import yaml
 
+from ohqbuilder.dem_acquisition import DemAcquisitionError, read_outlet_point
 from ohqbuilder.watershed_data.reconnaissance import selected_station_from_report
 from ohqbuilder.watershed_data.schemas import WatershedDataError
 
@@ -66,6 +67,40 @@ SLIGO_DEMO_LAT = 38.9700
 SLIGO_DEMO_CRS = "EPSG:26918"
 SLIGO_DEMO_FLOWLINES = Path("hydro/NHDFlowline.demo.geojson")
 SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
+
+WATERSHED_DATA_EXAMPLES = {
+    "Sligo Creek demo": {
+        "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
+        "longitude": "-77.0000", "latitude": "38.9700",
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    },
+    "John McCormack demo": {
+        "site_id": "johnmccormack3600", "name": "John McCormack 3600",
+        "longitude": "-76.99597205373109", "latitude": "38.93589535566567",
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    },
+    "Generic watershed example": {
+        "site_id": "example_watershed", "name": "Example Watershed",
+        "longitude": "-76.98", "latitude": "38.92",
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    },
+}
+
+
+def watershed_data_example_for_site(site_name: str) -> dict[str, str] | None:
+    """Return bundled smoke-test data defaults matching a project site name."""
+    normalized = "".join(character for character in site_name.lower() if character.isalnum())
+    for example in WATERSHED_DATA_EXAMPLES.values():
+        candidates = (example["site_id"], example["name"])
+        if normalized in {
+            "".join(character for character in value.lower() if character.isalnum())
+            for value in candidates
+        }:
+            return dict(example)
+    return None
 
 
 def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
@@ -308,6 +343,7 @@ def watershed_data_command(
     study_start: str = "",
     study_end: str = "",
     refresh: bool = False,
+    require_qc_pass: bool = False,
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
@@ -399,13 +435,16 @@ def watershed_data_command(
         return WorkflowCommand(
             "Export HydroPINN", ("ohqbuild", "data", "export-hydropinn",
                                   "--package", package, "--object-store", cache,
-                                  "--output", hydropinn_output)
+                                  "--output", hydropinn_output,
+                                  *(("--require-qc-pass",) if require_qc_pass else ()))
         )
     if action == "run":
         if not station_id:
             raise LauncherError("Select an explicit USGS station ID before running all data steps.")
-        bootstrap = _watershed_data_bootstrap_args(
-            site_id, name, longitude, latitude, study_start, study_end
+        bootstrap = () if Path(site_spec).expanduser().is_file() else (
+            _watershed_data_bootstrap_args(
+                site_id, name, longitude, latitude, study_start, study_end
+            )
         )
         forecast_args = _watershed_data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
@@ -415,13 +454,17 @@ def watershed_data_command(
             (
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", station_id, "--workspace", workspace,
-                "--export-hydropinn", *(("--refresh",) if refresh else ()),
+                "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
+                *(("--refresh",) if refresh else ()),
                 *forecast_args, *bootstrap,
             ),
         )
     if action == "run-weather":
-        bootstrap = _watershed_data_bootstrap_args(
-            site_id, name, longitude, latitude, study_start, study_end
+        bootstrap = () if Path(site_spec).expanduser().is_file() else (
+            _watershed_data_bootstrap_args(
+                site_id, name, longitude, latitude, study_start, study_end
+            )
         )
         forecast_args = _watershed_data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
@@ -432,6 +475,7 @@ def watershed_data_command(
                 "ohqbuild", "data", "run", "--site-spec", site_spec,
                 "--station-id", "", "--workspace", workspace,
                 "--no-discharge", "--export-hydropinn",
+                *(("--require-qc-pass",) if require_qc_pass else ()),
                 *(("--refresh",) if refresh else ()), *forecast_args, *bootstrap,
             ),
         )
@@ -455,7 +499,7 @@ def watershed_data_command(
     if action == "status":
         return WorkflowCommand("Inspect Data Status", (
             "ohqbuild", "data", "status", "--catalog", catalog,
-            "--object-store", cache, "--output", status_output,
+            "--object-store", cache, "--output", status_output, "--package", package,
         ))
     if action == "doctor":
         return WorkflowCommand("Check Data Workspace", (
@@ -1830,7 +1874,7 @@ class LauncherApp:
         dialog = tk.Toplevel(self.root)
         dialog.title("Optional Watershed Data")
         dialog.transient(self.root)
-        dialog.geometry("760x700")
+        dialog.geometry("700x620")
         canvas = tk.Canvas(dialog, highlightthickness=0)
         scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -1854,18 +1898,43 @@ class LauncherApp:
         period = data_config.get("study_period", {})
         if not isinstance(period, dict):
             period = {}
+        outlet_longitude = self.lon_var.get()
+        outlet_latitude = self.lat_var.get()
+        if not outlet_longitude or not outlet_latitude:
+            try:
+                project_state = state_from_config(config_path, project_config)
+                if project_state.outlet_source:
+                    derived_longitude, derived_latitude = read_outlet_point(
+                        project_state.outlet_source
+                    )
+                    outlet_longitude = str(derived_longitude)
+                    outlet_latitude = str(derived_latitude)
+            except (DemAcquisitionError, OSError, ValueError):
+                pass
         site_name = self.site_var.get().strip() or "watershed"
         site_id = Path(site_name).name.replace(" ", "_").lower()
+        example_defaults = watershed_data_example_for_site(site_name)
+        if example_defaults is not None:
+            outlet_longitude = outlet_longitude or example_defaults["longitude"]
+            outlet_latitude = outlet_latitude or example_defaults["latitude"]
         site_spec_default = project_dir / "sites" / f"{site_id}.yaml"
         workspace_default = project_dir / "outputs" / f"{site_id}_data"
         variables = {
             "SiteSpec": tk.StringVar(value=str(site_spec_default)),
             "Site ID": tk.StringVar(value=site_id),
             "Name": tk.StringVar(value=Path(site_name).name),
-            "Outlet longitude": tk.StringVar(value=self.lon_var.get()),
-            "Outlet latitude": tk.StringVar(value=self.lat_var.get()),
-            "Study start (UTC)": tk.StringVar(value=str(period.get("start") or "")),
-            "Study end (UTC)": tk.StringVar(value=str(period.get("end") or "")),
+            "Outlet longitude": tk.StringVar(value=outlet_longitude),
+            "Outlet latitude": tk.StringVar(value=outlet_latitude),
+            "Study start (UTC)": tk.StringVar(
+                value=str(period.get("start") or (
+                    example_defaults["study_start"] if example_defaults else ""
+                ))
+            ),
+            "Study end (UTC)": tk.StringVar(
+                value=str(period.get("end") or (
+                    example_defaults["study_end"] if example_defaults else ""
+                ))
+            ),
             "Reconnaissance output": tk.StringVar(value=str(workspace_default / "reconnaissance")),
             "Gauge radius (km)": tk.StringVar(value="50"),
             "Selected USGS station ID": tk.StringVar(value=""),
@@ -1894,16 +1963,153 @@ class LauncherApp:
             content,
             text="Optional watershed observations; Full Run to OHQ remains unchanged.",
         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=8)
-        for index, (label, variable) in enumerate(variables.items(), start=1):
+        example_var = tk.StringVar(
+            value=next(
+                (label for label, value in WATERSHED_DATA_EXAMPLES.items()
+                 if example_defaults == value),
+                "Choose an example…",
+            )
+        )
+
+        def apply_example() -> None:
+            selected = WATERSHED_DATA_EXAMPLES.get(example_var.get())
+            if selected is None:
+                return
+            selected_workspace = project_dir / "outputs" / f"{selected['site_id']}_data"
+            variables["Site ID"].set(selected["site_id"])
+            variables["Name"].set(selected["name"])
+            variables["Outlet longitude"].set(selected["longitude"])
+            variables["Outlet latitude"].set(selected["latitude"])
+            variables["Study start (UTC)"].set(selected["study_start"])
+            variables["Study end (UTC)"].set(selected["study_end"])
+            variables["Selected USGS station ID"].set("")
+            variables["SiteSpec"].set(
+                str(project_dir / "sites" / f"{selected['site_id']}.yaml")
+            )
+            variables["Reconnaissance output"].set(
+                str(selected_workspace / "reconnaissance")
+            )
+            variables["Cache"].set(str(selected_workspace / "cache"))
+            variables["Catalog"].set(
+                str(selected_workspace / "watershed_package/catalog.json")
+            )
+            variables["QC output"].set(
+                str(selected_workspace / "watershed_package/quality_control/temporal.json")
+            )
+            variables["Provenance output"].set(
+                str(selected_workspace / "watershed_package/provenance/temporal.json")
+            )
+            variables["Package"].set(str(selected_workspace / "watershed_package"))
+            variables["HydroPINN output"].set(str(selected_workspace / "hydropinn"))
+            variables["All-data workspace"].set(str(selected_workspace))
+            variables["Status output"].set(
+                str(selected_workspace / "watershed_package/status")
+            )
+            self.messages.put(
+                f"Loaded {example_var.get()} smoke-test defaults; discover and review a gauge.\n"
+            )
+
+        example_frame = tk.Frame(content)
+        example_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 6))
+        tk.Label(example_frame, text="Example watershed").pack(side="left")
+        tk.OptionMenu(
+            example_frame, example_var, "Choose an example…", *WATERSHED_DATA_EXAMPLES
+        ).pack(side="left", padx=5)
+        tk.Button(example_frame, text="Load example", command=apply_example).pack(side="left")
+        primary_labels = (
+            "Site ID", "Name", "Outlet longitude", "Outlet latitude",
+            "Study start (UTC)", "Study end (UTC)", "Gauge radius (km)",
+            "Selected USGS station ID", "Weather variables", "Native asset ID",
+        )
+        advanced_labels = tuple(label for label in variables if label not in primary_labels)
+        for index, label in enumerate(primary_labels, start=2):
+            variable = variables[label]
             tk.Label(content, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
-            tk.Entry(content, textvariable=variable, width=52).grid(
+            tk.Entry(content, textvariable=variable, width=42).grid(
                 row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
             )
+
+        def configure_advanced() -> None:
+            advanced = tk.Toplevel(dialog)
+            advanced.title("Watershed Data Paths and Forecast Settings")
+            advanced.transient(dialog)
+            advanced.geometry("720x520")
+            advanced_canvas = tk.Canvas(advanced, highlightthickness=0)
+            advanced_scrollbar = tk.Scrollbar(
+                advanced, orient="vertical", command=advanced_canvas.yview
+            )
+            advanced_canvas.configure(yscrollcommand=advanced_scrollbar.set)
+            advanced_scrollbar.pack(side="right", fill="y")
+            advanced_canvas.pack(side="left", fill="both", expand=True)
+            advanced_content = tk.Frame(advanced_canvas)
+            advanced_window = advanced_canvas.create_window(
+                (0, 0), window=advanced_content, anchor="nw"
+            )
+            advanced_content.bind(
+                "<Configure>",
+                lambda event: advanced_canvas.configure(
+                    scrollregion=advanced_canvas.bbox("all")
+                ),
+            )
+            advanced_canvas.bind(
+                "<Configure>",
+                lambda event: advanced_canvas.itemconfigure(
+                    advanced_window, width=event.width
+                ),
+            )
+            tk.Label(
+                advanced_content,
+                text=(
+                    "Generated file locations normally need no changes. "
+                    "Forecast settings are optional."
+                ),
+                justify="left",
+            ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=8)
+            for row_index, label in enumerate(advanced_labels, start=1):
+                tk.Label(advanced_content, text=label).grid(
+                    row=row_index, column=0, sticky="w", padx=10, pady=2
+                )
+                tk.Entry(
+                    advanced_content, textvariable=variables[label], width=54
+                ).grid(row=row_index, column=1, sticky="ew", padx=5, pady=2)
+            advanced_actions = tk.LabelFrame(advanced_content, text="Optional advanced actions")
+            advanced_actions.grid(
+                row=len(advanced_labels) + 1, column=0, columnspan=2,
+                sticky="ew", padx=10, pady=8,
+            )
+            tk.Button(
+                advanced_actions, text="Harmonize asset + QC",
+                command=lambda: run("harmonize"),
+            ).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+            tk.Button(
+                advanced_actions, text="Download Forecast Archive",
+                command=lambda: run("download-forecast"),
+            ).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            tk.Button(
+                advanced_actions, text="Create Forecast View",
+                command=lambda: run("forecast-view"),
+            ).grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+            for column in range(3):
+                advanced_actions.columnconfigure(column, weight=1)
+            tk.Button(advanced_content, text="Done", command=advanced.destroy).grid(
+                row=len(advanced_labels) + 2, column=1, sticky="e", padx=10, pady=10
+            )
+            advanced_content.columnconfigure(1, weight=1)
+
+        form_end_row = len(primary_labels) + 2
+        tk.Button(
+            content, text="Paths and forecast settings…", command=configure_advanced
+        ).grid(row=form_end_row, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
         refresh_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             content, text="Refresh provider responses (ignore reusable cache)",
             variable=refresh_var,
-        ).grid(row=len(variables) + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
+        ).grid(row=form_end_row + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
+        require_qc_pass_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            content, text="Require passing package QC for HydroPINN export",
+            variable=require_qc_pass_var,
+        ).grid(row=form_end_row + 2, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
             if action == "use-recon-selection":
@@ -1916,6 +2122,25 @@ class LauncherApp:
                     return
                 variables["Selected USGS station ID"].set(station)
                 self.messages.put(f"Selected USGS station from reconnaissance: {station}\n")
+                return
+            site_path = Path(variables["SiteSpec"].get()).expanduser()
+            actions_requiring_site = {
+                "validate-site", "reconnaissance", "download-discharge",
+                "download-weather", "download-pet", "freeze", "doctor",
+            }
+            if action in actions_requiring_site and not site_path.is_file():
+                self.messages.put(
+                    "ERROR: SiteSpec does not exist. Enter the site fields and click "
+                    "Create SiteSpec first.\n"
+                )
+                return
+            manifest_path = Path(variables["Package"].get()).expanduser() / "manifest.json"
+            if action in {"validate-package", "export-hydropinn", "status"} \
+                    and not manifest_path.is_file():
+                self.messages.put(
+                    "ERROR: The watershed package has not been created. Run all data steps "
+                    "or click Freeze Package first.\n"
+                )
                 return
             try:
                 command = watershed_data_command(
@@ -1945,6 +2170,7 @@ class LauncherApp:
                     study_start=variables["Study start (UTC)"].get(),
                     study_end=variables["Study end (UTC)"].get(),
                     refresh=refresh_var.get(),
+                    require_qc_pass=require_qc_pass_var.get(),
                 )
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
@@ -1959,20 +2185,17 @@ class LauncherApp:
             ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
-            ("Harmonize + QC", "harmonize"),
             ("Download PET/ET", "download-pet"),
             ("Freeze Package", "freeze"),
             ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
             ("RUN WEATHER/PET TO EXPORT", "run-weather"),
-            ("Download Forecast Archive", "download-forecast"),
-            ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
             ("Inspect Cache Garbage", "gc"),
         )
-        row = len(variables) + 2
+        row = form_end_row + 3
         action_frame = tk.LabelFrame(content, text="Actions")
         action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         for index, (label, action) in enumerate(actions):
