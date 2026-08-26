@@ -31,6 +31,20 @@ def test_data_doctor_validates_site_catalog_and_object_integrity(tmp_path):
     assert report["checks"][-1]["passed"] is False
 
 
+def test_data_doctor_reports_missing_catalog_without_crashing(tmp_path):
+    site = write_site_spec(
+        tmp_path / "site.yaml", site_id="test", name="Test", longitude=-77, latitude=39,
+        start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+    )
+
+    report = run_data_doctor(site_spec=site, catalog=tmp_path / "missing-catalog.json")
+
+    assert report["passed"] is False
+    assert report["checks"][-1]["name"] == "catalog"
+    assert report["checks"][-1]["passed"] is False
+    assert "does not exist" in report["checks"][-1]["message"]
+
+
 def test_data_doctor_fails_a_package_with_error_level_qc(tmp_path):
     site = write_site_spec(
         tmp_path / "site.yaml", site_id="test", name="Test", longitude=-77, latitude=39,

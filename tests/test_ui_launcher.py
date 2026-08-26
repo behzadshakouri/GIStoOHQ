@@ -132,11 +132,29 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.title("Optional Watershed Data")' in source
     assert "Download Selected Discharge" in source
     assert "Download Weather" in source
-    assert 'dialog.geometry("760x700")' in source
+    assert 'dialog.geometry("700x620")' in source
+    assert 'text="Paths and forecast settings…"' in source
+    assert 'advanced.title("Watershed Data Paths and Forecast Settings")' in source
+    assert 'text="Optional forecast actions"' in source
+    assert "SiteSpec does not exist. Enter the site fields" in source
+    assert "The watershed package has not been created" in source
+    assert "read_outlet_point" in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
     assert "Use Reconnaissance Selection" in source
     assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
+
+
+def test_existing_site_spec_does_not_require_bootstrap_fields_for_one_button_run(tmp_path):
+    site = tmp_path / "site.yaml"
+    site.write_text("existing", encoding="utf-8")
+
+    command = watershed_data_command(
+        "run", site_spec=str(site), station_id="01649500", workspace="run"
+    )
+
+    assert "--init-if-missing" not in command.argv
+    assert "--site-id" not in command.argv
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

@@ -30,8 +30,13 @@ def run_data_doctor(
 
     if catalog is not None:
         try:
-            data = AssetCatalog(catalog).read()
-            catalog_digest = data["catalog_digest"]
+            catalog_path = Path(catalog).expanduser().resolve()
+            if not catalog_path.is_file():
+                raise WatershedDataError(f"asset catalog does not exist: {catalog_path}")
+            data = AssetCatalog(catalog_path).read()
+            catalog_digest = data.get("catalog_digest")
+            if not isinstance(catalog_digest, str):
+                raise WatershedDataError("asset catalog is missing catalog_digest")
             record("catalog", True, f"catalog contains {len(data['assets'])} assets")
             if object_store is not None:
                 store = ObjectStore(object_store)

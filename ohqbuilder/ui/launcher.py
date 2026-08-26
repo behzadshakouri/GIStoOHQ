@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import yaml
 
+from ohqbuilder.dem_acquisition import DemAcquisitionError, read_outlet_point
 from ohqbuilder.watershed_data.reconnaissance import selected_station_from_report
 from ohqbuilder.watershed_data.schemas import WatershedDataError
 
@@ -406,8 +407,10 @@ def watershed_data_command(
     if action == "run":
         if not station_id:
             raise LauncherError("Select an explicit USGS station ID before running all data steps.")
-        bootstrap = _watershed_data_bootstrap_args(
-            site_id, name, longitude, latitude, study_start, study_end
+        bootstrap = () if Path(site_spec).expanduser().is_file() else (
+            _watershed_data_bootstrap_args(
+                site_id, name, longitude, latitude, study_start, study_end
+            )
         )
         forecast_args = _watershed_data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
@@ -424,8 +427,10 @@ def watershed_data_command(
             ),
         )
     if action == "run-weather":
-        bootstrap = _watershed_data_bootstrap_args(
-            site_id, name, longitude, latitude, study_start, study_end
+        bootstrap = () if Path(site_spec).expanduser().is_file() else (
+            _watershed_data_bootstrap_args(
+                site_id, name, longitude, latitude, study_start, study_end
+            )
         )
         forecast_args = _watershed_data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
@@ -1835,7 +1840,7 @@ class LauncherApp:
         dialog = tk.Toplevel(self.root)
         dialog.title("Optional Watershed Data")
         dialog.transient(self.root)
-        dialog.geometry("760x700")
+        dialog.geometry("700x620")
         canvas = tk.Canvas(dialog, highlightthickness=0)
         scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -1859,6 +1864,19 @@ class LauncherApp:
         period = data_config.get("study_period", {})
         if not isinstance(period, dict):
             period = {}
+        outlet_longitude = self.lon_var.get()
+        outlet_latitude = self.lat_var.get()
+        if not outlet_longitude or not outlet_latitude:
+            try:
+                project_state = state_from_config(config_path, project_config)
+                if project_state.outlet_source:
+                    derived_longitude, derived_latitude = read_outlet_point(
+                        project_state.outlet_source
+                    )
+                    outlet_longitude = str(derived_longitude)
+                    outlet_latitude = str(derived_latitude)
+            except (DemAcquisitionError, OSError, ValueError):
+                pass
         site_name = self.site_var.get().strip() or "watershed"
         site_id = Path(site_name).name.replace(" ", "_").lower()
         site_spec_default = project_dir / "sites" / f"{site_id}.yaml"
@@ -1867,8 +1885,8 @@ class LauncherApp:
             "SiteSpec": tk.StringVar(value=str(site_spec_default)),
             "Site ID": tk.StringVar(value=site_id),
             "Name": tk.StringVar(value=Path(site_name).name),
-            "Outlet longitude": tk.StringVar(value=self.lon_var.get()),
-            "Outlet latitude": tk.StringVar(value=self.lat_var.get()),
+            "Outlet longitude": tk.StringVar(value=outlet_longitude),
+            "Outlet latitude": tk.StringVar(value=outlet_latitude),
             "Study start (UTC)": tk.StringVar(value=str(period.get("start") or "")),
             "Study end (UTC)": tk.StringVar(value=str(period.get("end") or "")),
             "Reconnaissance output": tk.StringVar(value=str(workspace_default / "reconnaissance")),
@@ -1899,21 +1917,96 @@ class LauncherApp:
             content,
             text="Optional watershed observations; Full Run to OHQ remains unchanged.",
         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=10, pady=8)
-        for index, (label, variable) in enumerate(variables.items(), start=1):
+        primary_labels = (
+            "Site ID", "Name", "Outlet longitude", "Outlet latitude",
+            "Study start (UTC)", "Study end (UTC)", "Gauge radius (km)",
+            "Selected USGS station ID", "Weather variables", "Native asset ID",
+        )
+        advanced_labels = tuple(label for label in variables if label not in primary_labels)
+        for index, label in enumerate(primary_labels, start=1):
+            variable = variables[label]
             tk.Label(content, text=label).grid(row=index, column=0, sticky="w", padx=10, pady=2)
-            tk.Entry(content, textvariable=variable, width=52).grid(
+            tk.Entry(content, textvariable=variable, width=42).grid(
                 row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
             )
+
+        def configure_advanced() -> None:
+            advanced = tk.Toplevel(dialog)
+            advanced.title("Watershed Data Paths and Forecast Settings")
+            advanced.transient(dialog)
+            advanced.geometry("720x520")
+            advanced_canvas = tk.Canvas(advanced, highlightthickness=0)
+            advanced_scrollbar = tk.Scrollbar(
+                advanced, orient="vertical", command=advanced_canvas.yview
+            )
+            advanced_canvas.configure(yscrollcommand=advanced_scrollbar.set)
+            advanced_scrollbar.pack(side="right", fill="y")
+            advanced_canvas.pack(side="left", fill="both", expand=True)
+            advanced_content = tk.Frame(advanced_canvas)
+            advanced_window = advanced_canvas.create_window(
+                (0, 0), window=advanced_content, anchor="nw"
+            )
+            advanced_content.bind(
+                "<Configure>",
+                lambda event: advanced_canvas.configure(
+                    scrollregion=advanced_canvas.bbox("all")
+                ),
+            )
+            advanced_canvas.bind(
+                "<Configure>",
+                lambda event: advanced_canvas.itemconfigure(
+                    advanced_window, width=event.width
+                ),
+            )
+            tk.Label(
+                advanced_content,
+                text=(
+                    "Generated file locations normally need no changes. "
+                    "Forecast settings are optional."
+                ),
+                justify="left",
+            ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=8)
+            for row_index, label in enumerate(advanced_labels, start=1):
+                tk.Label(advanced_content, text=label).grid(
+                    row=row_index, column=0, sticky="w", padx=10, pady=2
+                )
+                tk.Entry(
+                    advanced_content, textvariable=variables[label], width=54
+                ).grid(row=row_index, column=1, sticky="ew", padx=5, pady=2)
+            forecast_actions = tk.LabelFrame(advanced_content, text="Optional forecast actions")
+            forecast_actions.grid(
+                row=len(advanced_labels) + 1, column=0, columnspan=2,
+                sticky="ew", padx=10, pady=8,
+            )
+            tk.Button(
+                forecast_actions, text="Download Forecast Archive",
+                command=lambda: run("download-forecast"),
+            ).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+            tk.Button(
+                forecast_actions, text="Create Forecast View",
+                command=lambda: run("forecast-view"),
+            ).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            forecast_actions.columnconfigure(0, weight=1)
+            forecast_actions.columnconfigure(1, weight=1)
+            tk.Button(advanced_content, text="Done", command=advanced.destroy).grid(
+                row=len(advanced_labels) + 2, column=1, sticky="e", padx=10, pady=10
+            )
+            advanced_content.columnconfigure(1, weight=1)
+
+        form_end_row = len(primary_labels) + 1
+        tk.Button(
+            content, text="Paths and forecast settings…", command=configure_advanced
+        ).grid(row=form_end_row, column=0, columnspan=3, sticky="w", padx=10, pady=(6, 2))
         refresh_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             content, text="Refresh provider responses (ignore reusable cache)",
             variable=refresh_var,
-        ).grid(row=len(variables) + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
+        ).grid(row=form_end_row + 1, column=0, columnspan=3, sticky="w", padx=10, pady=4)
         require_qc_pass_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             content, text="Require passing package QC for HydroPINN export",
             variable=require_qc_pass_var,
-        ).grid(row=len(variables) + 2, column=0, columnspan=3, sticky="w", padx=10, pady=4)
+        ).grid(row=form_end_row + 2, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
             if action == "use-recon-selection":
@@ -1926,6 +2019,25 @@ class LauncherApp:
                     return
                 variables["Selected USGS station ID"].set(station)
                 self.messages.put(f"Selected USGS station from reconnaissance: {station}\n")
+                return
+            site_path = Path(variables["SiteSpec"].get()).expanduser()
+            actions_requiring_site = {
+                "validate-site", "reconnaissance", "download-discharge",
+                "download-weather", "download-pet", "freeze", "doctor",
+            }
+            if action in actions_requiring_site and not site_path.is_file():
+                self.messages.put(
+                    "ERROR: SiteSpec does not exist. Enter the site fields and click "
+                    "Create SiteSpec first.\n"
+                )
+                return
+            manifest_path = Path(variables["Package"].get()).expanduser() / "manifest.json"
+            if action in {"validate-package", "export-hydropinn", "status"} \
+                    and not manifest_path.is_file():
+                self.messages.put(
+                    "ERROR: The watershed package has not been created. Run all data steps "
+                    "or click Freeze Package first.\n"
+                )
                 return
             try:
                 command = watershed_data_command(
@@ -1977,13 +2089,11 @@ class LauncherApp:
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
             ("RUN WEATHER/PET TO EXPORT", "run-weather"),
-            ("Download Forecast Archive", "download-forecast"),
-            ("Create Forecast View", "forecast-view"),
             ("Inspect Data Status", "status"),
             ("Check Data Workspace", "doctor"),
             ("Inspect Cache Garbage", "gc"),
         )
-        row = len(variables) + 3
+        row = form_end_row + 3
         action_frame = tk.LabelFrame(content, text="Actions")
         action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         for index, (label, action) in enumerate(actions):
