@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,6 +18,57 @@ def _file_sha256(path: Path) -> str:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _existing_export(
+    destination: Path, *, site_id: str,
+) -> tuple[HydroPINNExportManifest, Path] | None:
+    if not destination.exists():
+        return None
+    manifest_path = destination / "manifest.json"
+    try:
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = HydroPINNExportManifest.from_dict(document)
+    except (OSError, json.JSONDecodeError, WatershedDataError) as exc:
+        raise WatershedDataError(
+            f"HydroPINN export destination exists but is not a valid export: {destination}"
+        ) from exc
+    if manifest.site_id != site_id:
+        raise WatershedDataError(
+            "HydroPINN export destination belongs to a different site: "
+            f"{manifest.site_id}"
+        )
+    return manifest, manifest_path
+
+
+def _export_files_are_valid(
+    destination: Path, manifest: HydroPINNExportManifest,
+) -> bool:
+    if not (destination / "variables.json").is_file():
+        return False
+    return all(
+        (path := destination / asset["path"]).is_file()
+        and _file_sha256(path) == asset["sha256"]
+        for asset in manifest.assets
+    )
+
+
+def _publish_export_directory(staged: Path, final: Path) -> None:
+    """Replace a same-site export without exposing a partial new directory."""
+    backup: Path | None = None
+    if final.exists():
+        backup = Path(tempfile.mkdtemp(prefix=f".{final.name}.backup-", dir=final.parent))
+        backup.rmdir()
+        final.replace(backup)
+    try:
+        staged.replace(final)
+    except BaseException:
+        if backup is not None and backup.exists() and not final.exists():
+            backup.replace(final)
+        raise
+    else:
+        if backup is not None:
+            shutil.rmtree(backup)
 
 
 def export_hydropinn(
@@ -49,8 +101,17 @@ def export_hydropinn(
     if not assets:
         raise WatershedDataError("package has no harmonized temporal assets to export")
     final_destination = Path(output).expanduser().resolve()
-    if final_destination.exists():
-        raise WatershedDataError(f"HydroPINN export destination already exists: {final_destination}")
+    existing = _existing_export(final_destination, site_id=package_manifest.site_id)
+    expected_gate = "require_pass" if require_qc_pass else "reject_fail"
+    if existing is not None:
+        existing_manifest, existing_manifest_path = existing
+        if (
+            existing_manifest.source_package_id == package_manifest.package_id
+            and existing_manifest.profile == profile
+            and existing_manifest.qc_gate == expected_gate
+            and _export_files_are_valid(final_destination, existing_manifest)
+        ):
+            return existing_manifest_path
     final_destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=f".{final_destination.name}.staging-", dir=final_destination.parent
@@ -98,7 +159,7 @@ def export_hydropinn(
             "source_validation_policy_digests": dict(
                 package_manifest.validation_policy_digests
             ),
-            "qc_gate": "require_pass" if require_qc_pass else "reject_fail",
+            "qc_gate": expected_gate,
             "assets": exported,
             "transformations_not_performed": [
                 "normalization", "imputation", "lag_construction", "feature_selection",
@@ -106,5 +167,5 @@ def export_hydropinn(
             ],
         })
         _atomic_json(destination / "manifest.json", manifest.to_dict())
-        destination.replace(final_destination)
+        _publish_export_directory(destination, final_destination)
     return final_destination / "manifest.json"

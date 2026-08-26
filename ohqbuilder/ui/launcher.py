@@ -2164,6 +2164,12 @@ class LauncherApp:
                 self.messages.put(f"Selected USGS station from reconnaissance: {station}\n")
                 return
             site_path = Path(variables["SiteSpec"].get()).expanduser()
+            if action == "init-site" and site_path.is_file():
+                self.messages.put(
+                    "SiteSpec already exists; keeping the existing file. Validate it or choose "
+                    "a different SiteSpec path to create another site.\n"
+                )
+                return
             actions_requiring_site = {
                 "validate-site", "reconnaissance", "download-discharge",
                 "download-weather", "download-pet", "freeze", "doctor",

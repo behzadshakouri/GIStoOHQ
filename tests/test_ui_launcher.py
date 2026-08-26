@@ -150,6 +150,7 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert "refresh_data_action_buttons" in source
     assert 'state = "disabled" if self.command_running else "normal"' in source
     assert "starting the next data step" in source
+    assert "SiteSpec already exists; keeping the existing file" in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
     assert "Use Reconnaissance Selection" in source

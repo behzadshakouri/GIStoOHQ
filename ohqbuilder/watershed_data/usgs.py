@@ -92,6 +92,21 @@ def build_series_catalog_query(station_ids: list[str]) -> str:
     return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
 
 
+def build_series_catalog_query(station_ids: list[str]) -> str:
+    """Build a bounded follow-up query for station record coverage metadata."""
+    if not station_ids or len(station_ids) > USGS_SERIES_CATALOG_LIMIT:
+        raise WatershedDataError(
+            f"USGS series catalog query requires 1-{USGS_SERIES_CATALOG_LIMIT} stations"
+        )
+    if any(not station_id.isdigit() for station_id in station_ids):
+        raise WatershedDataError("USGS station IDs must contain digits only")
+    parameters = {
+        "format": "rdb", "sites": ",".join(station_ids), "parameterCd": "00060",
+        "siteStatus": "all", "seriesCatalogOutput": "true",
+    }
+    return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
+
+
 def parse_site_rdb(text: str, spec: SiteSpec) -> list[GaugeCandidate]:
     lines = [line for line in text.splitlines() if line and not line.startswith("#")]
     if len(lines) < 2:

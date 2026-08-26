@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from ohqbuilder.watershed_data.catalog import AssetCatalog, ObjectStore
-from ohqbuilder.watershed_data.hydropinn import export_hydropinn
+from ohqbuilder.watershed_data.hydropinn import _existing_export, export_hydropinn
 from ohqbuilder.watershed_data.package import freeze_package, validate_package
 from ohqbuilder.watershed_data.schemas import HydroPINNExportManifest, WatershedDataError
 from ohqbuilder.watershed_data.temporal import harmonize_asset
@@ -50,11 +50,35 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     assert {item["name"] for item in variables["variables"]} == {"PRECTOTCORR", "T2M"}
     assert variables["variables"][0]["normalization"] is None
     assert (tmp_path / "hydropinn" / "observations" / "temporal_1.csv").is_file()
-    with pytest.raises(WatershedDataError, match="destination already exists"):
-        export_hydropinn(
-            package=package, object_store=store.root, output=tmp_path / "hydropinn",
-            require_qc_pass=True,
-        )
+    original_manifest = manifest_path.read_bytes()
+    reused = export_hydropinn(
+        package=package, object_store=store.root, output=tmp_path / "hydropinn",
+        require_qc_pass=True,
+    )
+    assert reused == manifest_path
+    assert reused.read_bytes() == original_manifest
+
+    catalog.register({
+        "provider": "example", "product": "supplemental-native",
+        "content_digest": "f" * 64, "size": 1, "media_type": "application/json",
+    })
+    freeze_package(site_spec=site, catalog=catalog.path, output=package)
+    replaced = export_hydropinn(
+        package=package, object_store=store.root, output=tmp_path / "hydropinn",
+        require_qc_pass=True,
+    )
+    assert json.loads(replaced.read_text())["source_package_id"] != manifest[
+        "source_package_id"
+    ]
+
+
+def test_hydropinn_export_refuses_to_replace_unrecognized_directory(tmp_path):
+    destination = tmp_path / "hydropinn"
+    destination.mkdir()
+    (destination / "user-file.txt").write_text("keep")
+    with pytest.raises(WatershedDataError, match="not a valid export"):
+        _existing_export(destination, site_id="test")
+    assert (destination / "user-file.txt").read_text() == "keep"
 
 
 def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
