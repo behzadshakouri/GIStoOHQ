@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import time
 from typing import Any, Callable
 
@@ -23,8 +24,8 @@ def download_bytes(
         try:
             with opener(resource, timeout=timeout) as response:
                 return response.read(), getattr(response, "headers", None), attempt
-        except OSError as exc:
-            failures.append(str(exc))
+        except (OSError, http.client.HTTPException) as exc:
+            failures.append(f"{type(exc).__name__}: {exc}")
             if attempt < attempts:
                 time.sleep(base_delay * (2 ** (attempt - 1)))
     detail = failures[-1] if failures else "unknown provider error"
