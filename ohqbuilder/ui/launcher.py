@@ -2045,6 +2045,7 @@ class LauncherApp:
             tk.Entry(content, textvariable=variable, width=42).grid(
                 row=index, column=1, columnspan=2, sticky="ew", padx=5, pady=2
             )
+        data_action_buttons = []
 
         def configure_advanced() -> None:
             advanced = tk.Toplevel(dialog)
@@ -2094,18 +2095,24 @@ class LauncherApp:
                 row=len(advanced_labels) + 1, column=0, columnspan=2,
                 sticky="ew", padx=10, pady=8,
             )
-            tk.Button(
+            harmonize_button = tk.Button(
                 advanced_actions, text="Harmonize asset + QC",
                 command=lambda: run("harmonize"),
-            ).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-            tk.Button(
+            )
+            harmonize_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+            forecast_download_button = tk.Button(
                 advanced_actions, text="Download Forecast Archive",
                 command=lambda: run("download-forecast"),
-            ).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-            tk.Button(
+            )
+            forecast_download_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            forecast_view_button = tk.Button(
                 advanced_actions, text="Create Forecast View",
                 command=lambda: run("forecast-view"),
-            ).grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+            )
+            forecast_view_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+            data_action_buttons.extend((
+                harmonize_button, forecast_download_button, forecast_view_button,
+            ))
             for column in range(3):
                 advanced_actions.columnconfigure(column, weight=1)
             tk.Button(advanced_content, text="Done", command=advanced.destroy).grid(
@@ -2129,6 +2136,12 @@ class LauncherApp:
         ).grid(row=form_end_row + 2, column=0, columnspan=3, sticky="w", padx=10, pady=4)
 
         def run(action: str) -> None:
+            if self.command_running:
+                self.messages.put(
+                    "A workflow command is already running. Wait for it to finish before "
+                    "starting the next data step.\n"
+                )
+                return
             if action == "use-recon-selection":
                 report_root = Path(variables["Reconnaissance output"].get()).expanduser()
                 report_path = (
@@ -2233,15 +2246,27 @@ class LauncherApp:
         action_frame = tk.LabelFrame(content, text="Actions")
         action_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
         for index, (label, action) in enumerate(actions):
-            tk.Button(action_frame, text=label, command=lambda value=action: run(value)).grid(
-                row=index // 3, column=index % 3, padx=5, pady=5, sticky="ew"
+            button = tk.Button(
+                action_frame, text=label, command=lambda value=action: run(value)
             )
+            button.grid(row=index // 3, column=index % 3, padx=5, pady=5, sticky="ew")
+            data_action_buttons.append(button)
         for column in range(3):
             action_frame.columnconfigure(column, weight=1)
         tk.Button(content, text="Close", command=dialog.destroy).grid(
             row=row + 1, column=2, sticky="e", padx=10, pady=(0, 10)
         )
         content.columnconfigure(1, weight=1)
+
+        def refresh_data_action_buttons() -> None:
+            if not dialog.winfo_exists():
+                return
+            state = "disabled" if self.command_running else "normal"
+            for button in data_action_buttons:
+                button.config(state=state)
+            dialog.after(100, refresh_data_action_buttons)
+
+        refresh_data_action_buttons()
 
     def configure_documented_watershed(self) -> None:
         """Edit reference provenance in a compact modal instead of the main form."""

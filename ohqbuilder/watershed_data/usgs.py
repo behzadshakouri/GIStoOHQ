@@ -62,6 +62,7 @@ def build_site_query(spec: SiteSpec, radius_km: float) -> str:
     parameters = {
         "format": "rdb", "bBox": _bounding_box(spec, radius_km),
         "parameterCd": "00060", "siteStatus": "all", "siteOutput": "expanded",
+        "seriesCatalogOutput": "true",
     }
     return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
 
@@ -71,7 +72,7 @@ def parse_site_rdb(text: str, spec: SiteSpec) -> list[GaugeCandidate]:
     if len(lines) < 2:
         return []
     reader = csv.DictReader(io.StringIO("\n".join([lines[0], *lines[2:]])), delimiter="\t")
-    candidates = []
+    candidates: dict[str, GaugeCandidate] = {}
     for row in reader:
         if not row.get("site_no") or not row.get("dec_long_va") or not row.get("dec_lat_va"):
             continue
@@ -85,15 +86,36 @@ def parse_site_rdb(text: str, spec: SiteSpec) -> list[GaugeCandidate]:
                 area = float(row["drain_area_va"]) * 2.589988110336
         except ValueError:
             pass
-        candidates.append(GaugeCandidate(
+        candidate = GaugeCandidate(
             provider="usgs", station_id=row["site_no"], name=row.get("station_nm") or "",
             longitude=longitude, latitude=latitude,
             distance_km=_haversine_km(spec.longitude, spec.latitude, longitude, latitude),
             drainage_area_km2=area, record_start=row.get("begin_date") or None,
             record_end=row.get("end_date") or None,
             status=(row.get("site_status") or row.get("site_tp_cd") or "unknown").lower(),
-        ))
-    return sorted(candidates, key=lambda item: (item.distance_km, item.station_id))
+        )
+        previous = candidates.get(candidate.station_id)
+        if previous is None:
+            candidates[candidate.station_id] = candidate
+            continue
+        starts = [value for value in (previous.record_start, candidate.record_start) if value]
+        ends = [value for value in (previous.record_end, candidate.record_end) if value]
+        candidates[candidate.station_id] = GaugeCandidate(
+            provider=previous.provider, station_id=previous.station_id,
+            name=previous.name or candidate.name, longitude=previous.longitude,
+            latitude=previous.latitude, distance_km=previous.distance_km,
+            drainage_area_km2=(
+                previous.drainage_area_km2
+                if previous.drainage_area_km2 is not None else candidate.drainage_area_km2
+            ),
+            record_start=min(starts) if starts else None,
+            record_end=max(ends) if ends else None,
+            status=(
+                "active" if "active" in {previous.status, candidate.status}
+                else previous.status
+            ),
+        )
+    return sorted(candidates.values(), key=lambda item: (item.distance_km, item.station_id))
 
 
 def discover_gauges(

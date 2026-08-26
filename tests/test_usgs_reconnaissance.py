@@ -29,7 +29,9 @@ def test_usgs_site_query_and_rdb_parsing_are_deterministic():
     url = build_site_query(spec, 25)
     assert url.startswith("https://waterservices.usgs.gov/nwis/site/")
     assert "parameterCd=00060" in url
-    coordinates = parse_qs(urlparse(url).query)["bBox"][0].split(",")
+    query = parse_qs(urlparse(url).query)
+    assert query["seriesCatalogOutput"] == ["true"]
+    coordinates = query["bBox"][0].split(",")
     assert len(coordinates) == 4
     assert all(len(value.partition(".")[2]) == 6 for value in coordinates)
     candidates = parse_site_rdb(Path("tests/fixtures/usgs_sites.rdb").read_text(), spec)
@@ -41,6 +43,16 @@ def test_usgs_site_query_and_rdb_parsing_are_deterministic():
 def test_usgs_site_query_rejects_invalid_radius():
     with pytest.raises(WatershedDataError, match="positive and finite"):
         build_site_query(_spec(), 0)
+
+
+def test_usgs_series_catalog_rows_are_merged_per_station():
+    fixture = Path("tests/fixtures/usgs_sites.rdb").read_text()
+    duplicate = fixture.splitlines()[3].replace("1938-10-01", "2001-01-01")
+    candidates = parse_site_rdb(fixture + duplicate + "\n", _spec())
+
+    assert [candidate.station_id for candidate in candidates].count("01649500") == 1
+    merged = next(candidate for candidate in candidates if candidate.station_id == "01649500")
+    assert merged.record_start == "1938-10-01"
 
 
 def test_reconnaissance_writes_json_and_markdown_and_selects_clear_best(tmp_path):
