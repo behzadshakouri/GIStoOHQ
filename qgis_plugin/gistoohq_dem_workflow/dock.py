@@ -195,6 +195,8 @@ def _command_for_watershed_data(
     forecast_product: str = "forecast", prediction_time: str = "",
     status_output: str = "watershed_package/status",
     refresh: bool = False,
+    catchment_area_m2: float | None = None,
+    catchment_area_source: str = "",
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
     if action == "init-site":
@@ -213,6 +215,17 @@ def _command_for_watershed_data(
         ]
         if name:
             command.extend(["--name", name])
+        if catchment_area_m2 is None and catchment_area_source.strip():
+            raise QgisDockConfigError("Catchment area is required with its source.")
+        if catchment_area_m2 is not None:
+            if catchment_area_m2 <= 0 or not catchment_area_source.strip():
+                raise QgisDockConfigError(
+                    "A positive catchment area and its source are required together."
+                )
+            command.extend([
+                "--catchment-area-m2", str(catchment_area_m2),
+                "--catchment-area-source", catchment_area_source.strip(),
+            ])
         return command
     if action == "validate-site":
         if not site_spec:
@@ -296,7 +309,10 @@ def _command_for_watershed_data(
     if action == "run":
         if not station_id:
             raise QgisDockConfigError("Select an explicit USGS station ID before running all steps.")
-        bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
+        bootstrap = _data_bootstrap_args(
+            site_id, name, longitude, latitude, start, end,
+            catchment_area_m2, catchment_area_source,
+        )
         forecast_args = _data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
         )
@@ -307,7 +323,10 @@ def _command_for_watershed_data(
             *forecast_args, *bootstrap,
         ]
     if action == "run-weather":
-        bootstrap = _data_bootstrap_args(site_id, name, longitude, latitude, start, end)
+        bootstrap = _data_bootstrap_args(
+            site_id, name, longitude, latitude, start, end,
+            catchment_area_m2, catchment_area_source,
+        )
         forecast_args = _data_forecast_run_args(
             forecast_url, forecast_provider, forecast_product, prediction_time
         )
@@ -342,7 +361,10 @@ def _command_for_watershed_data(
     raise QgisDockConfigError(f"Unknown watershed data action: {action}")
 
 
-def _data_bootstrap_args(site_id, name, longitude, latitude, start, end) -> list[str]:
+def _data_bootstrap_args(
+    site_id, name, longitude, latitude, start, end,
+    catchment_area_m2, catchment_area_source,
+) -> list[str]:
     if any(value in (None, "") for value in (site_id, longitude, latitude, start, end)):
         raise QgisDockConfigError(
             "One-button data runs require site ID, outlet coordinates, and study start/end."
@@ -353,6 +375,17 @@ def _data_bootstrap_args(site_id, name, longitude, latitude, start, end) -> list
     ]
     if name:
         args.extend(["--name", str(name)])
+    if catchment_area_m2 is None and catchment_area_source.strip():
+        raise QgisDockConfigError("Catchment area is required with its source.")
+    if catchment_area_m2 is not None:
+        if catchment_area_m2 <= 0 or not catchment_area_source.strip():
+            raise QgisDockConfigError(
+                "A positive catchment area and its source are required together."
+            )
+        args.extend([
+            "--catchment-area-m2", str(catchment_area_m2),
+            "--catchment-area-source", catchment_area_source.strip(),
+        ])
     return args
 
 
@@ -907,6 +940,7 @@ class DemWorkflowDock:
             "Latitude": str(outlet.get("latitude") or ""),
             "Start (UTC)": str(period.get("start") or ""),
             "End (UTC)": str(period.get("end") or ""), "Product URL": "", "Provider": "",
+            "Catchment area (m²)": "", "Catchment area source": "",
             "Product": "", "Product version": "unspecified",
             "Cache": str(workspace / "cache"),
             "Catalog": str(workspace / "watershed_package/catalog.json"),
@@ -956,6 +990,13 @@ class DemWorkflowDock:
                 fields["Selected USGS station ID"].setText(station)
                 self.log.append(f"Selected USGS station from reconnaissance: {station}")
                 return
+            site_path = Path(fields["SiteSpec"].text()).expanduser()
+            if action == "init-site" and site_path.is_file():
+                self.log.append(
+                    "SiteSpec already exists; keeping the existing file. Validate it or choose "
+                    "a different SiteSpec path to create another site."
+                )
+                return
             try:
                 longitude = float(fields["Longitude"].text()) if fields["Longitude"].text() else None
                 latitude = float(fields["Latitude"].text()) if fields["Latitude"].text() else None
@@ -964,6 +1005,11 @@ class DemWorkflowDock:
                     site_id=fields["Site ID"].text(), name=fields["Name"].text(),
                     longitude=longitude, latitude=latitude,
                     start=fields["Start (UTC)"].text(), end=fields["End (UTC)"].text(),
+                    catchment_area_m2=(
+                        float(fields["Catchment area (m²)"].text())
+                        if fields["Catchment area (m²)"].text().strip() else None
+                    ),
+                    catchment_area_source=fields["Catchment area source"].text(),
                     url=fields["Product URL"].text(), provider=fields["Provider"].text(),
                     product=fields["Product"].text(),
                     product_version=fields["Product version"].text(),
