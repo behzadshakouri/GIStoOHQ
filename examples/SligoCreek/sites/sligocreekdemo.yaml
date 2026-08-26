@@ -1,0 +1,26 @@
+schema_name: SiteSpec
+schema_version: '1.0'
+site_id: sligocreekdemo
+name: SligoCreekDemo
+geometry:
+  outlet:
+    longitude: -76.98873786162696
+    latitude: 38.97837618066522
+  supplied_basin: null
+study_period:
+  start: '2024-01-01T00:00:00Z'
+  end: '2024-12-31T23:00:00Z'
+catchment:
+  area_m2: 23754600.0
+  source: GIStoOHQ watershed delineation
+target_timestep: 1h
+sources:
+  discharge:
+    selection: auto
+    policy_version: '1.0'
+  meteorology:
+    selection: auto
+    policy_version: '1.0'
+  pet:
+    selection: auto
+    policy_version: '1.0'

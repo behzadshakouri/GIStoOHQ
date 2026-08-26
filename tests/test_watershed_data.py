@@ -54,6 +54,40 @@ def test_site_spec_default_schema_version_remains_1_0():
     assert spec.schema_version == "1.0"
 
 
+def test_site_spec_validates_and_preserves_catchment_area_provenance():
+    document = {
+        "site_id": "test",
+        "geometry": {"outlet": {"longitude": -77, "latitude": 39}},
+        "study_period": {
+            "start": "2020-01-01T00:00:00Z",
+            "end": "2021-01-01T00:00:00Z",
+        },
+        "catchment": {"area_m2": 2_500_000, "source": "GIS-delineated watershed"},
+    }
+    spec = SiteSpec.from_dict(document)
+    assert spec.to_dict()["catchment"] == {
+        "area_m2": 2_500_000,
+        "source": "GIS-delineated watershed",
+    }
+
+    document["catchment"]["area_m2"] = 0
+    with pytest.raises(WatershedDataError, match="area_m2 must be a positive number"):
+        SiteSpec.from_dict(document)
+
+    document["catchment"] = {"area_m2": 1, "source": ""}
+    with pytest.raises(WatershedDataError, match="catchment.source is required"):
+        SiteSpec.from_dict(document)
+
+
+def test_sligo_example_declares_authoritative_catchment_metadata():
+    spec = SiteSpec.from_file("examples/SligoCreek/sites/sligocreekdemo.yaml")
+
+    assert spec.site_id == "sligocreekdemo"
+    assert spec.catchment_area_m2 == 23_754_600.0
+    assert spec.catchment_area_source == "GIStoOHQ watershed delineation"
+    assert spec.digest != "99aeb6d9ac7c81f5c61b346c509c4eb5c4bfa6af6c1a5d40ac9c7fc2e08a2faa"
+
+
 def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     store = ObjectStore(tmp_path / "cache")
     first = store.put(io.BytesIO(b"weather data"))

@@ -49,8 +49,12 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "init-site", site_spec="site.yaml", site_id="demo", name="Demo",
         longitude=-77, latitude=39, study_start="2024-01-01T00:00:00Z",
         study_end="2024-12-31T23:00:00Z",
+        catchment_area_m2=2_500_000, catchment_area_source="GIS delineation",
     )
     assert init.argv[:5] == ("ohqbuild", "data", "init-site", "--site-spec", "site.yaml")
+    assert init.argv[-4:] == (
+        "--catchment-area-m2", "2500000", "--catchment-area-source", "GIS delineation",
+    )
     discovery = watershed_data_command(
         "reconnaissance", site_spec="site.yaml", reconnaissance_output="recon", radius_km=25
     )
@@ -157,6 +161,22 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
 
 
+def test_watershed_data_command_requires_complete_positive_catchment_metadata():
+    kwargs = {
+        "site_spec": "site.yaml", "site_id": "demo", "longitude": -77, "latitude": 39,
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    }
+    with pytest.raises(LauncherError, match="supplied together"):
+        watershed_data_command(
+            "init-site", **kwargs, catchment_area_m2=1, catchment_area_source=""
+        )
+    with pytest.raises(LauncherError, match="positive"):
+        watershed_data_command(
+            "init-site", **kwargs, catchment_area_m2=0, catchment_area_source="GIS"
+        )
+
+
 def test_existing_site_spec_does_not_require_bootstrap_fields_for_one_button_run(tmp_path):
     site = tmp_path / "site.yaml"
     site.write_text("existing", encoding="utf-8")
@@ -173,11 +193,16 @@ def test_watershed_data_examples_supply_complete_site_bootstrap_values():
     sligo = watershed_data_example_for_site("SligoCreekDemo")
     john_mccormack = watershed_data_example_for_site("JohnMcCormack3600")
 
+    assert sligo["catchment_area_m2"] == "23754600.0"
+    assert sligo["catchment_area_source"] == "GIStoOHQ watershed delineation"
+
     assert sligo == {
         "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
-        "longitude": "-77.0000", "latitude": "38.9700",
+        "longitude": "-76.98873786162696", "latitude": "38.97837618066522",
         "study_start": "2024-01-01T00:00:00Z",
         "study_end": "2024-12-31T23:00:00Z",
+        "catchment_area_m2": "23754600.0",
+        "catchment_area_source": "GIStoOHQ watershed delineation",
     }
     assert john_mccormack is not None
     assert john_mccormack["longitude"] == "-76.99597205373109"

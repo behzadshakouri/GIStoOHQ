@@ -305,6 +305,16 @@ def test_qgis_plugin_has_optional_watershed_data_tab_and_commands():
     assert "Download Declared Product" in dock
     assert "QScrollArea" in dock
     assert "buttons.addWidget(button, index // 3, index % 3)" in dock
+    assert "SiteSpec already exists; keeping the existing file" in dock
+
+    init = _command_for_watershed_data(
+        "init-site", site_spec="site.yaml", site_id="demo", longitude=-77, latitude=39,
+        start="2024-01-01T00:00:00Z", end="2024-12-31T23:00:00Z",
+        catchment_area_m2=2_500_000, catchment_area_source="GIS delineation",
+    )
+    assert init[-4:] == [
+        "--catchment-area-m2", "2500000", "--catchment-area-source", "GIS delineation",
+    ]
 
     command = _command_for_watershed_data(
         "acquire-url", site_spec="site.yaml", url="https://example.gov/weather.csv",

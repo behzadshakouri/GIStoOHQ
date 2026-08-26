@@ -41,6 +41,8 @@ def run_watershed_data_pipeline(
     latitude: float | None = None,
     study_start: str = "",
     study_end: str = "",
+    catchment_area_m2: float | None = None,
+    catchment_area_source: str | None = None,
 ) -> dict[str, object]:
     """Run the optional native→QC→package workflow after explicit gauge selection."""
     if include_discharge and not station_id:
@@ -70,6 +72,8 @@ def run_watershed_data_pipeline(
         write_site_spec(
             site_path, site_id=site_id, name=name, longitude=float(longitude),
             latitude=float(latitude), start=study_start, end=study_end,
+            catchment_area_m2=catchment_area_m2,
+            catchment_area_source=catchment_area_source,
         )
     spec = SiteSpec.from_file(site_path)
     root = Path(workspace).expanduser().resolve()

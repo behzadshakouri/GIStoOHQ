@@ -37,6 +37,7 @@ def test_run_pipeline_downloads_harmonizes_packages_and_exports(tmp_path):
     site = write_site_spec(
         tmp_path / "site.yaml", site_id="test", name="Test", longitude=-77, latitude=39,
         start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+        catchment_area_m2=1_000_000, catchment_area_source="test GIS delineation",
     )
     result = run_watershed_data_pipeline(
         site_spec=site, station_id="01649500", workspace=tmp_path / "run",
@@ -83,6 +84,7 @@ def test_weather_pet_pipeline_does_not_require_station_id(tmp_path):
     site = write_site_spec(
         tmp_path / "site.yaml", site_id="weather", name="Weather", longitude=-77, latitude=39,
         start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+        catchment_area_m2=1_000_000, catchment_area_source="test GIS delineation",
     )
     result = run_watershed_data_pipeline(
         site_spec=site, station_id="", workspace=tmp_path / "weather_run",
@@ -122,6 +124,7 @@ def test_weather_pipeline_bootstraps_missing_site_spec(tmp_path):
         include_discharge=False, init_if_missing=True, site_id="weather", name="Weather",
         longitude=-77, latitude=39, study_start="2025-01-01T00:00:00Z",
         study_end="2025-01-02T00:00:00Z",
+        catchment_area_m2=1_000_000, catchment_area_source="test GIS delineation",
         weather_acquirer=_fixture_acquirer(
             "tests/fixtures/nasa_power_hourly.json", "nasa-power", "historical-meteorology"
         ),
