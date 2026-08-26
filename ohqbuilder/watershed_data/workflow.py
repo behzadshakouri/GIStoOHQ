@@ -24,6 +24,8 @@ def write_site_spec(
     latitude: float,
     start: str,
     end: str,
+    catchment_area_m2: float | None = None,
+    catchment_area_source: str | None = None,
     overwrite: bool = False,
 ) -> Path:
     output = Path(path).expanduser().resolve()
@@ -35,6 +37,10 @@ def write_site_spec(
             "name": name or site_id,
             "geometry": {"outlet": {"longitude": longitude, "latitude": latitude}},
             "study_period": {"start": start, "end": end},
+            "catchment": (
+                {"area_m2": catchment_area_m2, "source": catchment_area_source}
+                if catchment_area_m2 is not None else None
+            ),
             "target_timestep": "1h",
             "sources": {
                 "discharge": {"selection": "auto", "policy_version": "1.0"},

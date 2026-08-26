@@ -359,6 +359,8 @@ def watershed_data_command(
     latitude: float | None = None,
     study_start: str = "",
     study_end: str = "",
+    catchment_area_m2: float | None = None,
+    catchment_area_source: str = "",
     refresh: bool = False,
     require_qc_pass: bool = False,
 ) -> WorkflowCommand:
@@ -381,6 +383,7 @@ def watershed_data_command(
         ]
         if name:
             argv.extend(("--name", name))
+        argv.extend(_catchment_args(catchment_area_m2, catchment_area_source))
         return WorkflowCommand("Create SiteSpec", tuple(argv))
     if action == "reconnaissance":
         return WorkflowCommand(
@@ -460,7 +463,8 @@ def watershed_data_command(
             raise LauncherError("Select an explicit USGS station ID before running all data steps.")
         bootstrap = () if Path(site_spec).expanduser().is_file() else (
             _watershed_data_bootstrap_args(
-                site_id, name, longitude, latitude, study_start, study_end
+                site_id, name, longitude, latitude, study_start, study_end,
+                catchment_area_m2, catchment_area_source,
             )
         )
         forecast_args = _watershed_data_forecast_run_args(
@@ -480,7 +484,8 @@ def watershed_data_command(
     if action == "run-weather":
         bootstrap = () if Path(site_spec).expanduser().is_file() else (
             _watershed_data_bootstrap_args(
-                site_id, name, longitude, latitude, study_start, study_end
+                site_id, name, longitude, latitude, study_start, study_end,
+                catchment_area_m2, catchment_area_source,
             )
         )
         forecast_args = _watershed_data_forecast_run_args(
@@ -533,7 +538,8 @@ def watershed_data_command(
 
 def _watershed_data_bootstrap_args(
     site_id: str, name: str, longitude: float | None, latitude: float | None,
-    study_start: str, study_end: str,
+    study_start: str, study_end: str, catchment_area_m2: float | None,
+    catchment_area_source: str,
 ) -> tuple[str, ...]:
     required = (site_id, longitude, latitude, study_start, study_end)
     if any(value in (None, "") for value in required):
@@ -544,7 +550,19 @@ def _watershed_data_bootstrap_args(
         "--init-if-missing", "--site-id", site_id, "--lon", str(longitude),
         "--lat", str(latitude), "--start", study_start, "--end", study_end,
     )
-    return (*args, "--name", name) if name else args
+    if name:
+        args = (*args, "--name", name)
+    return (*args, *_catchment_args(catchment_area_m2, catchment_area_source))
+
+
+def _catchment_args(area_m2: float | None, source: str) -> tuple[str, ...]:
+    if area_m2 is None and not source.strip():
+        return ()
+    if area_m2 is None or not source.strip():
+        raise LauncherError("Catchment area and catchment source must be supplied together.")
+    if area_m2 <= 0:
+        raise LauncherError("Catchment area must be positive.")
+    return ("--catchment-area-m2", str(area_m2), "--catchment-area-source", source.strip())
 
 
 def _watershed_data_forecast_run_args(
@@ -1952,6 +1970,8 @@ class LauncherApp:
                     example_defaults["study_end"] if example_defaults else ""
                 ))
             ),
+            "Catchment area (m²)": tk.StringVar(value=""),
+            "Catchment area source": tk.StringVar(value=""),
             "Reconnaissance output": tk.StringVar(value=str(workspace_default / "reconnaissance")),
             "Gauge radius (km)": tk.StringVar(value="50"),
             "Selected USGS station ID": tk.StringVar(value=""),
@@ -1999,6 +2019,8 @@ class LauncherApp:
             variables["Outlet latitude"].set(selected["latitude"])
             variables["Study start (UTC)"].set(selected["study_start"])
             variables["Study end (UTC)"].set(selected["study_end"])
+            variables["Catchment area (m²)"].set("")
+            variables["Catchment area source"].set("")
             variables["Selected USGS station ID"].set("")
             variables["SiteSpec"].set(
                 str(project_dir / "sites" / f"{selected['site_id']}.yaml")
@@ -2036,6 +2058,7 @@ class LauncherApp:
         primary_labels = (
             "Site ID", "Name", "Outlet longitude", "Outlet latitude",
             "Study start (UTC)", "Study end (UTC)", "Gauge radius (km)",
+            "Catchment area (m²)", "Catchment area source",
             "Selected USGS station ID", "Weather variables", "Native asset ID",
         )
         advanced_labels = tuple(label for label in variables if label not in primary_labels)
@@ -2223,6 +2246,11 @@ class LauncherApp:
                     if variables["Outlet latitude"].get() else None,
                     study_start=variables["Study start (UTC)"].get(),
                     study_end=variables["Study end (UTC)"].get(),
+                    catchment_area_m2=(
+                        float(variables["Catchment area (m²)"].get())
+                        if variables["Catchment area (m²)"].get().strip() else None
+                    ),
+                    catchment_area_source=variables["Catchment area source"].get(),
                     refresh=refresh_var.get(),
                     require_qc_pass=require_qc_pass_var.get(),
                 )

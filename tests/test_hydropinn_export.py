@@ -16,6 +16,7 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     site = write_site_spec(
         tmp_path / "site.yaml", site_id="test", name="Test", longitude=-77, latitude=39,
         start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+        catchment_area_m2=2_500_000, catchment_area_source="GIS-delineated watershed",
     )
     store = ObjectStore(tmp_path / "store")
     raw = Path("tests/fixtures/nasa_power_hourly.json").read_bytes()
@@ -40,7 +41,11 @@ def test_hydropinn_export_is_thin_deterministic_and_named(tmp_path):
     manifest = json.loads(manifest_path.read_text())
     variables = json.loads((tmp_path / "hydropinn" / "variables.json").read_text())
     assert manifest["profile"] == "water-balance-v1"
-    assert manifest["schema_version"] == "1.1"
+    assert manifest["schema_version"] == "1.2"
+    assert manifest["study_start"] == "2025-01-01T00:00:00Z"
+    assert manifest["study_end"] == "2025-01-02T00:00:00Z"
+    assert manifest["catchment_area_m2"] == 2_500_000
+    assert manifest["catchment_area_source"] == "GIS-delineated watershed"
     assert manifest["source_package_qc_status"] == "pass"
     assert manifest["source_failed_qc_rule_ids"] == []
     assert manifest["source_qc_policy_digests"].keys() == {"temporal-qc-v5"}
@@ -85,6 +90,7 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
     site = write_site_spec(
         tmp_path / "site.yaml", site_id="test", name="Test", longitude=-77, latitude=39,
         start="2025-01-01T00:00:00Z", end="2025-01-02T00:00:00Z",
+        catchment_area_m2=2_500_000, catchment_area_source="GIS-delineated watershed",
     )
     catalog = AssetCatalog(tmp_path / "catalog.json")
     store = ObjectStore(tmp_path / "store")
@@ -144,9 +150,11 @@ def test_hydropinn_export_refuses_failed_package_qc(tmp_path):
 def test_hydropinn_manifest_rejects_unsafe_asset_paths():
     with pytest.raises(WatershedDataError, match="safe and relative"):
         HydroPINNExportManifest.from_dict({
-            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "schema_name": "HydroPINNExport", "schema_version": "1.2",
             "profile": "water-balance-v1", "source_package_id": "sha256:" + "a" * 64,
-            "site_id": "test", "source_package_qc_status": "pass",
+            "site_id": "test", "study_start": "2025-01-01T00:00:00Z",
+            "study_end": "2025-01-02T00:00:00Z", "source_package_qc_status": "pass",
+            "catchment_area_m2": 1.0, "catchment_area_source": "test fixture",
             "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
             "source_validation_policy_digests": {},
             "qc_gate": "require_pass",
@@ -161,10 +169,38 @@ def test_hydropinn_manifest_rejects_unsafe_asset_paths():
 def test_hydropinn_manifest_rejects_invalid_source_package_id():
     with pytest.raises(WatershedDataError, match="source package ID"):
         HydroPINNExportManifest.from_dict({
-            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "schema_name": "HydroPINNExport", "schema_version": "1.2",
             "profile": "water-balance-v1", "source_package_id": "not-a-digest",
-            "site_id": "test", "source_package_qc_status": "pass",
+            "site_id": "test", "study_start": "2025-01-01T00:00:00Z",
+            "study_end": "2025-01-02T00:00:00Z", "source_package_qc_status": "pass",
+            "catchment_area_m2": 1.0, "catchment_area_source": "test fixture",
             "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
             "source_validation_policy_digests": {}, "qc_gate": "require_pass",
             "assets": [], "transformations_not_performed": [],
         })
+
+
+def test_hydropinn_manifest_requires_valid_study_interval():
+    document = {
+        "schema_name": "HydroPINNExport", "schema_version": "1.2",
+        "profile": "water-balance-v1", "source_package_id": "sha256:" + "a" * 64,
+        "site_id": "test", "study_start": "2025-01-02T00:00:00Z",
+        "study_end": "2025-01-01T00:00:00Z", "source_package_qc_status": "pass",
+        "catchment_area_m2": 1.0, "catchment_area_source": "test fixture",
+        "source_failed_qc_rule_ids": [], "source_qc_policy_digests": {},
+        "source_validation_policy_digests": {}, "qc_gate": "require_pass",
+        "assets": [], "transformations_not_performed": [],
+    }
+    with pytest.raises(WatershedDataError, match="study_start must precede study_end"):
+        HydroPINNExportManifest.from_dict(document)
+
+    document["study_start"] = "2025-01-01T00:00:00Z"
+    document["study_end"] = "2025-01-02T00:00:00Z"
+    document["catchment_area_m2"] = 0
+    with pytest.raises(WatershedDataError, match="catchment_area_m2 must be positive"):
+        HydroPINNExportManifest.from_dict(document)
+
+    document["catchment_area_m2"] = 1.0
+    del document["study_start"]
+    with pytest.raises(WatershedDataError, match="invalid HydroPINNExport manifest"):
+        HydroPINNExportManifest.from_dict(document)
