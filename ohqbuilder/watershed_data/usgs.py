@@ -46,9 +46,13 @@ def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
 
 
 def _bounding_box(spec: SiteSpec, radius_km: float) -> str:
+    if not math.isfinite(radius_km) or radius_km <= 0:
+        raise WatershedDataError("USGS gauge discovery radius must be positive and finite")
     latitude_delta = radius_km / 111.32
     longitude_delta = radius_km / (111.32 * max(0.1, math.cos(math.radians(spec.latitude))))
-    return ",".join(str(value) for value in (
+    # NWIS rejects bBox coordinates with excessive decimal precision. Six places
+    # retain sub-metre precision while satisfying the service request contract.
+    return ",".join(f"{value:.6f}" for value in (
         spec.longitude - longitude_delta, spec.latitude - latitude_delta,
         spec.longitude + longitude_delta, spec.latitude + latitude_delta,
     ))

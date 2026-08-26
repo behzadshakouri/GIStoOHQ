@@ -38,6 +38,7 @@ from ohqbuilder.ui.launcher import (
     use_expanded_acquisition,
     workflow_prerequisite_error,
     write_drawn_acquisition,
+    watershed_catalog_has_harmonized_assets,
     watershed_data_example_for_site,
     watershed_data_command,
 )
@@ -142,6 +143,10 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert "SiteSpec does not exist. Enter the site fields" in source
     assert "The watershed package has not been created" in source
     assert "read_outlet_point" in source
+    assert 'text="Close", command=dialog.destroy' in source
+    assert "No reconnaissance report exists" in source
+    assert "No harmonized temporal assets are available" in source
+    assert "dialog.destroy()\n            self.start_workflow_command(command)" not in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
     assert "Use Reconnaissance Selection" in source
@@ -173,6 +178,17 @@ def test_watershed_data_examples_supply_complete_site_bootstrap_values():
     assert john_mccormack is not None
     assert john_mccormack["longitude"] == "-76.99597205373109"
     assert watershed_data_example_for_site("unrelated") is None
+
+
+def test_launcher_detects_exportable_harmonized_catalog_assets(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    assert watershed_catalog_has_harmonized_assets(catalog) is False
+    catalog.write_text(json.dumps({"assets": [{"product": "historical-meteorology"}]}))
+    assert watershed_catalog_has_harmonized_assets(catalog) is False
+    catalog.write_text(json.dumps({
+        "assets": [{"product": "harmonized-temporal-observations"}],
+    }))
+    assert watershed_catalog_has_harmonized_assets(catalog) is True
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):

@@ -103,6 +103,23 @@ def watershed_data_example_for_site(site_name: str) -> dict[str, str] | None:
     return None
 
 
+def watershed_catalog_has_harmonized_assets(catalog: str | Path) -> bool:
+    """Return whether a launcher catalog contains an exportable temporal asset."""
+    path = Path(catalog).expanduser()
+    if not path.is_file():
+        return False
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    assets = document.get("assets")
+    return isinstance(assets, list) and any(
+        isinstance(asset, dict)
+        and asset.get("product") == "harmonized-temporal-observations"
+        for asset in assets
+    )
+
+
 def osm_tile_cache_path(zoom: int, x: int, y: int, *, cache_dir: Path = OSM_CACHE_DIR) -> Path:
     """Return the cache path for a downloaded OSM tile."""
 
@@ -2113,6 +2130,16 @@ class LauncherApp:
 
         def run(action: str) -> None:
             if action == "use-recon-selection":
+                report_root = Path(variables["Reconnaissance output"].get()).expanduser()
+                report_path = (
+                    report_root if report_root.suffix.lower() == ".json"
+                    else report_root / "report.json"
+                )
+                if not report_path.is_file():
+                    self.messages.put(
+                        "ERROR: No reconnaissance report exists. Click Discover Gauges first.\n"
+                    )
+                    return
                 try:
                     station = selected_station_from_report(
                         variables["Reconnaissance output"].get()
@@ -2140,6 +2167,14 @@ class LauncherApp:
                 self.messages.put(
                     "ERROR: The watershed package has not been created. Run all data steps "
                     "or click Freeze Package first.\n"
+                )
+                return
+            if action == "export-hydropinn" and not watershed_catalog_has_harmonized_assets(
+                variables["Catalog"].get()
+            ):
+                self.messages.put(
+                    "ERROR: No harmonized temporal assets are available. Run Weather/PET to "
+                    "Export, run all data steps, or harmonize downloaded assets first.\n"
                 )
                 return
             try:
@@ -2175,7 +2210,6 @@ class LauncherApp:
             except (LauncherError, ValueError) as exc:
                 self.messages.put(f"ERROR: {exc}\n")
                 return
-            dialog.destroy()
             self.start_workflow_command(command)
 
         actions = (
@@ -2204,6 +2238,9 @@ class LauncherApp:
             )
         for column in range(3):
             action_frame.columnconfigure(column, weight=1)
+        tk.Button(content, text="Close", command=dialog.destroy).grid(
+            row=row + 1, column=2, sticky="e", padx=10, pady=(0, 10)
+        )
         content.columnconfigure(1, weight=1)
 
     def configure_documented_watershed(self) -> None:
