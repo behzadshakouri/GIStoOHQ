@@ -6,7 +6,7 @@ import json
 import math
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +17,7 @@ from .schemas import canonical_request_key
 
 USGS_SITE_SERVICE = "https://waterservices.usgs.gov/nwis/site/"
 USGS_INSTANTANEOUS_VALUES_SERVICE = "https://waterservices.usgs.gov/nwis/iv/"
+USGS_SERIES_CATALOG_LIMIT = 25
 
 
 @dataclass(frozen=True)
@@ -46,9 +47,13 @@ def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
 
 
 def _bounding_box(spec: SiteSpec, radius_km: float) -> str:
+    if not math.isfinite(radius_km) or radius_km <= 0:
+        raise WatershedDataError("USGS gauge discovery radius must be positive and finite")
     latitude_delta = radius_km / 111.32
     longitude_delta = radius_km / (111.32 * max(0.1, math.cos(math.radians(spec.latitude))))
-    return ",".join(str(value) for value in (
+    # NWIS rejects bBox coordinates with excessive decimal precision. Six places
+    # retain sub-metre precision while satisfying the service request contract.
+    return ",".join(f"{value:.6f}" for value in (
         spec.longitude - longitude_delta, spec.latitude - latitude_delta,
         spec.longitude + longitude_delta, spec.latitude + latitude_delta,
     ))
@@ -62,12 +67,27 @@ def build_site_query(spec: SiteSpec, radius_km: float) -> str:
     return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
 
 
+def build_series_catalog_query(station_ids: list[str]) -> str:
+    """Build a bounded follow-up query for station record coverage metadata."""
+    if not station_ids or len(station_ids) > USGS_SERIES_CATALOG_LIMIT:
+        raise WatershedDataError(
+            f"USGS series catalog query requires 1-{USGS_SERIES_CATALOG_LIMIT} stations"
+        )
+    if any(not station_id.isdigit() for station_id in station_ids):
+        raise WatershedDataError("USGS station IDs must contain digits only")
+    parameters = {
+        "format": "rdb", "sites": ",".join(station_ids), "parameterCd": "00060",
+        "siteStatus": "all", "seriesCatalogOutput": "true",
+    }
+    return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
+
+
 def parse_site_rdb(text: str, spec: SiteSpec) -> list[GaugeCandidate]:
     lines = [line for line in text.splitlines() if line and not line.startswith("#")]
     if len(lines) < 2:
         return []
     reader = csv.DictReader(io.StringIO("\n".join([lines[0], *lines[2:]])), delimiter="\t")
-    candidates = []
+    candidates: dict[str, GaugeCandidate] = {}
     for row in reader:
         if not row.get("site_no") or not row.get("dec_long_va") or not row.get("dec_lat_va"):
             continue
@@ -81,15 +101,36 @@ def parse_site_rdb(text: str, spec: SiteSpec) -> list[GaugeCandidate]:
                 area = float(row["drain_area_va"]) * 2.589988110336
         except ValueError:
             pass
-        candidates.append(GaugeCandidate(
+        candidate = GaugeCandidate(
             provider="usgs", station_id=row["site_no"], name=row.get("station_nm") or "",
             longitude=longitude, latitude=latitude,
             distance_km=_haversine_km(spec.longitude, spec.latitude, longitude, latitude),
             drainage_area_km2=area, record_start=row.get("begin_date") or None,
             record_end=row.get("end_date") or None,
             status=(row.get("site_status") or row.get("site_tp_cd") or "unknown").lower(),
-        ))
-    return sorted(candidates, key=lambda item: (item.distance_km, item.station_id))
+        )
+        previous = candidates.get(candidate.station_id)
+        if previous is None:
+            candidates[candidate.station_id] = candidate
+            continue
+        starts = [value for value in (previous.record_start, candidate.record_start) if value]
+        ends = [value for value in (previous.record_end, candidate.record_end) if value]
+        candidates[candidate.station_id] = GaugeCandidate(
+            provider=previous.provider, station_id=previous.station_id,
+            name=previous.name or candidate.name, longitude=previous.longitude,
+            latitude=previous.latitude, distance_km=previous.distance_km,
+            drainage_area_km2=(
+                previous.drainage_area_km2
+                if previous.drainage_area_km2 is not None else candidate.drainage_area_km2
+            ),
+            record_start=min(starts) if starts else None,
+            record_end=max(ends) if ends else None,
+            status=(
+                "active" if "active" in {previous.status, candidate.status}
+                else previous.status
+            ),
+        )
+    return sorted(candidates.values(), key=lambda item: (item.distance_km, item.station_id))
 
 
 def discover_gauges(
@@ -102,8 +143,35 @@ def discover_gauges(
     raw, _, _ = download_bytes(
         url, opener=opener, timeout=60.0, label="USGS gauge discovery"
     )
-    text = raw.decode("utf-8")
-    return url, parse_site_rdb(text, spec)
+    candidates = parse_site_rdb(raw.decode("utf-8"), spec)
+    nearest_ids = [
+        candidate.station_id for candidate in candidates[:USGS_SERIES_CATALOG_LIMIT]
+    ]
+    if not nearest_ids:
+        return url, candidates
+    coverage_url = build_series_catalog_query(nearest_ids)
+    coverage_raw, _, _ = download_bytes(
+        coverage_url, opener=opener, timeout=60.0, label="USGS gauge record coverage"
+    )
+    coverage = {
+        candidate.station_id: candidate
+        for candidate in parse_site_rdb(coverage_raw.decode("utf-8"), spec)
+    }
+    enriched = [
+        replace(
+            candidate,
+            drainage_area_km2=(
+                candidate.drainage_area_km2
+                if candidate.drainage_area_km2 is not None
+                else coverage[candidate.station_id].drainage_area_km2
+            ),
+            record_start=coverage[candidate.station_id].record_start,
+            record_end=coverage[candidate.station_id].record_end,
+            status=coverage[candidate.station_id].status,
+        ) if candidate.station_id in coverage else candidate
+        for candidate in candidates
+    ]
+    return url, enriched
 
 
 def build_discharge_query(spec: SiteSpec, station_id: str) -> tuple[str, dict[str, str]]:

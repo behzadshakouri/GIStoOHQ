@@ -14,6 +14,17 @@ class WatershedDataError(ValueError):
     """Raised when a watershed-data document violates its contract."""
 
 
+def _is_sha256(value: object, *, prefixed: bool = False) -> bool:
+    if not isinstance(value, str):
+        return False
+    candidate = value.removeprefix("sha256:") if prefixed else value
+    return (
+        (not prefixed or value.startswith("sha256:"))
+        and len(candidate) == 64
+        and all(character in "0123456789abcdef" for character in candidate)
+    )
+
+
 def _utc_timestamp(value: str, field: str) -> str:
     if not isinstance(value, str):
         raise WatershedDataError(f"{field} must be an ISO-8601 timestamp")
@@ -219,11 +230,18 @@ class PackageManifest:
     self_contained: bool
     redistributable: bool
     package_qc_status: Literal["pass", "warning", "fail", "not_run"] = "not_run"
+    failed_qc_rule_ids: tuple[str, ...] = ()
+    qc_policy_digests: dict[str, str] = field(default_factory=dict)
+    validation_policy_digests: dict[str, str] = field(default_factory=dict)
     sidecar_checksums: dict[str, str] = field(default_factory=dict)
-    schema_version: str = "1.0"
+    schema_version: str = "1.2"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PackageManifest":
+        if data.get("schema_name") != "PackageManifest" or data.get("schema_version") not in {
+            "1.0", "1.1", "1.2",
+        }:
+            raise WatershedDataError("PackageManifest schema must be version 1.0, 1.1, or 1.2")
         try:
             manifest = cls(
                 package_id=str(data["package_id"]), site_id=str(data["site_id"]),
@@ -235,8 +253,11 @@ class PackageManifest:
                 raw_inclusion=data["raw_inclusion"], self_contained=bool(data["self_contained"]),
                 redistributable=bool(data["redistributable"]),
                 package_qc_status=data.get("package_qc_status", "not_run"),
+                failed_qc_rule_ids=tuple(data.get("failed_qc_rule_ids", ())),
+                qc_policy_digests=dict(data.get("qc_policy_digests", {})),
+                validation_policy_digests=dict(data.get("validation_policy_digests", {})),
                 sidecar_checksums=dict(data.get("sidecar_checksums", {})),
-                schema_version=str(data.get("schema_version", "1.0")),
+                schema_version=str(data["schema_version"]),
             )
         except (KeyError, TypeError) as exc:
             raise WatershedDataError(f"invalid PackageManifest: missing {exc}") from exc
@@ -246,10 +267,44 @@ class PackageManifest:
             raise WatershedDataError("self_contained must be true exactly when raw_inclusion is all")
         if manifest.package_qc_status not in {"pass", "warning", "fail", "not_run"}:
             raise WatershedDataError("package_qc_status must be pass, warning, fail, or not_run")
+        if not _is_sha256(manifest.package_id, prefixed=True):
+            raise WatershedDataError("package_id must be a sha256-prefixed lowercase digest")
+        if not _is_sha256(manifest.site_spec_digest):
+            raise WatershedDataError("site_spec_digest must be a lowercase SHA-256 value")
+        if not _is_sha256(manifest.catalog_digest):
+            raise WatershedDataError("catalog_digest must be a lowercase SHA-256 value")
+        if not manifest.site_id or not manifest.producer or not manifest.producer_version:
+            raise WatershedDataError("site_id, producer, and producer_version must be non-empty")
+        if any(not _is_sha256(asset_id, prefixed=True) for asset_id in manifest.included_asset_ids):
+            raise WatershedDataError("included_asset_ids must be sha256-prefixed digests")
+        if tuple(sorted(set(manifest.included_asset_ids))) != manifest.included_asset_ids:
+            raise WatershedDataError("included_asset_ids must be sorted and unique")
+        if any(not isinstance(rule_id, str) or not rule_id for rule_id in manifest.failed_qc_rule_ids):
+            raise WatershedDataError("failed_qc_rule_ids must contain non-empty strings")
+        if tuple(sorted(set(manifest.failed_qc_rule_ids))) != manifest.failed_qc_rule_ids:
+            raise WatershedDataError("failed_qc_rule_ids must be sorted and unique")
+        for policy_version, policy_digest in manifest.qc_policy_digests.items():
+            if not isinstance(policy_version, str) or not policy_version:
+                raise WatershedDataError("qc_policy_digests keys must be non-empty")
+            if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
+                char not in "0123456789abcdef" for char in policy_digest
+            ):
+                raise WatershedDataError("qc_policy_digests values must be lowercase SHA-256")
+        for policy_version, policy_digest in manifest.validation_policy_digests.items():
+            if not isinstance(policy_version, str) or not policy_version:
+                raise WatershedDataError("validation_policy_digests keys must be non-empty")
+            if not isinstance(policy_digest, str) or len(policy_digest) != 64 or any(
+                char not in "0123456789abcdef" for char in policy_digest
+            ):
+                raise WatershedDataError(
+                    "validation_policy_digests values must be lowercase SHA-256"
+                )
         for path, digest in manifest.sidecar_checksums.items():
-            if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+            if (not isinstance(path, str) or not path or Path(path).is_absolute()
+                    or ".." in Path(path).parts):
                 raise WatershedDataError("sidecar checksum paths must be safe relative paths")
-            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(char not in "0123456789abcdef" for char in digest)):
                 raise WatershedDataError("sidecar checksums must be lowercase SHA-256 values")
         return manifest
 
@@ -263,5 +318,100 @@ class PackageManifest:
             "raw_inclusion": self.raw_inclusion, "self_contained": self.self_contained,
             "redistributable": self.redistributable,
             "package_qc_status": self.package_qc_status,
+            "failed_qc_rule_ids": list(self.failed_qc_rule_ids),
+            "qc_policy_digests": dict(sorted(self.qc_policy_digests.items())),
+            "validation_policy_digests": dict(sorted(self.validation_policy_digests.items())),
             "sidecar_checksums": dict(sorted(self.sidecar_checksums.items())),
+        }
+
+
+@dataclass(frozen=True)
+class HydroPINNExportManifest:
+    profile: str
+    source_package_id: str
+    site_id: str
+    source_package_qc_status: Literal["pass", "warning", "fail", "not_run"]
+    source_failed_qc_rule_ids: tuple[str, ...]
+    source_qc_policy_digests: dict[str, str]
+    source_validation_policy_digests: dict[str, str]
+    qc_gate: Literal["reject_fail", "require_pass"]
+    assets: tuple[dict[str, str], ...]
+    transformations_not_performed: tuple[str, ...]
+    schema_version: str = "1.1"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "HydroPINNExportManifest":
+        if data.get("schema_name") != "HydroPINNExport" or data.get("schema_version") != "1.1":
+            raise WatershedDataError("HydroPINNExport schema must be version 1.1")
+        try:
+            manifest = cls(
+                profile=str(data["profile"]), source_package_id=str(data["source_package_id"]),
+                site_id=str(data["site_id"]),
+                source_package_qc_status=data["source_package_qc_status"],
+                source_failed_qc_rule_ids=tuple(data["source_failed_qc_rule_ids"]),
+                source_qc_policy_digests=dict(data["source_qc_policy_digests"]),
+                source_validation_policy_digests=dict(
+                    data["source_validation_policy_digests"]
+                ),
+                qc_gate=data["qc_gate"], assets=tuple(data["assets"]),
+                transformations_not_performed=tuple(data["transformations_not_performed"]),
+            )
+        except (KeyError, TypeError) as exc:
+            raise WatershedDataError(f"invalid HydroPINNExport manifest: {exc}") from exc
+        if manifest.source_package_qc_status not in {"pass", "warning", "fail", "not_run"}:
+            raise WatershedDataError("invalid HydroPINNExport source QC status")
+        if manifest.qc_gate not in {"reject_fail", "require_pass"}:
+            raise WatershedDataError("invalid HydroPINNExport QC gate")
+        if not manifest.profile or not manifest.site_id:
+            raise WatershedDataError("HydroPINNExport profile and site_id must be non-empty")
+        if not _is_sha256(manifest.source_package_id, prefixed=True):
+            raise WatershedDataError("invalid HydroPINNExport source package ID")
+        if any(not isinstance(rule_id, str) or not rule_id
+               for rule_id in manifest.source_failed_qc_rule_ids):
+            raise WatershedDataError("HydroPINNExport failed rule IDs must be non-empty strings")
+        if tuple(sorted(set(manifest.source_failed_qc_rule_ids))) != manifest.source_failed_qc_rule_ids:
+            raise WatershedDataError("HydroPINNExport failed rule IDs must be sorted and unique")
+        for version, digest in manifest.source_qc_policy_digests.items():
+            if (not isinstance(version, str) or not version or not isinstance(digest, str)
+                    or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
+                raise WatershedDataError("invalid HydroPINNExport policy digest")
+        for version, digest in manifest.source_validation_policy_digests.items():
+            if (not isinstance(version, str) or not version or not isinstance(digest, str)
+                    or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
+                raise WatershedDataError("invalid HydroPINNExport validation policy digest")
+        for asset in manifest.assets:
+            if not isinstance(asset, dict) or set(asset) != {"asset_id", "path", "sha256"}:
+                raise WatershedDataError("invalid HydroPINNExport asset entry")
+            if not _is_sha256(asset["asset_id"], prefixed=True):
+                raise WatershedDataError("invalid HydroPINNExport asset ID")
+            if not isinstance(asset["path"], str) or not asset["path"]:
+                raise WatershedDataError("invalid HydroPINNExport asset path")
+            path = Path(asset["path"])
+            if path.is_absolute() or ".." in path.parts:
+                raise WatershedDataError("HydroPINNExport asset paths must be safe and relative")
+            digest = asset["sha256"]
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
+                raise WatershedDataError("invalid HydroPINNExport asset checksum")
+        if (any(not isinstance(item, str) or not item
+                for item in manifest.transformations_not_performed)
+                or len(set(manifest.transformations_not_performed))
+                != len(manifest.transformations_not_performed)):
+            raise WatershedDataError(
+                "HydroPINNExport transformations_not_performed must be unique strings"
+            )
+        return manifest
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_name": "HydroPINNExport", "schema_version": self.schema_version,
+            "profile": self.profile, "source_package_id": self.source_package_id,
+            "site_id": self.site_id, "source_package_qc_status": self.source_package_qc_status,
+            "source_failed_qc_rule_ids": list(self.source_failed_qc_rule_ids),
+            "source_qc_policy_digests": dict(sorted(self.source_qc_policy_digests.items())),
+            "source_validation_policy_digests": dict(
+                sorted(self.source_validation_policy_digests.items())
+            ),
+            "qc_gate": self.qc_gate, "assets": list(self.assets),
+            "transformations_not_performed": list(self.transformations_not_performed),
         }
