@@ -23,6 +23,7 @@ def run_watershed_data_pipeline(
     include_weather: bool = True,
     include_pet: bool = True,
     export_hydropinn_profile: bool = False,
+    require_qc_pass: bool = False,
     discharge_acquirer: Callable = acquire_observed_discharge,
     weather_acquirer: Callable = acquire_historical_meteorology,
     pet_acquirer: Callable = acquire_pet_et,
@@ -50,6 +51,10 @@ def run_watershed_data_pipeline(
         raise WatershedDataError("forecast URL and provider must be supplied together")
     if prediction_time and not forecast_url:
         raise WatershedDataError("prediction time requires a forecast URL and provider")
+    if require_qc_pass and not export_hydropinn_profile:
+        raise WatershedDataError(
+            "require_qc_pass is only valid when HydroPINN export is enabled"
+        )
     site_path = Path(site_spec).expanduser().resolve()
     if not site_path.exists() and init_if_missing:
         missing = [
@@ -100,6 +105,8 @@ def run_watershed_data_pipeline(
             asset_id=asset["asset_id"], catalog=catalog, object_store=cache,
             qc_output=qc_dir / f"{safe_id}.json",
             provenance_output=provenance_dir / f"{safe_id}.json",
+            expected_start=spec.study_start, expected_end=spec.study_end,
+            fail_on_qc_error=True,
         ))
     if forecast_asset is not None and prediction_time:
         forecast_view = forecast_view_builder(
@@ -115,7 +122,8 @@ def run_watershed_data_pipeline(
     hydropinn_manifest = None
     if export_hydropinn_profile:
         hydropinn_manifest = export_hydropinn(
-            package=package, object_store=cache, output=root / "hydropinn"
+            package=package, object_store=cache, output=root / "hydropinn",
+            require_qc_pass=require_qc_pass,
         )
     return {
         "site_id": spec.site_id,
@@ -125,6 +133,10 @@ def run_watershed_data_pipeline(
         "derived_asset_ids": [asset["asset_id"] for asset in derived_assets],
         "package_manifest": str(manifest_path),
         "package_id": manifest.package_id,
+        "package_qc_status": manifest.package_qc_status,
+        "failed_qc_rule_ids": list(manifest.failed_qc_rule_ids),
+        "qc_policy_digests": dict(manifest.qc_policy_digests),
+        "validation_policy_digests": dict(manifest.validation_policy_digests),
         "hydropinn_manifest": str(hydropinn_manifest) if hydropinn_manifest else None,
         "forecast_asset_id": forecast_asset["asset_id"] if forecast_asset else None,
         "forecast_view_asset_id": forecast_view["asset_id"] if forecast_view else None,
