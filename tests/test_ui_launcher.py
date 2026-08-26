@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import queue
@@ -10,6 +11,7 @@ import pytest
 from ohqbuilder.ui.launcher import (
     BASEMAP_PROVIDERS,
     CommandRunner,
+    LauncherApp,
     LauncherError,
     LauncherState,
     RunnerFinished,
@@ -36,6 +38,8 @@ from ohqbuilder.ui.launcher import (
     use_expanded_acquisition,
     workflow_prerequisite_error,
     write_drawn_acquisition,
+    watershed_catalog_has_harmonized_assets,
+    watershed_data_example_for_site,
     watershed_data_command,
 )
 
@@ -73,12 +77,17 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         "export-hydropinn", site_spec="site.yaml", package="package",
         cache="cache", hydropinn_output="export",
     ).argv[-2:] == ("--output", "export")
+    assert watershed_data_command(
+        "export-hydropinn", site_spec="site.yaml", require_qc_pass=True,
+    ).argv[-1] == "--require-qc-pass"
     run = watershed_data_command(
         "run", site_spec="site.yaml", station_id="01649500", workspace="run",
         site_id="demo", longitude=-77, latitude=39,
         study_start="2024-01-01T00:00:00Z", study_end="2024-12-31T23:00:00Z",
+        require_qc_pass=True,
     )
     assert "--init-if-missing" in run.argv
+    assert "--require-qc-pass" in run.argv
     refreshed = watershed_data_command(
         "download-weather", site_spec="site.yaml", refresh=True
     )
@@ -103,10 +112,12 @@ def test_standalone_launcher_builds_optional_watershed_data_commands():
         forecast_provider="example",
     )
     assert forecast.argv[2] == "download-forecast"
-    assert watershed_data_command(
+    status = watershed_data_command(
         "status", site_spec="site.yaml", catalog="catalog.json", cache="cache",
         status_output="status",
-    ).argv[-2:] == ("--output", "status")
+    )
+    assert ("--output", "status") == status.argv[status.argv.index("--output"):][:2]
+    assert ("--package", "watershed_package") == status.argv[-2:]
     weather_run = watershed_data_command(
         "run-weather", site_spec="site.yaml", workspace="weather_run",
         site_id="demo", longitude=-77, latitude=39,
@@ -123,11 +134,65 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.title("Optional Watershed Data")' in source
     assert "Download Selected Discharge" in source
     assert "Download Weather" in source
-    assert 'dialog.geometry("760x700")' in source
+    assert 'dialog.geometry("700x620")' in source
+    assert 'text="Paths and forecast settings…"' in source
+    assert 'advanced.title("Watershed Data Paths and Forecast Settings")' in source
+    assert 'text="Optional advanced actions"' in source
+    assert 'text="Example watershed"' in source
+    assert 'text="Load example"' in source
+    assert "SiteSpec does not exist. Enter the site fields" in source
+    assert "The watershed package has not been created" in source
+    assert "read_outlet_point" in source
+    assert 'text="Close", command=dialog.destroy' in source
+    assert "No reconnaissance report exists" in source
+    assert "No harmonized temporal assets are available" in source
+    assert "dialog.destroy()\n            self.start_workflow_command(command)" not in source
+    assert "refresh_data_action_buttons" in source
+    assert 'state = "disabled" if self.command_running else "normal"' in source
+    assert "starting the next data step" in source
+    assert "SiteSpec already exists; keeping the existing file" in source
     assert 'tk.LabelFrame(content, text="Actions")' in source
     assert "RUN WEATHER/PET TO EXPORT" in source
     assert "Use Reconnaissance Selection" in source
     assert 'project_dir / "sites" / f"{site_id}.yaml"' in source
+
+
+def test_existing_site_spec_does_not_require_bootstrap_fields_for_one_button_run(tmp_path):
+    site = tmp_path / "site.yaml"
+    site.write_text("existing", encoding="utf-8")
+
+    command = watershed_data_command(
+        "run", site_spec=str(site), station_id="01649500", workspace="run"
+    )
+
+    assert "--init-if-missing" not in command.argv
+    assert "--site-id" not in command.argv
+
+
+def test_watershed_data_examples_supply_complete_site_bootstrap_values():
+    sligo = watershed_data_example_for_site("SligoCreekDemo")
+    john_mccormack = watershed_data_example_for_site("JohnMcCormack3600")
+
+    assert sligo == {
+        "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
+        "longitude": "-77.0000", "latitude": "38.9700",
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    }
+    assert john_mccormack is not None
+    assert john_mccormack["longitude"] == "-76.99597205373109"
+    assert watershed_data_example_for_site("unrelated") is None
+
+
+def test_launcher_detects_exportable_harmonized_catalog_assets(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    assert watershed_catalog_has_harmonized_assets(catalog) is False
+    catalog.write_text(json.dumps({"assets": [{"product": "historical-meteorology"}]}))
+    assert watershed_catalog_has_harmonized_assets(catalog) is False
+    catalog.write_text(json.dumps({
+        "assets": [{"product": "harmonized-temporal-observations"}],
+    }))
+    assert watershed_catalog_has_harmonized_assets(catalog) is True
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):
@@ -905,6 +970,13 @@ def test_ui_launcher_defaults_to_sligo_example_when_available():
     from ohqbuilder.ui.launcher import default_config_path
 
     assert default_config_path() == "examples/SligoCreek/dem_workflow.example.yaml"
+
+
+def test_watershed_dialog_exposes_strict_qc_export_gate():
+    source = inspect.getsource(LauncherApp.configure_watershed_data)
+
+    assert "Require passing package QC for HydroPINN export" in source
+    assert "require_qc_pass=require_qc_pass_var.get()" in source
 
 
 def test_run_dem_ui_shell_wrapper_exists():
