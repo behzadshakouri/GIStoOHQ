@@ -71,9 +71,11 @@ SLIGO_DEMO_TILE_INDEX = Path("indexes/usgs_3dep_tiles.demo.geojson")
 WATERSHED_DATA_EXAMPLES = {
     "Sligo Creek demo": {
         "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
-        "longitude": "-77.0000", "latitude": "38.9700",
+        "longitude": "-76.98873786162696", "latitude": "38.97837618066522",
         "study_start": "2024-01-01T00:00:00Z",
         "study_end": "2024-12-31T23:00:00Z",
+        "catchment_area_m2": "23754600.0",
+        "catchment_area_source": "GIStoOHQ watershed delineation",
     },
     "John McCormack demo": {
         "site_id": "johnmccormack3600", "name": "John McCormack 3600",
@@ -1970,8 +1972,14 @@ class LauncherApp:
                     example_defaults["study_end"] if example_defaults else ""
                 ))
             ),
-            "Catchment area (m²)": tk.StringVar(value=""),
-            "Catchment area source": tk.StringVar(value=""),
+            "Catchment area (m²)": tk.StringVar(
+                value=str(example_defaults.get("catchment_area_m2", ""))
+                if example_defaults else ""
+            ),
+            "Catchment area source": tk.StringVar(
+                value=str(example_defaults.get("catchment_area_source", ""))
+                if example_defaults else ""
+            ),
             "Reconnaissance output": tk.StringVar(value=str(workspace_default / "reconnaissance")),
             "Gauge radius (km)": tk.StringVar(value="50"),
             "Selected USGS station ID": tk.StringVar(value=""),
@@ -2019,8 +2027,10 @@ class LauncherApp:
             variables["Outlet latitude"].set(selected["latitude"])
             variables["Study start (UTC)"].set(selected["study_start"])
             variables["Study end (UTC)"].set(selected["study_end"])
-            variables["Catchment area (m²)"].set("")
-            variables["Catchment area source"].set("")
+            variables["Catchment area (m²)"].set(selected.get("catchment_area_m2", ""))
+            variables["Catchment area source"].set(
+                selected.get("catchment_area_source", "")
+            )
             variables["Selected USGS station ID"].set("")
             variables["SiteSpec"].set(
                 str(project_dir / "sites" / f"{selected['site_id']}.yaml")

@@ -193,11 +193,16 @@ def test_watershed_data_examples_supply_complete_site_bootstrap_values():
     sligo = watershed_data_example_for_site("SligoCreekDemo")
     john_mccormack = watershed_data_example_for_site("JohnMcCormack3600")
 
+    assert sligo["catchment_area_m2"] == "23754600.0"
+    assert sligo["catchment_area_source"] == "GIStoOHQ watershed delineation"
+
     assert sligo == {
         "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
-        "longitude": "-77.0000", "latitude": "38.9700",
+        "longitude": "-76.98873786162696", "latitude": "38.97837618066522",
         "study_start": "2024-01-01T00:00:00Z",
         "study_end": "2024-12-31T23:00:00Z",
+        "catchment_area_m2": "23754600.0",
+        "catchment_area_source": "GIStoOHQ watershed delineation",
     }
     assert john_mccormack is not None
     assert john_mccormack["longitude"] == "-76.99597205373109"

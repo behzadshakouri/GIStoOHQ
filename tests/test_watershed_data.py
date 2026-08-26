@@ -79,6 +79,15 @@ def test_site_spec_validates_and_preserves_catchment_area_provenance():
         SiteSpec.from_dict(document)
 
 
+def test_sligo_example_declares_authoritative_catchment_metadata():
+    spec = SiteSpec.from_file("examples/SligoCreek/sites/sligocreekdemo.yaml")
+
+    assert spec.site_id == "sligocreekdemo"
+    assert spec.catchment_area_m2 == 23_754_600.0
+    assert spec.catchment_area_source == "GIStoOHQ watershed delineation"
+    assert spec.digest != "99aeb6d9ac7c81f5c61b346c509c4eb5c4bfa6af6c1a5d40ac9c7fc2e08a2faa"
+
+
 def test_object_store_deduplicates_and_catalog_registers_once(tmp_path):
     store = ObjectStore(tmp_path / "cache")
     first = store.put(io.BytesIO(b"weather data"))
