@@ -330,6 +330,8 @@ class HydroPINNExportManifest:
     profile: str
     source_package_id: str
     site_id: str
+    study_start: str
+    study_end: str
     source_package_qc_status: Literal["pass", "warning", "fail", "not_run"]
     source_failed_qc_rule_ids: tuple[str, ...]
     source_qc_policy_digests: dict[str, str]
@@ -337,16 +339,18 @@ class HydroPINNExportManifest:
     qc_gate: Literal["reject_fail", "require_pass"]
     assets: tuple[dict[str, str], ...]
     transformations_not_performed: tuple[str, ...]
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "HydroPINNExportManifest":
-        if data.get("schema_name") != "HydroPINNExport" or data.get("schema_version") != "1.1":
-            raise WatershedDataError("HydroPINNExport schema must be version 1.1")
+        if data.get("schema_name") != "HydroPINNExport" or data.get("schema_version") != "1.2":
+            raise WatershedDataError("HydroPINNExport schema must be version 1.2")
         try:
             manifest = cls(
                 profile=str(data["profile"]), source_package_id=str(data["source_package_id"]),
                 site_id=str(data["site_id"]),
+                study_start=_utc_timestamp(data["study_start"], "study_start"),
+                study_end=_utc_timestamp(data["study_end"], "study_end"),
                 source_package_qc_status=data["source_package_qc_status"],
                 source_failed_qc_rule_ids=tuple(data["source_failed_qc_rule_ids"]),
                 source_qc_policy_digests=dict(data["source_qc_policy_digests"]),
@@ -364,6 +368,8 @@ class HydroPINNExportManifest:
             raise WatershedDataError("invalid HydroPINNExport QC gate")
         if not manifest.profile or not manifest.site_id:
             raise WatershedDataError("HydroPINNExport profile and site_id must be non-empty")
+        if manifest.study_start >= manifest.study_end:
+            raise WatershedDataError("HydroPINNExport study_start must precede study_end")
         if not _is_sha256(manifest.source_package_id, prefixed=True):
             raise WatershedDataError("invalid HydroPINNExport source package ID")
         if any(not isinstance(rule_id, str) or not rule_id
@@ -406,7 +412,9 @@ class HydroPINNExportManifest:
         return {
             "schema_name": "HydroPINNExport", "schema_version": self.schema_version,
             "profile": self.profile, "source_package_id": self.source_package_id,
-            "site_id": self.site_id, "source_package_qc_status": self.source_package_qc_status,
+            "site_id": self.site_id, "study_start": self.study_start,
+            "study_end": self.study_end,
+            "source_package_qc_status": self.source_package_qc_status,
             "source_failed_qc_rule_ids": list(self.source_failed_qc_rule_ids),
             "source_qc_policy_digests": dict(sorted(self.source_qc_policy_digests.items())),
             "source_validation_policy_digests": dict(
