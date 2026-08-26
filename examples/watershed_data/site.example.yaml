@@ -10,6 +10,10 @@ geometry:
 study_period:
   start: 2024-01-01T00:00:00Z
   end: 2024-12-31T23:00:00Z
+catchment:
+  # Replace with the modeled GIS catchment's authoritative area and provenance.
+  area_m2: 1000000.0
+  source: GIS-delineated watershed
 target_timestep: 1h
 sources:
   discharge:
