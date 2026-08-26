@@ -60,10 +60,19 @@ def _bounding_box(spec: SiteSpec, radius_km: float) -> str:
 
 
 def build_site_query(spec: SiteSpec, radius_km: float) -> str:
+    """Build the initial USGS site-discovery query.
+
+    USGS does not allow ``siteOutput=expanded`` and
+    ``seriesCatalogOutput=true`` in the same request. Discovery therefore
+    requests expanded site metadata first; period-of-record metadata is
+    retrieved separately by ``build_series_catalog_query``.
+    """
     parameters = {
-        "format": "rdb", "bBox": _bounding_box(spec, radius_km),
-        "parameterCd": "00060", "siteStatus": "all", "siteOutput": "expanded",
-        "seriesCatalogOutput": "true",
+        "format": "rdb",
+        "bBox": _bounding_box(spec, radius_km),
+        "parameterCd": "00060",
+        "siteStatus": "all",
+        "siteOutput": "expanded",
     }
     return USGS_SITE_SERVICE + "?" + urllib.parse.urlencode(parameters)
 
