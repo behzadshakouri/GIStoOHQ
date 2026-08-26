@@ -92,6 +92,10 @@ def export_hydropinn(
             "HydroPINN export requires passing package QC; source status is "
             + package_manifest.package_qc_status
         )
+    if spec.catchment_area_m2 is None:
+        raise WatershedDataError(
+            "HydroPINN export requires catchment.area_m2 in the frozen SiteSpec"
+        )
     catalog = AssetCatalog(root / "catalog.json").read()
     assets = [
         asset for asset in catalog["assets"]
@@ -155,6 +159,8 @@ def export_hydropinn(
             "profile": profile, "source_package_id": package_manifest.package_id,
             "site_id": package_manifest.site_id,
             "study_start": spec.study_start, "study_end": spec.study_end,
+            "catchment_area_m2": spec.catchment_area_m2,
+            "catchment_area_source": spec.catchment_area_source,
             "source_package_qc_status": package_manifest.package_qc_status,
             "source_failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids),
             "source_qc_policy_digests": dict(package_manifest.qc_policy_digests),

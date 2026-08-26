@@ -420,12 +420,14 @@ Pass `--require-qc-pass` to either `data export-hydropinn` or an exporting `data
 to reject both warning and `not_run` packages as well. A pipeline run rejects this
 option unless `--export-hydropinn` is also selected, rather than silently ignoring
 the requested gate. HydroPINNExport 1.2 manifests record the authoritative study
-start and end from the frozen SiteSpec, the source package QC status, failed rule
-IDs, policy digests, and the applied `reject_fail` or `require_pass` gate, making
-the temporal and export decisions auditable after publication.
-The HydroPINNExport 1.2 schema validates the required study interval, QC enums,
-sorted failed-rule IDs, policy and asset checksums, source package IDs, required
-strings, unique omitted-operation labels, and safe relative asset paths before
+start, end, positive catchment area in square metres, and area provenance from the
+frozen SiteSpec. They also record the source package QC status, failed rule IDs,
+policy digests, and the applied `reject_fail` or `require_pass` gate, making the
+temporal and export decisions auditable after publication. Export fails when the
+SiteSpec has no catchment area rather than guessing from a selected USGS gauge.
+The HydroPINNExport 1.2 schema validates the required study interval, catchment
+area, QC enums, sorted failed-rule IDs, policy and asset checksums, source package
+IDs, required strings, unique omitted-operation labels, and safe relative asset paths before
 publishing the manifest. Manifest policy/checksum validation rejects non-string JSON
 values with domain errors rather than leaking implementation type errors.
 Package and HydroPINN manifests also require canonical SHA-256 package, catalog,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,6 +83,8 @@ class SiteSpec:
     study_end: str
     target_timestep: str
     sources: dict[str, Any]
+    catchment_area_m2: float | None = None
+    catchment_area_source: str | None = None
     schema_version: str = "1.0"
 
     @classmethod
@@ -108,6 +111,26 @@ class SiteSpec:
         sources = data.get("sources") or {}
         if not isinstance(sources, dict):
             raise WatershedDataError("sources must be an object")
+        catchment = data.get("catchment") or {}
+        if not isinstance(catchment, dict):
+            raise WatershedDataError("catchment must be an object")
+        area_value = catchment.get("area_m2")
+        area_source = catchment.get("source")
+        if area_value is None:
+            catchment_area_m2 = None
+            catchment_area_source = None
+        else:
+            try:
+                catchment_area_m2 = float(area_value)
+            except (TypeError, ValueError) as exc:
+                raise WatershedDataError("catchment.area_m2 must be a positive number") from exc
+            if not math.isfinite(catchment_area_m2) or catchment_area_m2 <= 0:
+                raise WatershedDataError("catchment.area_m2 must be a positive number")
+            if not isinstance(area_source, str) or not area_source.strip():
+                raise WatershedDataError(
+                    "catchment.source is required when catchment.area_m2 is supplied"
+                )
+            catchment_area_source = area_source.strip()
         return cls(
             site_id=site_id,
             name=str(data.get("name") or site_id),
@@ -117,6 +140,8 @@ class SiteSpec:
             study_end=end,
             target_timestep=str(data.get("target_timestep") or "1h"),
             sources=sources,
+            catchment_area_m2=catchment_area_m2,
+            catchment_area_source=catchment_area_source,
             schema_version=str(data.get("schema_version") or "1.0"),
         )
 
@@ -130,7 +155,7 @@ class SiteSpec:
         return cls.from_dict(data)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document = {
             "schema_name": "SiteSpec",
             "schema_version": self.schema_version,
             "site_id": self.site_id,
@@ -143,6 +168,12 @@ class SiteSpec:
             "target_timestep": self.target_timestep,
             "sources": self.sources,
         }
+        if self.catchment_area_m2 is not None:
+            document["catchment"] = {
+                "area_m2": self.catchment_area_m2,
+                "source": self.catchment_area_source,
+            }
+        return document
 
     @property
     def digest(self) -> str:
@@ -332,6 +363,8 @@ class HydroPINNExportManifest:
     site_id: str
     study_start: str
     study_end: str
+    catchment_area_m2: float
+    catchment_area_source: str
     source_package_qc_status: Literal["pass", "warning", "fail", "not_run"]
     source_failed_qc_rule_ids: tuple[str, ...]
     source_qc_policy_digests: dict[str, str]
@@ -351,6 +384,8 @@ class HydroPINNExportManifest:
                 site_id=str(data["site_id"]),
                 study_start=_utc_timestamp(data["study_start"], "study_start"),
                 study_end=_utc_timestamp(data["study_end"], "study_end"),
+                catchment_area_m2=float(data["catchment_area_m2"]),
+                catchment_area_source=data["catchment_area_source"],
                 source_package_qc_status=data["source_package_qc_status"],
                 source_failed_qc_rule_ids=tuple(data["source_failed_qc_rule_ids"]),
                 source_qc_policy_digests=dict(data["source_qc_policy_digests"]),
@@ -360,7 +395,7 @@ class HydroPINNExportManifest:
                 qc_gate=data["qc_gate"], assets=tuple(data["assets"]),
                 transformations_not_performed=tuple(data["transformations_not_performed"]),
             )
-        except (KeyError, TypeError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             raise WatershedDataError(f"invalid HydroPINNExport manifest: {exc}") from exc
         if manifest.source_package_qc_status not in {"pass", "warning", "fail", "not_run"}:
             raise WatershedDataError("invalid HydroPINNExport source QC status")
@@ -370,6 +405,12 @@ class HydroPINNExportManifest:
             raise WatershedDataError("HydroPINNExport profile and site_id must be non-empty")
         if manifest.study_start >= manifest.study_end:
             raise WatershedDataError("HydroPINNExport study_start must precede study_end")
+        if (not math.isfinite(manifest.catchment_area_m2)
+                or manifest.catchment_area_m2 <= 0):
+            raise WatershedDataError("HydroPINNExport catchment_area_m2 must be positive")
+        if (not isinstance(manifest.catchment_area_source, str)
+                or not manifest.catchment_area_source.strip()):
+            raise WatershedDataError("HydroPINNExport catchment_area_source must be non-empty")
         if not _is_sha256(manifest.source_package_id, prefixed=True):
             raise WatershedDataError("invalid HydroPINNExport source package ID")
         if any(not isinstance(rule_id, str) or not rule_id
@@ -414,6 +455,8 @@ class HydroPINNExportManifest:
             "profile": self.profile, "source_package_id": self.source_package_id,
             "site_id": self.site_id, "study_start": self.study_start,
             "study_end": self.study_end,
+            "catchment_area_m2": self.catchment_area_m2,
+            "catchment_area_source": self.catchment_area_source,
             "source_package_qc_status": self.source_package_qc_status,
             "source_failed_qc_rule_ids": list(self.source_failed_qc_rule_ids),
             "source_qc_policy_digests": dict(sorted(self.source_qc_policy_digests.items())),

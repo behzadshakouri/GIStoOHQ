@@ -97,6 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
     data_init.add_argument("--lat", required=True, type=float)
     data_init.add_argument("--start", required=True)
     data_init.add_argument("--end", required=True)
+    data_init.add_argument("--catchment-area-m2", type=float)
+    data_init.add_argument("--catchment-area-source")
     data_init.add_argument("--force", action="store_true")
     data_validate = data_sub.add_parser("validate-site", help="Validate a watershed SiteSpec.")
     data_validate.add_argument("--site-spec", required=True)
@@ -182,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
     data_run.add_argument("--lat", type=float, default=None)
     data_run.add_argument("--start", default="")
     data_run.add_argument("--end", default="")
+    data_run.add_argument("--catchment-area-m2", type=float)
+    data_run.add_argument("--catchment-area-source")
     data_run.add_argument("--forecast-url", default="")
     data_run.add_argument("--forecast-provider", default="")
     data_run.add_argument("--forecast-product", default="forecast")
@@ -1182,6 +1186,8 @@ def main(argv: list[str] | None = None) -> int:
                     latitude=args.lat,
                     start=args.start,
                     end=args.end,
+                    catchment_area_m2=args.catchment_area_m2,
+                    catchment_area_source=args.catchment_area_source,
                     overwrite=args.force,
                 )
                 print(f"Wrote watershed SiteSpec: {result}")
@@ -1263,6 +1269,8 @@ def main(argv: list[str] | None = None) -> int:
                     init_if_missing=args.init_if_missing, site_id=args.site_id,
                     name=args.name, longitude=args.lon, latitude=args.lat,
                     study_start=args.start, study_end=args.end,
+                    catchment_area_m2=args.catchment_area_m2,
+                    catchment_area_source=args.catchment_area_source,
                     forecast_url=args.forecast_url, forecast_provider=args.forecast_provider,
                     forecast_product=args.forecast_product, prediction_time=args.prediction_time,
                     refresh=args.refresh,
