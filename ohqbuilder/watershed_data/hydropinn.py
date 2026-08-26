@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .catalog import AssetCatalog, ObjectStore, _atomic_json
 from .package import validate_package
-from .schemas import HydroPINNExportManifest, WatershedDataError
+from .schemas import HydroPINNExportManifest, SiteSpec, WatershedDataError
 
 
 def _file_sha256(path: Path) -> str:
@@ -81,6 +81,7 @@ def export_hydropinn(
         raise WatershedDataError(f"unsupported HydroPINN profile: {profile}")
     root = Path(package).expanduser().resolve()
     package_manifest = validate_package(root)
+    spec = SiteSpec.from_file(root / "site_spec.yaml")
     if package_manifest.package_qc_status == "fail":
         raise WatershedDataError(
             "HydroPINN export refused because the source package has failed QC: "
@@ -150,9 +151,10 @@ def export_hydropinn(
         }
         _atomic_json(destination / "variables.json", variables)
         manifest = HydroPINNExportManifest.from_dict({
-            "schema_name": "HydroPINNExport", "schema_version": "1.1",
+            "schema_name": "HydroPINNExport", "schema_version": "1.2",
             "profile": profile, "source_package_id": package_manifest.package_id,
             "site_id": package_manifest.site_id,
+            "study_start": spec.study_start, "study_end": spec.study_end,
             "source_package_qc_status": package_manifest.package_qc_status,
             "source_failed_qc_rule_ids": list(package_manifest.failed_qc_rule_ids),
             "source_qc_policy_digests": dict(package_manifest.qc_policy_digests),
