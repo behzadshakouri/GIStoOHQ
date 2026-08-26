@@ -38,6 +38,7 @@ from ohqbuilder.ui.launcher import (
     use_expanded_acquisition,
     workflow_prerequisite_error,
     write_drawn_acquisition,
+    watershed_data_example_for_site,
     watershed_data_command,
 )
 
@@ -135,7 +136,9 @@ def test_standalone_launcher_exposes_watershed_data_dialog():
     assert 'dialog.geometry("700x620")' in source
     assert 'text="Paths and forecast settings…"' in source
     assert 'advanced.title("Watershed Data Paths and Forecast Settings")' in source
-    assert 'text="Optional forecast actions"' in source
+    assert 'text="Optional advanced actions"' in source
+    assert 'text="Example watershed"' in source
+    assert 'text="Load example"' in source
     assert "SiteSpec does not exist. Enter the site fields" in source
     assert "The watershed package has not been created" in source
     assert "read_outlet_point" in source
@@ -155,6 +158,21 @@ def test_existing_site_spec_does_not_require_bootstrap_fields_for_one_button_run
 
     assert "--init-if-missing" not in command.argv
     assert "--site-id" not in command.argv
+
+
+def test_watershed_data_examples_supply_complete_site_bootstrap_values():
+    sligo = watershed_data_example_for_site("SligoCreekDemo")
+    john_mccormack = watershed_data_example_for_site("JohnMcCormack3600")
+
+    assert sligo == {
+        "site_id": "sligocreekdemo", "name": "Sligo Creek Demo",
+        "longitude": "-77.0000", "latitude": "38.9700",
+        "study_start": "2024-01-01T00:00:00Z",
+        "study_end": "2024-12-31T23:00:00Z",
+    }
+    assert john_mccormack is not None
+    assert john_mccormack["longitude"] == "-76.99597205373109"
+    assert watershed_data_example_for_site("unrelated") is None
 
 
 def test_qgis_layer_paths_collects_generated_dem_and_delineation_files(tmp_path):
