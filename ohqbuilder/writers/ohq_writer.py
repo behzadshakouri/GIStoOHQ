@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..model.watershed import Watershed
+from ..soil_pedotransfer import van_genuchten_params
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
 from .routing_writer import trapezoidal_channel_properties
@@ -294,10 +295,15 @@ class OHQWriter:
 
     Representation
     --------------
-    * GIS subbasins become ``Catchment`` blocks.
+    * GIS subbasins become ``CN_Catchment`` composites (formulation="legacy")
+      or ``Mixed_Hydrologic_Response_Unit`` composites (formulation="mixed_hru").
+      Both are composite types and are emitted with ``create composite``, not
+      ``create block`` - the latter never instantiates a composite's internal
+      members.
     * GIS reaches become ``Trapezoidal Channel Segment`` blocks.
     * Catchments discharge directly to their first downstream reach using
-      ``Catchment_link``.
+      ``CN_outlet`` (legacy) or ``Trapezoidal_Channel_link``/
+      ``groundwater_to_stream`` (mixed_hru).
     * Consecutive reaches are connected by ``Trapezoidal_Channel_link``.
     * Terminal reaches discharge to one ``fixed_head`` outlet through
       ``channel2fixed``.
@@ -611,6 +617,8 @@ class OHQWriter:
         writer.addtemplate(_resource_path("open_channel.json"))
         if self.formulation == "mixed_hru":
             writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
+        else:
+            writer.addtemplate(_resource_path("cn_catchment.json"))
         writer.line()
 
         if self.include_comments:
@@ -627,8 +635,18 @@ class OHQWriter:
             area_m2 = area_km2 * 1_000_000.0
             slope_pct = _finite(getattr(subbasin, "slope_pct", None), 1.0)
             slope = max(slope_pct / 100.0, 1.0e-6)
-            curve_number = _finite(getattr(subbasin, "curve_number", None), 75.0)
-            runoff_coeff = min(max(curve_number / 100.0, 0.01), 1.0)
+            # Curve Number is a retention parameter for the SCS-CN nonlinear
+            # abstraction formula (S=25.4/CN-0.254 m, Ia=0.2S), not a linear
+            # rainfall multiplier: CN_Catchment consumes it directly and
+            # applies that formula internally, so it is passed through here
+            # unconverted rather than divided by 100 into a fake Runoff_coeff.
+            curve_number = min(max(_finite(getattr(subbasin, "curve_number", None), 75.0), 30.0), 98.0)
+            # NRCS lag needs the longest flow path length; GIStoOHQ's legacy
+            # GIS scripts already compute this per subbasin (flow_len_ft, from
+            # longest_flow_paths.gpkg) and it is already read onto Subbasin by
+            # subbasin_reader.py, just unused by this writer until now.
+            flow_len_ft = _optional_finite(getattr(subbasin, "flow_len_ft", None))
+            hydraulic_length = flow_len_ft * 0.3048 if flow_len_ft else None
             impervious_fraction = _finite(
                 getattr(subbasin, "impervious_fraction", None), 0.2
             )
@@ -644,10 +662,29 @@ class OHQWriter:
             )
             x, y = catchment_positions[name]
 
+            # SSURGO-derived sand/clay percentages, when available from the
+            # GIS pipeline (extract_soil_texture.py), are converted into
+            # site-specific van Genuchten parameters via the Carsel & Parrish
+            # (1988) textural-class lookup. Sites without texture data (e.g.
+            # Sligo Creek today) fall back to mixed_hydrologic_response_unit.json's
+            # generic template defaults by simply omitting these properties.
+            sand_pct = _optional_finite(getattr(subbasin, "sand_pct", None))
+            clay_pct = _optional_finite(getattr(subbasin, "clay_pct", None))
+            soil_properties: list[tuple[str, Any]] = []
+            if sand_pct is not None and clay_pct is not None:
+                vg = van_genuchten_params(sand_pct, clay_pct)
+                soil_properties = [
+                    ("K_sat", f"{vg.K_sat:.12g}[m/day]"),
+                    ("alpha_vG", f"{vg.alpha_vG:.12g}[1/m]"),
+                    ("n_vG", f"{vg.n_vG:.12g}"),
+                    ("theta_sat", f"{vg.theta_sat:.12g}"),
+                    ("theta_res", f"{vg.theta_res:.12g}"),
+                ]
+
             block_type = (
                 "Mixed_Hydrologic_Response_Unit"
                 if self.formulation == "mixed_hru"
-                else "Catchment"
+                else "CN_Catchment"
             )
             properties = (
                 [
@@ -655,6 +692,7 @@ class OHQWriter:
                     ("impervious_fraction", f"{impervious_fraction:.12g}"),
                     ("catchment_slope", f"{slope:.12g}"),
                     ("catchment_width", f"{width:.12g}[m]"),
+                    *soil_properties,
                     ("Precipitation", "Rain"),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
@@ -664,25 +702,24 @@ class OHQWriter:
                 ]
                 if self.formulation == "mixed_hru"
                 else [
+                    ("CN", f"{curve_number:.12g}"),
                     ("area", f"{area_m2:.12g}[m~^2]"),
-                    ("Slope", f"{slope:.12g}"),
-                    ("Width", f"{width:.12g}[m]"),
-                    ("ManningCoeff", "0.15"),
-                    ("Runoff_coeff", f"{runoff_coeff:.12g}"),
+                    *(
+                        [("hydraulic_length", f"{hydraulic_length:.12g}[m]")]
+                        if hydraulic_length
+                        else []
+                    ),
+                    ("slope", f"{slope:.12g}"),
+                    ("recovery_coefficient", "0.1[1/day]"),
+                    ("initial_abstraction_depth", "0[m]"),
                     ("Precipitation", "Rain"),
-                    ("Evapotranspiration", ""),
-                    ("inflow", ""),
-                    ("depth", "0[m]"),
-                    ("elevation", f"{elevation:.12g}[m]"),
-                    ("depression_storage", "0.005[m]"),
-                    ("loss_coefficient", "0[1/day]"),
                     ("x", x),
                     ("y", y),
                     ("_width", block_width),
                     ("_height", block_height),
                 ]
             )
-            writer.create_block(
+            writer.create_composite(
                 block_type,
                 name=name,
                 properties=properties,
@@ -728,6 +765,7 @@ class OHQWriter:
             writer.comment("Watershed runoff discharging into stream reaches")
 
         for source, target in catchment_targets.items():
+            subbasin = subbasin_by_name[source]
             first_step = downstream.get(source, [target])[0]
             link_name = link_name_by_pair.get(
                 (source, first_step),
@@ -735,26 +773,62 @@ class OHQWriter:
             )
             link_types = (
                 (
-                    ("Trapezoidal_Channel_link", "surface"),
-                    ("Trapezoidal_Channel_link", "impervious surface"),
+                    # Mixed_Hydrologic_Response_Unit's Reach and Impervious_Reach
+                    # members both wrap a plain Trapezoidal Channel Segment, but a
+                    # composite can only resolve one external exit per distinct
+                    # link "type" string (Composite::ResolvePort keys its ports
+                    # map by that exact string - see aquifolium/src/Composite.cpp).
+                    # Reach_link/Impervious_Reach_link are therefore real, separate
+                    # connector types registered in mixed_hydrologic_response_unit.json
+                    # (identical Manning's-equation physics to Trapezoidal_Channel_link,
+                    # just distinctly named so each exit resolves), not the shared
+                    # Trapezoidal_Channel_link type itself. Verified end-to-end by
+                    # actually solving a generated .ohq through OpenHydroQual-Console:
+                    # using Trapezoidal_Channel_link here produces "cannot start at
+                    # composite" for every subbasin.
+                    ("Reach_link", "surface"),
+                    ("Impervious_Reach_link", "impervious surface"),
                     ("groundwater_to_stream", "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
-                else (("Catchment_link", ""),)
+                # CN_Catchment exposes its outflow through the CN_outlet
+                # interface (from its internal final cascade reservoir), not
+                # the plain-Catchment Catchment_link connector; see the real
+                # OpenHydroQual CN_Catchment example (Examples/CN_Catchment).
+                else (("CN_outlet", ""),)
             )
             for link_type, suffix in link_types:
-                # Reach_link and Impervious_Reach_link are composite interface
-                # labels, not registered connector types. Both interfaces use
-                # Trapezoidal_Channel_link; retain the two distinct exits.
                 key = (source, target, f"{link_type}:{suffix}")
                 if key in emitted_links:
                     continue
                 emitted_links.add(key)
+                link_properties: list[tuple[str, Any]] = []
+                if link_type == "groundwater_to_stream":
+                    # length/area have no template default and a strict >0
+                    # criteria (groundwater.json), so an unparameterized link
+                    # fails verification before solving. GIStoOHQ has no real
+                    # streambed-contact geometry yet, so these are nominal
+                    # placeholders: a 10m aquifer-to-stream flow path (matching
+                    # the composite's own reach_length default) and a contact
+                    # area scaled by the subbasin's characteristic width - not
+                    # measured geometry, but enough to let the model solve.
+                    catchment_width = max(
+                        math.sqrt(
+                            _positive(getattr(subbasin, "area_km2", None), 1.0e-6)
+                            * 1_000_000.0
+                        ),
+                        1.0,
+                    )
+                    link_properties = [
+                        ("length", "10[m]"),
+                        ("area", f"{catchment_width * 10.0:.12g}[m~^2]"),
+                    ]
                 writer.create_link(
                     link_type,
                     name=f"{link_name} {suffix}".strip(),
                     source=source,
                     target=target,
+                    properties=link_properties,
                 )
 
         if self.include_comments:

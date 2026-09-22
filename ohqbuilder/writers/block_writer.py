@@ -84,6 +84,25 @@ class BlockWriter:
         values = [("type", block_type), ("name", name), *list(properties)]
         self.command("create", kind="block", properties=values)
 
+    def create_composite(
+        self,
+        composite_type: str,
+        *,
+        name: str,
+        properties: Iterable[tuple[str, Any]] = (),
+    ) -> None:
+        # "create block" and "create composite" are NOT interchangeable in the
+        # OpenHydroQual grammar: only the composite path (Command.cpp) calls
+        # Instantiate()/ApplyGeometry()/Propagate() to build a composite's
+        # internal members (e.g. Mixed_Hydrologic_Response_Unit's Soil_1-3,
+        # Groundwater, Impervious_Catchment) and push applyto-derived formulas
+        # down onto them. "create block" only ever builds a bare Block with the
+        # literal properties given, with no such expansion - it silently
+        # produces a non-functional model for any type whose JSON schema
+        # declares "type": "composite".
+        values = [("type", composite_type), ("name", name), *list(properties)]
+        self.command("create", kind="composite", properties=values)
+
     def create_link(
         self,
         link_type: str,

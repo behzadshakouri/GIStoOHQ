@@ -25,7 +25,11 @@ def test_writer_renders_subbasin():
         topology=[TopologyLink(1, "subbasin", "Subbasin_1", "sink", None, "Outlet")],
     )
     txt = OHQWriter().render(ws)
-    assert "create block;type=Catchment,name=Subbasin_1" in txt
+    # CN_Catchment is a composite type: it must be created with "create
+    # composite" (which instantiates its internal Retention/R1-R5 cascade),
+    # not "create block" (which would leave it an empty, non-functional shell).
+    assert "create composite;type=CN_Catchment,name=Subbasin_1" in txt
+    assert "CN=75" in txt
     assert "create block;type=fixed_head,name=Outlet" in txt
 
 
@@ -82,16 +86,74 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
 
     assert "mixed_hydrologic_response_unit.json" in text
     assert "mixed_hydrologic_response_unit_final_v2.json" not in text
-    assert "type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
+    # Composite types must use "create composite" - only that command path
+    # instantiates a composite's internal members (Soil_1-3, Groundwater,
+    # Impervious_Catchment, ...) and propagates its applyto-derived formulas.
+    # "create block" builds an empty shell with no internal members at all.
+    assert "create composite;type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
+    assert "create block;type=Mixed_Hydrologic_Response_Unit" not in text
     assert "impervious_fraction=0.27" in text
     assert "surface_elevation=84.2[m]" in text
     assert "Runoff_coeff=" not in text
-    assert text.count(
-        "from=Subbasin_1,to=Reach_1,type=Trapezoidal_Channel_link"
-    ) == 2
-    assert "type=Reach_link" not in text
-    assert "type=Impervious_Reach_link" not in text
+    # Mixed_Hydrologic_Response_Unit's Reach/Impervious_Reach members can only
+    # be resolved as external exits through their own distinct connector
+    # types (Reach_link/Impervious_Reach_link); a composite can resolve just
+    # one exit per link "type" string, so both cannot share the underlying
+    # Trapezoidal_Channel_link type. Confirmed by actually solving a
+    # generated .ohq through OpenHydroQual-Console: using
+    # Trapezoidal_Channel_link here fails with "cannot start at composite".
+    assert "from=Subbasin_1,to=Reach_1,type=Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Impervious_Reach_link" in text
+    assert "type=Trapezoidal_Channel_link" not in text
     assert "from=Subbasin_1,to=Reach_1,type=groundwater_to_stream" in text
+    # groundwater_to_stream's length/area have no template default and a
+    # strict >0 criteria (see groundwater.json); an unparameterized link
+    # fails model verification before solving, confirmed by actually running
+    # a generated .ohq through OpenHydroQual-Console.
+    assert "type=groundwater_to_stream,name=Subbasin_1 to Reach_1 baseflow,length=10[m]" in text
+    # No SSURGO texture data on this Subbasin: soil parameters must be
+    # omitted so mixed_hydrologic_response_unit.json's generic template
+    # defaults apply, not silently written as some fabricated value.
+    assert "K_sat=" not in text
+    assert "alpha_vG=" not in text
+    assert "n_vG=" not in text
+    assert "theta_sat=" not in text
+    assert "theta_res=" not in text
+
+
+def test_writer_renders_mixed_hru_soil_texture_as_van_genuchten_parameters():
+    ws = Watershed(
+        name="MixedSoil",
+        subbasins=[
+            Subbasin(
+                id=1,
+                name="Subbasin_1",
+                area_km2=1.0,
+                impervious_fraction=0.27,
+                surface_elevation_m=84.2,
+                centroid_x=100.0,
+                centroid_y=200.0,
+                sand_pct=20.0,
+                clay_pct=15.0,
+            )
+        ],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="mixed_hru").render(ws)
+
+    # sand=20%, clay=15% (silt=65%) classifies as silt loam; parameters are
+    # the Carsel & Parrish (1988) averages for that class.
+    assert "K_sat=0.108[m/day]" in text
+    assert "alpha_vG=2[1/m]" in text
+    assert "n_vG=1.41" in text
+    assert "theta_sat=0.45" in text
+    assert "theta_res=0.067" in text
 
 
 def test_writer_parameterizes_reach_as_trapezoidal_channel_connected_to_catchment():
@@ -142,4 +204,6 @@ def test_writer_parameterizes_reach_as_trapezoidal_channel_connected_to_catchmen
     assert "ManningCoeff=0.041" in text
     assert "bottom_elevation=98.6[m]" in text
     assert "length=432.1[m]" in text
-    assert "create link;from=Subbasin_1,to=Reach_1,type=Catchment_link" in text
+    # CN_Catchment exposes its outflow through CN_outlet (from its internal
+    # final cascade reservoir), not the plain-Catchment Catchment_link.
+    assert "create link;from=Subbasin_1,to=Reach_1,type=CN_outlet" in text

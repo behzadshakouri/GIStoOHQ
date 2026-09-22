@@ -15,6 +15,9 @@ class Subbasin:
     flow_len_ft: float | None = None
     tc_min: float | None = None
     lag_min: float | None = None
+    sand_pct: float | None = None
+    silt_pct: float | None = None
+    clay_pct: float | None = None
     centroid_x: float | None = None
     centroid_y: float | None = None
     downstream: str | None = None

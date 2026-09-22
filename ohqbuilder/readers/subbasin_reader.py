@@ -19,6 +19,15 @@ def _impervious_fraction(row):
     return None
 
 
+def _soil_pct(row, names):
+    """Read a 0-100 soil-texture percentage from common GIS field names."""
+    for name in names:
+        value = safe_float(row_get(row, name))
+        if value is not None:
+            return value
+    return None
+
+
 def _surface_elevation(row):
     """Read a representative subbasin surface elevation in metres."""
     for name in (
@@ -69,6 +78,9 @@ class SubbasinReader:
                     flow_len_ft=safe_float(row_get(row, "flow_len_ft")),
                     tc_min=safe_float(row_get(row, "tc_min")),
                     lag_min=safe_float(row_get(row, "lag_min")),
+                    sand_pct=_soil_pct(row, ("sand_pct", "sand_percent", "pct_sand")),
+                    silt_pct=_soil_pct(row, ("silt_pct", "silt_percent", "pct_silt")),
+                    clay_pct=_soil_pct(row, ("clay_pct", "clay_percent", "pct_clay")),
                     centroid_x=x,
                     centroid_y=y,
                     x_act=x,
