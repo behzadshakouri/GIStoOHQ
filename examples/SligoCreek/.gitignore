@@ -3,3 +3,8 @@
 /intermediate/*.json
 /dem/raw/*
 !/dem/raw/.gitkeep
+
+# GIStoOHQ pipeline output (watershed package, HydroPINN export, download
+# cache) - generated data, not source; the root .gitignore's `outputs/*` rule
+# is anchored to the repo root so it doesn't reach this nested outputs dir.
+/outputs/

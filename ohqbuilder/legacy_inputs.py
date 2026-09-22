@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -9,6 +7,7 @@ from typing import Literal
 from .qgis_env import (
     ensure_processing_available,
     initialize_processing,
+    module_available,
     processing_algorithm_available,
     register_grass_provider,
 )
@@ -79,17 +78,8 @@ def verify_reach_writer_revision(script_dir: str | Path | None = None) -> Path:
     return script
 
 
-def _module_available(name: str) -> bool:
-    if name in sys.modules:
-        return True
-    try:
-        return importlib.util.find_spec(name) is not None
-    except (ImportError, ValueError):
-        return False
-
-
 def _require_qgis() -> None:
-    if not _module_available("qgis.core"):
+    if not module_available("qgis.core"):
         raise LegacyInputWorkflowError(
             "Creating GIS input files requires a QGIS Python environment. Open QGIS "
             "and run from its Python Console, or use a QGIS application Python "

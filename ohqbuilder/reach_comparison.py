@@ -56,9 +56,17 @@ def compare_reach_networks(
     if generated.crs is None or reference.crs is None:
         raise ReachComparisonError("Generated reaches and NHD flowlines must define a CRS")
 
-    metric_crs = generated.to_crs("EPSG:4326").estimate_utm_crs()
-    if metric_crs is None:
-        raise ReachComparisonError("Could not determine a local projected CRS")
+    # If the input is already in a projected (meters-based) CRS, use it
+    # directly: round-tripping through WGS84 and re-estimating a UTM zone
+    # from that is lossy and, for geometry far from a projection's standard
+    # lines (e.g. near a false origin), can measurably distort lengths even
+    # though the input was already suitable for planar measurement.
+    if generated.crs.is_projected:
+        metric_crs = generated.crs
+    else:
+        metric_crs = generated.to_crs("EPSG:4326").estimate_utm_crs()
+        if metric_crs is None:
+            raise ReachComparisonError("Could not determine a local projected CRS")
     generated_metric = generated.to_crs(metric_crs)
     reference_metric = reference.to_crs(metric_crs)
     if watershed_path is not None:

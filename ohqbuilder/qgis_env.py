@@ -14,7 +14,12 @@ def module_available(name: str) -> bool:
         return True
     try:
         return importlib.util.find_spec(name) is not None
-    except (ModuleNotFoundError, ValueError):
+    except Exception:
+        # Some QGIS installs raise from their own import hooks (observed:
+        # AttributeError on a partially initialized `qgis` package during a
+        # circular import) rather than the plain ModuleNotFoundError/ValueError
+        # this used to only catch. Any failure here means the module cannot be
+        # relied on, which is exactly the "unavailable" outcome callers want.
         return False
 
 
@@ -26,7 +31,11 @@ def qgis_plugin_paths() -> list[Path]:
     paths: list[Path] = []
     try:
         from qgis.core import QgsApplication
-    except ImportError:
+    except Exception:
+        # Some QGIS installs raise from their own import hooks (observed:
+        # AttributeError on a partially initialized `qgis` package during a
+        # circular import) rather than a plain ImportError. Treat any import
+        # failure the same way: no plugin paths are discoverable.
         return paths
 
     if not QgsApplication.prefixPath():

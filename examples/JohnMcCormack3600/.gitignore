@@ -1,6 +1,7 @@
 inputs/
 intermediate/
 dem/
+outputs/
 source_downloads/
 JohnMcCormack3600/
 *.ohq

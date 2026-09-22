@@ -1,3 +1,5 @@
+import sys
+
 from ohqbuilder.doctor import DoctorCheck, DoctorReport, run_doctor
 
 
@@ -34,6 +36,13 @@ def test_doctor_strict_gis_makes_qgis_checks_required(tmp_path, monkeypatch):
         return None if name in {"geopandas", "qgis.core"} else object()
 
     monkeypatch.setattr("ohqbuilder.qgis_env.importlib.util.find_spec", fake_find_spec)
+    # module_available() short-circuits on sys.modules; on a machine with a
+    # real QGIS/geopandas install, an earlier test/doctor call may have
+    # already cached these, which would silently bypass the fake_find_spec
+    # above. Force the fake to actually be consulted.
+    monkeypatch.delitem(sys.modules, "geopandas", raising=False)
+    monkeypatch.delitem(sys.modules, "qgis.core", raising=False)
+    monkeypatch.delitem(sys.modules, "qgis", raising=False)
 
     report = run_doctor(tmp_path, strict_gis=True)
 
@@ -62,6 +71,7 @@ def test_doctor_strict_gis_requires_processing(tmp_path, monkeypatch):
         return None if name == "processing" else object()
 
     monkeypatch.setattr("ohqbuilder.qgis_env.importlib.util.find_spec", fake_find_spec)
+    monkeypatch.delitem(sys.modules, "processing", raising=False)
 
     report = run_doctor(tmp_path, strict_gis=True)
 
