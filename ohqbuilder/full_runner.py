@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 import zipfile
-from typing import Callable
+from typing import Any, Callable
 
 from .legacy_inputs import (
     LegacyWorkflowOptions,
@@ -22,6 +22,11 @@ from .settings import BuilderSettings
 from .source_materializer import materialize_source_inputs
 from .validation.input_validator import InputValidator
 from .watershed_comparison import compare_watersheds
+from .watershed_confidence_summary import (
+    SNAP_GREEN_M,
+    SNAP_YELLOW_M,
+    write_delineation_confidence_summary,
+)
 from .nhdplus_trace import NhdplusTraceError, trace_upstream_catchments
 from .reach_comparison import ReachComparisonError, compare_reach_networks
 from .pour_point_candidates import PourPointCandidateError, generate_pour_point_candidates
@@ -336,6 +341,7 @@ def write_watershed_report(
     output_path: str | Path | None = None,
     comparison_paths: list[str | Path] | None = None,
     reach_comparison_paths: list[str | Path] | None = None,
+    confidence_summary_path: str | Path | None = None,
 ) -> Path:
     """Write a portable HTML summary for model review and regression baselines."""
 
@@ -349,6 +355,62 @@ def write_watershed_report(
     subbasins = list(getattr(watershed, "subbasins", []) or [])
     counts = network_element_counts(watershed)
     area = sum(float(getattr(item, "area_km2", 0.0) or 0.0) for item in subbasins)
+
+    confidence_colors = {"high": "#1a7f37", "moderate": "#9a6700", "low": "#cf222e", "unknown": "#57606a"}
+    confidence: dict[str, Any] = {}
+    if confidence_summary_path is not None:
+        confidence = json.loads(
+            Path(confidence_summary_path).expanduser().resolve().read_text(encoding="utf-8")
+        )
+    overall = str(confidence.get("overall_confidence", "unknown"))
+    color = confidence_colors.get(overall, "#57606a")
+    snap = confidence.get("outlet_snap") or {}
+    snap_distance = snap.get("snap_distance_m")
+    snap_html = (
+        f"{float(snap_distance):.1f} m ({escape(str(snap.get('confidence', 'unknown')))})"
+        if snap_distance is not None
+        else "not evaluated for this run"
+    )
+    dem_resolution = confidence.get("dem_resolution_m")
+    dem_html = f"{float(dem_resolution):.1f} m" if dem_resolution is not None else "unknown"
+    boundary_items = "".join(
+        f"<li><strong>{escape(key)}</strong>: {escape(str(item.get('confidence', 'unknown')))} "
+        f"(IoU={item.get('iou'):.3f}, area ratio={item.get('reference_to_generated_area_ratio'):.2f})</li>"
+        if item.get("iou") is not None and item.get("reference_to_generated_area_ratio") is not None
+        else f"<li><strong>{escape(key)}</strong>: {escape(str(item.get('confidence', 'unknown')))}</li>"
+        for key, item in (confidence.get("boundary_comparisons") or {}).items()
+    )
+    reach = confidence.get("reach_comparison")
+    reach_item = (
+        f"<li><strong>reach network</strong>: {escape(str(reach.get('confidence', 'unknown')))} "
+        f"({float(reach.get('generated_within_tolerance_pct', 0.0)):.0f}% of generated reaches "
+        f"within {float(reach.get('tolerance_m', 30.0)):g}m of mapped NHD flowlines)</li>"
+        if reach
+        else ""
+    )
+    caveats = confidence.get("caveats") or []
+    caveats_html = (
+        "<ul>" + "".join(f"<li>{escape(str(c))}</li>" for c in caveats) + "</ul>"
+        if caveats
+        else "<p>No caveats recorded.</p>"
+    )
+    confidence_section = f"""
+<h2>Delineation confidence</h2>
+<p style="font-size:1.3em"><strong style="color:{color}">{escape(overall.upper())}</strong>
+&mdash; aggregated from GIStoOHQ's own comparison and outlet-snap checks below; not an
+independent verification. Small catchments (under ~100 km²) are the hardest case for
+automated delineation in general.</p>
+<h3>Outlet snap quality</h3><ul><li>GREEN: less than {SNAP_GREEN_M:g} m</li>
+<li>YELLOW: {SNAP_GREEN_M:g}–75 m</li><li>RED: greater than {SNAP_YELLOW_M:g} m</li></ul>
+<ul>
+<li><strong>Outlet snap distance</strong>: {snap_html}</li>
+<li><strong>DEM resolution</strong>: {dem_html}</li>
+{boundary_items}
+{reach_item}
+</ul>
+<p><strong>Caveats:</strong></p>
+{caveats_html}
+"""
 
     comparison_rows = []
     for comparison_path in comparison_paths or []:
@@ -433,12 +495,11 @@ table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #bbb;padding
 th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</style></head><body>
 <h1>GIStoOHQ Watershed Report</h1>
 <h2>Watershed Area</h2><p><strong>{area:.4f} km²</strong></p>
+{confidence_section}
 <h2>GIS Extraction</h2><ul><li>Subbasins: {counts['subbasin'][0]}</li>
 <li>Reaches: {counts['reach'][0]}</li><li>Junctions: {counts['junction'][0]}</li></ul>
 <h2>Final Model Network</h2><ul><li>Subbasins: {counts['subbasin'][1]}</li>
 <li>Reaches: {counts['reach'][1]}</li><li>Junctions: {counts['junction'][1]}</li></ul>
-<h2>Outlet snap quality</h2><ul><li>GREEN: less than 20 m</li>
-<li>YELLOW: 20–75 m</li><li>RED: greater than 75 m</li></ul>
 {comparison_section}
 {reach_comparison_section}
 <h2>Subbasin parameters</h2><table><thead><tr><th>Subbasin</th><th>Area (km²)</th>
@@ -946,6 +1007,8 @@ def run_full_pipeline(
             )
             emit(f"Wrote NHDPlus comparison metrics: {nhd_comparison}")
             comparison_paths.append(nhd_comparison)
+        confidence_summary_path = write_delineation_confidence_summary(generated_boundary.parent)
+        emit(f"Wrote delineation confidence summary: {confidence_summary_path}")
         # Step 4: validate the generated inputs and write the OHQ file.
         emit("[6/6] Validating inputs and building OHQ...")
         settings = BuilderSettings.from_args(root, site, project_name=project_name)
@@ -968,6 +1031,7 @@ def run_full_pipeline(
             hms_path,
             comparison_paths=comparison_paths,
             reach_comparison_paths=reach_comparison_paths,
+            confidence_summary_path=confidence_summary_path,
         )
         emit(
             full_run_summary(
