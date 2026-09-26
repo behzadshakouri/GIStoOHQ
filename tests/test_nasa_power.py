@@ -78,6 +78,52 @@ def test_power_acquisition_stores_exact_native_response(tmp_path):
     assert reused["asset_id"] == asset["asset_id"]
 
 
+def test_power_acquisition_chunks_long_hourly_ranges_and_merges_them(tmp_path):
+    long_spec = SiteSpec.from_dict({
+        "site_id": "test-long",
+        "geometry": {"outlet": {"longitude": -76.98, "latitude": 38.94}},
+        # 4 years > MAX_HOURLY_REQUEST_DAYS (1095 days), forcing the chunked path.
+        "study_period": {"start": "2015-01-01T00:00:00Z", "end": "2019-01-01T00:00:00Z"},
+    })
+    chunk_one = {
+        "type": "Feature", "geometry": {"type": "Point", "coordinates": [-76.98, 38.94, 0]},
+        "properties": {"parameter": {"PRECTOTCORR": {"2015010100": 0.0}, "T2M": {"2015010100": 2.5}}},
+        "parameters": {
+            "PRECTOTCORR": {"units": "mm/hour", "longname": "Corrected Precipitation"},
+            "T2M": {"units": "C", "longname": "Temperature at 2 Meters"},
+        },
+    }
+    chunk_two = {
+        "type": "Feature", "geometry": {"type": "Point", "coordinates": [-76.98, 38.94, 0]},
+        "properties": {"parameter": {"PRECTOTCORR": {"2019010100": 1.0}, "T2M": {"2019010100": 3.5}}},
+        "parameters": {
+            "PRECTOTCORR": {"units": "mm/hour", "longname": "Corrected Precipitation"},
+            "T2M": {"units": "C", "longname": "Temperature at 2 Meters"},
+        },
+    }
+    import json as json_module
+    responses = [json_module.dumps(chunk_one).encode(), json_module.dumps(chunk_two).encode()]
+    calls = []
+
+    def opener(url, timeout):
+        calls.append(url)
+        return _Response(responses[len(calls) - 1])
+
+    asset = acquire_historical_meteorology(
+        long_spec, cache=tmp_path / "cache", catalog=tmp_path / "catalog.json",
+        parameters=("PRECTOTCORR", "T2M"), opener=opener,
+    )
+    assert len(calls) > 1, "a >3-year hourly range must be split into multiple requests"
+    for call_url in calls:
+        query = parse_qs(urlsplit(call_url).query)
+        assert query["parameters"] == ["PRECTOTCORR,T2M"]
+    assert asset["observation_counts"] == {"PRECTOTCORR": 2, "T2M": 2}
+    assert asset["temporal_coverage"] == {"start": "2015010100", "end": "2019010100"}
+    with ObjectStore(tmp_path / "cache").open(asset["content_digest"]) as stored:
+        merged = json_module.loads(stored.read())
+    assert merged["properties"]["parameter"]["PRECTOTCORR"] == {"2015010100": 0.0, "2019010100": 1.0}
+
+
 def test_pet_et_acquisition_declares_provider_semantics(tmp_path):
     document = Path("tests/fixtures/nasa_power_daily.json").read_bytes()
     calls = []
