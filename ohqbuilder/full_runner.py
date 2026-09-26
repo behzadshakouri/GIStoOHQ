@@ -93,7 +93,8 @@ def cached_reuse_counts(source_download_dir: Path) -> tuple[int, int]:
 
 
 def validated_reuse_inputs(
-    root: str | Path, site: str, download_dir: str | Path | None
+    root: str | Path, site: str, download_dir: str | Path | None,
+    *, require_design_storms: bool = True,
 ) -> Path:
     """Validate the local products required to continue without remote services."""
 
@@ -173,7 +174,7 @@ def validated_reuse_inputs(
             f"{soils_dir}: {', '.join(missing_soils)}"
         )
     atlas_table = root_path / site / "atlas14" / "atlas14_pf.csv"
-    if not atlas_table.is_file():
+    if require_design_storms and not atlas_table.is_file():
         raise FullRunError(
             "Offline/reuse mode requires the existing NOAA Atlas 14 table to prevent "
             f"a later web request: {atlas_table}"
@@ -248,7 +249,7 @@ def existing_legacy_hms_project(
 def full_run_summary(
     watershed,
     ohq_path: str | Path,
-    hms_path: str | Path,
+    hms_path: str | Path | None,
     report_path: str | Path | None = None,
     comparison_paths: list[str | Path] | None = None,
     reach_comparison_paths: list[str | Path] | None = None,
@@ -276,8 +277,11 @@ def full_run_summary(
         "",
         "Products",
         f"  ✓ OHQ model       : {Path(ohq_path).expanduser().resolve()}",
-        f"  ✓ HEC-HMS project : {Path(hms_path).expanduser().resolve()}",
     ]
+    lines.append(
+        f"  ✓ HEC-HMS project : {Path(hms_path).expanduser().resolve()}"
+        if hms_path is not None else "  — Design storms and HEC-HMS project omitted"
+    )
     if report_path is not None:
         lines.append(
             f"  ✓ Watershed report: {Path(report_path).expanduser().resolve()}"
@@ -337,7 +341,7 @@ def full_run_summary(
 def write_watershed_report(
     watershed,
     ohq_path: str | Path,
-    hms_path: str | Path,
+    hms_path: str | Path | None,
     output_path: str | Path | None = None,
     comparison_paths: list[str | Path] | None = None,
     reach_comparison_paths: list[str | Path] | None = None,
@@ -346,7 +350,7 @@ def write_watershed_report(
     """Write a portable HTML summary for model review and regression baselines."""
 
     ohq = Path(ohq_path).expanduser().resolve()
-    hms = Path(hms_path).expanduser().resolve()
+    hms = Path(hms_path).expanduser().resolve() if hms_path is not None else None
     report = (
         Path(output_path).expanduser().resolve()
         if output_path is not None
@@ -506,8 +510,8 @@ th:first-child,td:first-child{{text-align:left}}code{{overflow-wrap:anywhere}}</
 <th>CN</th><th>Slope (%)</th><th>Flow path (ft)</th><th>Tc (min)</th><th>Lag (min)</th>
 </tr></thead><tbody>{rows}</tbody></table>
 <h2>Artifacts</h2><p>OHQ: <code>{escape(str(ohq))}</code></p>
-<p>HEC-HMS: <code>{escape(str(hms))}</code></p>
-<p><em>Review the snapped outlet, longest flow path, topology, parameters, and design storms before use.</em></p>
+<p>HEC-HMS: {('<code>' + escape(str(hms)) + '</code>') if hms else 'Omitted; no design storms generated'}</p>
+<p><em>Review the snapped outlet, longest flow path, topology, parameters, and any design storms before use.</em></p>
 </body></html>"""
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(document, encoding="utf-8")
@@ -656,6 +660,7 @@ def run_full_pipeline(
     maximum_area_ratio: float = 1.25,
     use_existing_outlet: bool = False,
     reuse_downloads: bool = False,
+    skip_design_storms: bool = False,
     outlet_source: str | Path | None = None,
     snap_outlet_to_documented_watershed: bool = False,
     documented_snapped_outlet_path: str | Path | None = None,
@@ -679,6 +684,8 @@ def run_full_pipeline(
             print(message, flush=True)
 
     try:
+        if skip_design_storms and not reuse_downloads:
+            raise FullRunError("Skipping design storms requires --reuse-downloads with reviewed local inputs")
         if minimum_watershed_area_km2 < 0 or minimum_subwatershed_area_km2 < 0:
             raise FullRunError("Watershed area thresholds cannot be negative.")
         if minimum_area_ratio <= 0 or maximum_area_ratio < minimum_area_ratio:
@@ -785,7 +792,9 @@ def run_full_pipeline(
         # Step 1: download every supported source product, or deliberately reuse
         # a previously populated cache without making any remote requests.
         if reuse_downloads:
-            source_download_dir = validated_reuse_inputs(root, site, download_dir)
+            source_download_dir = validated_reuse_inputs(
+                root, site, download_dir, require_design_storms=not skip_design_storms
+            )
             cached_dem_count, cached_hydro_count = cached_reuse_counts(source_download_dir)
             emit(
                 "[1/6] Offline/reuse mode: skipping all remote source and soil queries; "
@@ -923,6 +932,12 @@ def run_full_pipeline(
                 "MIN_SUBWATERSHED_AREA_KM2": minimum_subwatershed_area_km2,
                 "MIN_AREA_RATIO": minimum_area_ratio,
                 "MAX_AREA_RATIO": maximum_area_ratio,
+                **({"PHASE2_STEPS": [
+                    "delineatewatershed.py", "subtractsubwatershed.py", "load_cn_inputs.py",
+                    "cliptowatershed.py", "prepcngrid.py", "buildcnraster.py", "zonal_cn.py",
+                    "extract_slope.py", "longestflowpath.py", "compute_tc.py",
+                    "build_topology.py", "write_basin.py",
+                ]} if skip_design_storms else {}),
             },
         )
         reach_script = verify_reach_writer_revision(script_dir)
@@ -1021,8 +1036,8 @@ def run_full_pipeline(
         built = build_ohq_project(settings, output_path=requested_output)
         if not built:
             raise FullRunError("OHQ builder did not produce an output path.")
-        hms_path = existing_legacy_hms_project(root, site, project_name)
-        if hms_path is None:
+        hms_path = None if skip_design_storms else existing_legacy_hms_project(root, site, project_name)
+        if hms_path is None and not skip_design_storms:
             hms_path = Path(build_hms_project(settings).project_file)
         watershed = WatershedBuilder(settings).build()
         report_path = write_watershed_report(
