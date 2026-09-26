@@ -251,6 +251,24 @@ def _simulation_window() -> tuple[str, str]:
 
     start = os.environ.get("OHQ_SIM_START_TIME", "0").strip() or "0"
     end = os.environ.get("OHQ_SIM_END_TIME", "1").strip() or "1"
+    try:
+        start_value = float(start)
+        end_value = float(end)
+    except ValueError as exc:
+        raise ValueError(
+            "OHQ_SIM_START_TIME/OHQ_SIM_END_TIME must be numbers "
+            f"(got start={start!r}, end={end!r})"
+        ) from exc
+    if not (math.isfinite(start_value) and math.isfinite(end_value)):
+        raise ValueError(
+            "OHQ_SIM_START_TIME/OHQ_SIM_END_TIME must be finite "
+            f"(got start={start!r}, end={end!r})"
+        )
+    if end_value <= start_value:
+        raise ValueError(
+            "OHQ_SIM_END_TIME must be greater than OHQ_SIM_START_TIME "
+            f"(got start={start!r}, end={end!r})"
+        )
     return start, end
 
 
