@@ -18,6 +18,7 @@ from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .osm_vectors import download_osm_vectors
 from .copernicus_dem import download_copernicus_dem
 from .landcover_crosswalk import map_landcover
+from .soilgrids_wcs import download_texture as download_soilgrids_texture
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .dem_workflow import (
     DemWorkflowError,
@@ -480,6 +481,16 @@ def build_parser() -> argparse.ArgumentParser:
     copernicus.add_argument("--bounds", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), required=True)
     copernicus.add_argument("--output-dir", required=True, help="Source DEM directory (for example site/source_downloads/site/demlr).")
     copernicus.add_argument("--max-tiles", type=int, default=16)
+
+    soilgrids = sub.add_parser(
+        "download-soilgrids-texture",
+        help="Fetch raw SoilGrids sand/silt/clay medians via WCS (does not derive HSG).",
+    )
+    soilgrids.add_argument("--bounds-projected", nargs=4, type=float,
+                           metavar=("XMIN", "YMIN", "XMAX", "YMAX"), required=True,
+                           help="Bounds in ISRIC WCS native EPSG:152160, not longitude/latitude.")
+    soilgrids.add_argument("--depth", choices=("0-5cm", "5-15cm", "15-30cm"), default="0-5cm")
+    soilgrids.add_argument("--output-dir", required=True)
 
     landcover_map = sub.add_parser(
         "map-landcover",
@@ -1620,6 +1631,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"HEC-HMS project complete: {result.hms_project_path}")
         if result.report_path:
             print(f"Watershed report complete: {result.report_path}")
+        return 0
+    if args.command == "download-soilgrids-texture":
+        try:
+            manifest = download_soilgrids_texture(tuple(args.bounds_projected), args.depth, args.output_dir)
+        except (ValueError, OSError, ImportError) as exc:
+            print(f"download-soilgrids-texture failed: {exc}")
+            return 2
+        print(f"Wrote raw SoilGrids texture source: {manifest}")
         return 0
     if args.command == "map-landcover":
         try:
