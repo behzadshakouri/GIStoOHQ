@@ -225,10 +225,20 @@ per `docs/soil_data_retrieval.md`. Global substitute:
 - **SoilGrids** (ISRIC, ~250 m, global) — a candidate source for sand, silt,
   and clay fractions. It does not directly supply US hydrologic soil group
   classes. A documented derivation and validation are needed for `hsg.tif`,
-  along with compatible texture rasters and vector schemas. No alternate
-  downloader or validated conversion exists yet. ISRIC currently reports
-  that its SoilGrids REST API is temporarily paused; a downloader must not
-  assume that endpoint is available.
+  along with compatible texture rasters and vector schemas. ISRIC currently
+  reports that its SoilGrids REST API is paused. Its [WCS documentation](https://docs.isric.org/globaldata/soilgrids/wcs.html)
+  describes a separate route for spatial subsets.
+
+`ohqbuild download-soilgrids-texture --bounds-projected XMIN YMIN XMAX YMAX
+--depth 0-5cm --output-dir DIR` fetches the raw Q0.5 sand, silt and clay
+coverages through WCS and records URLs and checksums. The bounds must be in
+the service's **native EPSG:152160 coordinates**; longitude/latitude will
+produce a wrong or empty subset. SoilGrids stores these texture properties
+as g/kg: divide by 10 for percent. The command intentionally does **not**
+write `hsg.tif`, `soil_texture.gpkg`, or the legacy `sand_pct.tif` files.
+Those require a documented depth aggregation, grid conversion, and an
+independent HSG method before they can be used in Phase 2. Check the source
+extent against the modeled watershed and expect WCS service outages.
 
 ## Suggested next step for a real global downloader
 
