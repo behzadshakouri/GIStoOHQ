@@ -240,6 +240,20 @@ def _resource_path(filename: str) -> str:
     return str(Path(root) / filename)
 
 
+def _simulation_window() -> tuple[str, str]:
+    """Return (start, end) simulation time, in the model's day-based time unit.
+
+    Defaults to the original 0/1 placeholder window (kept for backward
+    compatibility with any script relying on it). Set OHQ_SIM_START_TIME /
+    OHQ_SIM_END_TIME to drive a real run -- e.g. to match a rainfall
+    timeseries built for a specific date range via OHQ_RAINFALL_FILE.
+    """
+
+    start = os.environ.get("OHQ_SIM_START_TIME", "0").strip() or "0"
+    end = os.environ.get("OHQ_SIM_END_TIME", "1").strip() or "1"
+    return start, end
+
+
 def _ordered_unique(values: Iterable[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -884,8 +898,9 @@ class OHQWriter:
                 )
 
         writer.line()
-        writer.setvalue("system", "simulation_start_time", "0")
-        writer.setvalue("system", "simulation_end_time", "1")
+        sim_start, sim_end = _simulation_window()
+        writer.setvalue("system", "simulation_start_time", sim_start)
+        writer.setvalue("system", "simulation_end_time", sim_end)
         writer.setvalue("system", "outputfile", f"{model_name}_OHQ_output.txt")
 
         return writer.text()
