@@ -15,6 +15,7 @@ from .dem_acquisition import (
     validate_watershed_within_acquisition,
 )
 from .dem_downloader import download_dem_manifest, parse_products, process_csv
+from .osm_vectors import download_osm_vectors
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .dem_workflow import (
     DemWorkflowError,
@@ -469,6 +470,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads."
     )
     dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
+
+    osm = sub.add_parser(
+        "download-osm-vectors",
+        help="Fetch bounded OSM river/stream or road ways as WGS84 GeoJSON.",
+    )
+    osm.add_argument("--product", choices=("hydro", "roads"), required=True)
+    osm.add_argument("--bounds", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), required=True)
+    osm.add_argument("--output", required=True, help="Output GeoJSON path; hydro filename must contain 'flowline' for materialization.")
 
     manifest_download = sub.add_parser(
         "download-dem-manifest",
@@ -1588,6 +1597,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"HEC-HMS project complete: {result.hms_project_path}")
         if result.report_path:
             print(f"Watershed report complete: {result.report_path}")
+        return 0
+    if args.command == "download-osm-vectors":
+        try:
+            output = download_osm_vectors(tuple(args.bounds), args.product, args.output)
+        except (ValueError, OSError) as exc:
+            print(f"download-osm-vectors failed: {exc}")
+            return 2
+        print(f"Wrote OSM {args.product} source: {output}")
         return 0
     if args.command == "download-data":
         try:
