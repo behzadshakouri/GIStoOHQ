@@ -14,6 +14,26 @@ def _number(value: Any, default: float) -> float:
     return parsed if math.isfinite(parsed) else default
 
 
+def reach_bottom_elevation(reach: Reach | None) -> float:
+    """Return the same channel-bottom elevation trapezoidal_channel_properties
+    writes for this reach (the lower of its two ends, with the same
+    z_up_m/elevation_m/z_m fallback chain), so callers sizing a connection to
+    a reach agree with what actually ends up on that reach's block.
+    """
+
+    if reach is None:
+        return 0.0
+    z_up = _number(
+        getattr(reach, "z_up_m", None),
+        _number(
+            getattr(reach, "elevation_m", None),
+            _number(getattr(reach, "z_m", None), 0.0),
+        ),
+    )
+    z_dn = _number(getattr(reach, "z_dn_m", None), z_up)
+    return min(z_up, z_dn)
+
+
 def trapezoidal_channel_properties(reach: Reach) -> list[tuple[str, str]]:
     """Return OpenHydroQual properties for one trapezoidal stream reach.
 
@@ -59,19 +79,10 @@ def trapezoidal_channel_properties(reach: Reach) -> list[tuple[str, str]]:
         1.0e-6,
     )
 
-    z_up = _number(
-        getattr(reach, "z_up_m", None),
-        _number(
-            getattr(reach, "elevation_m", None),
-            _number(getattr(reach, "z_m", None), 0.0),
-        ),
-    )
-    z_dn = _number(getattr(reach, "z_dn_m", None), z_up)
-
     # The block represents the reach as a storage segment.  Use the lower end
     # as its bottom elevation so the downstream hydraulic gradient is not
     # artificially reversed.
-    bottom_elevation = min(z_up, z_dn)
+    bottom_elevation = reach_bottom_elevation(reach)
 
     initial_depth = _number(
         getattr(reach, "initial_depth_m", None),

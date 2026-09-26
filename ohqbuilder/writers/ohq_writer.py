@@ -10,7 +10,7 @@ from ..model.watershed import Watershed
 from ..soil_pedotransfer import van_genuchten_params
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
-from .routing_writer import trapezoidal_channel_properties
+from .routing_writer import reach_bottom_elevation, trapezoidal_channel_properties
 
 
 def _safe_name(value: Any, fallback: str) -> str:
@@ -821,11 +821,14 @@ class OHQWriter:
                     # length/area have no template default and a strict >0
                     # criteria (groundwater.json), so an unparameterized link
                     # fails verification before solving. GIStoOHQ has no real
-                    # streambed-contact geometry yet, so these are nominal
-                    # placeholders: a 10m aquifer-to-stream flow path (matching
-                    # the composite's own reach_length default) and a contact
-                    # area scaled by the subbasin's characteristic width - not
-                    # measured geometry, but enough to let the model solve.
+                    # streambed-contact geometry yet, so these remain nominal
+                    # placeholders, not measured geometry - but the flow-path
+                    # LENGTH can no longer be a bare constant (see below).
+                    #
+                    # Contact area: same characteristic-width basis as before
+                    # (sqrt of subbasin area) times a nominal 10m contact
+                    # depth - still just an order-of-magnitude aquifer/stream
+                    # interface, unchanged by this fix.
                     catchment_width = max(
                         math.sqrt(
                             _positive(getattr(subbasin, "area_km2", None), 1.0e-6)
@@ -833,8 +836,57 @@ class OHQWriter:
                         ),
                         1.0,
                     )
+                    # Flow-path length: this connector is a Darcy expression in
+                    # groundwater.json, flow = area * hydraulic_conductivity *
+                    # (head.s - head.e) / length. head.s (Groundwater) derives
+                    # from this composite's own `surface_elevation`, which
+                    # GIStoOHQ correctly sets to the SUBBASIN'S MEAN DEM
+                    # elevation (right for infiltration/ET). head.e is the
+                    # target reach's own real, GIS-derived channel-bottom
+                    # elevation, which is the local valley/outlet elevation,
+                    # not the subbasin mean. For a large or high-relief
+                    # subbasin those two can differ by hundreds of meters. The
+                    # previous fixed 10m path turned that relief straight into
+                    # the gradient (head_diff/length), so a subbasin with
+                    # ~600m of mean-to-channel relief produced a gradient near
+                    # 6000% - three orders of magnitude past a real aquifer's
+                    # typical 0.1%-5% - and correspondingly unphysical
+                    # baseflow. Verified end-to-end on the Zarrineh/Nezamabad
+                    # basin (12,400 km^2, subbasins up to 6,064 km^2): Mixed
+                    # HRU discharge averaged ~29x the observed record before
+                    # this fix, using nothing else but this one connector's
+                    # geometry.
+                    #
+                    # Fix: size the flow path FROM the actual relief so the
+                    # resulting gradient is pinned near a plausible regional
+                    # value (TARGET_GRADIENT) instead of being whatever falls
+                    # out of a constant nobody scaled to basin size. A small,
+                    # low-relief subbasin (the Sligo Creek case the original
+                    # 10m constant was tuned against) still gets a short path
+                    # via the MIN_FLOWPATH_M floor - this degrades back to
+                    # essentially the original behavior there, it does not
+                    # regress it. A large, high-relief subbasin gets a longer
+                    # path that absorbs its relief instead of amplifying it.
+                    TARGET_GRADIENT = 0.02  # 2%: mid-range for a regional
+                    # unconfined aquifer (realistic range ~0.1%-5%; e.g.
+                    # Freeze & Cherry, Groundwater, 1979, table 3.1-style
+                    # regional water-table slopes).
+                    MIN_FLOWPATH_M = 10.0  # never shorter than the original
+                    # nominal path, so a subbasin with negligible relief (or a
+                    # reach elevation this data doesn't resolve) behaves
+                    # exactly as before.
+                    surface_elevation_m = _finite(
+                        getattr(subbasin, "surface_elevation_m", None),
+                        _finite(
+                            getattr(subbasin, "elevation_m", None),
+                            _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+                        ),
+                    )
+                    reach_elevation_m = reach_bottom_elevation(reach_by_name.get(target))
+                    relief_m = abs(surface_elevation_m - reach_elevation_m)
+                    flow_path_length_m = max(relief_m / TARGET_GRADIENT, MIN_FLOWPATH_M)
                     link_properties = [
-                        ("length", "10[m]"),
+                        ("length", f"{flow_path_length_m:.12g}[m]"),
                         ("area", f"{catchment_width * 10.0:.12g}[m~^2]"),
                     ]
                 writer.create_link(
