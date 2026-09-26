@@ -25,8 +25,22 @@ input for it.
 ## 1. DEM: USGS 3DEP → Copernicus GLO-30
 
 **If** `ohqbuild download-data --products dem` returns nothing for your
-site's coordinates (outside CONUS/Alaska/territories), **use** Copernicus
-GLO-30 (30 m global DEM, public, no auth, no API key):
+site's coordinates, consider Copernicus GLO-30 Public. Its public tile list
+has coverage gaps; it is a digital **surface** model, including buildings
+and vegetation, which can matter for flow routing.
+
+```bash
+ohqbuild download-copernicus-dem \
+  --bounds WEST SOUTH EAST NORTH \
+  --output-dir /path/to/site/source_downloads/site/demlr
+```
+
+The command checks the published tile index, downloads only intersecting
+1-degree tiles (maximum 16 unless explicitly raised), reads every raster
+block to detect corruption, and records tile URLs and SHA-256 checksums in
+`copernicus_dem_source.json`. Install the GIS dependencies for raster
+verification. Then run `materialize-inputs` against that source directory to
+mosaic, reproject, and clip; check the resulting DEM extent before delineation.
 
 - Tiles live at the public AWS Open Data bucket, 1°x1° each, named
   `Copernicus_DSM_COG_10_N{lat}_00_E{lon}_00_DEM.tif` (or `S`/`W` for
@@ -47,10 +61,8 @@ GLO-30 (30 m global DEM, public, no auth, no API key):
   (caught a full re-run in), the fix was re-clipping the already-downloaded
   tile mosaic to a much larger extent (~110-230 km margin on every side)
   rather than a targeted expansion.
-- **Verify each downloaded tile** with `gdalinfo -checksum` before
-  mosaicking — a truncated/corrupted download reads as a normal-looking
-  file otherwise and fails much later, confusingly, inside `gdalwarp`
-  (`TIFFReadEncodedTile` errors) or silently produces bad elevations.
+- **Verify each downloaded tile** before mosaicking. The command reads
+  every raster block; manually downloaded tiles need the same check.
 - **Watch for a `gdalbuildvrt <glob>.tif` footgun**: if a previously
   reprojected output (e.g. a stray `cliped_utm.tif` from an earlier attempt)
   sits in the same directory as the raw source tiles, a wildcard glob can
@@ -182,7 +194,9 @@ per `docs/soil_data_retrieval.md`. Global substitute:
   and clay fractions. It does not directly supply US hydrologic soil group
   classes. A documented derivation and validation are needed for `hsg.tif`,
   along with compatible texture rasters and vector schemas. No alternate
-  downloader or validated conversion exists yet.
+  downloader or validated conversion exists yet. ISRIC currently reports
+  that its SoilGrids REST API is temporarily paused; a downloader must not
+  assume that endpoint is available.
 
 ## Suggested next step for a real global downloader
 
@@ -194,7 +208,8 @@ site's bounding box intersects CONUS/Alaska/territories) on
 `download-data`/`download-inputs`/`full-run`, dispatching to a parallel set
 of downloader modules (Copernicus DEM, OSM hydrography/roads, ESA WorldCover,
 SoilGrids) mirroring `dem_downloader.py`/`source_materializer.py`'s existing
-structure. The OSM vector command is one narrow building block, not an
+structure. The Copernicus and OSM commands are source-acquisition building
+blocks, not an
 automatic global `full-run`. The Zarrineh inputs were prepared manually for
 that site. Define CN/soil and design-storm semantics before automating the
 remaining products.
