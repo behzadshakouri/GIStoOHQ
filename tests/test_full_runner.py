@@ -382,7 +382,8 @@ def test_full_pipeline_runs_every_stage(monkeypatch, tmp_path):
     }
 
 
-def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path):
+@pytest.mark.parametrize("skip_design_storms", [False, True])
+def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, tmp_path, skip_design_storms):
     downloads = tmp_path / "downloads"
     _write_valid_cached_sources(downloads)
     soils = tmp_path / "SITE_A" / "soils"
@@ -390,8 +391,9 @@ def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, t
     for name in ("hydrologic_soil_groups.gpkg", "hsg.tif", "soil_texture.gpkg"):
         (soils / name).write_bytes(b"cached")
     atlas = tmp_path / "SITE_A" / "atlas14" / "atlas14_pf.csv"
-    atlas.parent.mkdir()
-    atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
+    if not skip_design_storms:
+        atlas.parent.mkdir()
+        atlas.write_text("duration,100yr\n5-min,1.0\n", encoding="utf-8")
     calls = {}
 
     monkeypatch.setattr(
@@ -407,7 +409,7 @@ def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, t
         lambda *a, **k: calls.setdefault("materialize", k),
     )
     monkeypatch.setattr("ohqbuilder.full_runner.run_hydrology_preprocessing", lambda *a, **k: None)
-    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: None)
+    monkeypatch.setattr("ohqbuilder.full_runner.run_legacy_input_workflow", lambda *a, **k: calls.setdefault("phases", a[4]))
     monkeypatch.setattr(
         "ohqbuilder.full_runner.InputValidator",
         lambda: SimpleNamespace(validate=lambda settings: SimpleNamespace(ok=True, errors=[])),
@@ -417,7 +419,7 @@ def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, t
     )
     monkeypatch.setattr(
         "ohqbuilder.full_runner.build_hms_project",
-        lambda *a, **k: SimpleNamespace(project_file=tmp_path / "result.hms"),
+        lambda *a, **k: calls.setdefault("hms", SimpleNamespace(project_file=tmp_path / "result.hms")),
     )
 
     run_full_pipeline(
@@ -427,11 +429,18 @@ def test_full_pipeline_reuses_local_inputs_without_remote_queries(monkeypatch, t
         lat=39.0,
         download_dir=downloads,
         reuse_downloads=True,
+        skip_design_storms=skip_design_storms,
     )
 
     assert calls["materialize"]["source_dir"] == downloads.resolve()
     assert calls["materialize"]["allow_network_fallbacks"] is False
     assert calls["outlet"][1:] == (-77.0, 39.0)
+    if skip_design_storms:
+        assert "write_met.py" not in calls["phases"].child_options["PHASE2_STEPS"]
+        assert "write_hms_project.py" not in calls["phases"].child_options["PHASE2_STEPS"]
+        assert "hms" not in calls
+    else:
+        assert "PHASE2_STEPS" not in calls["phases"].child_options
 
 
 def test_full_pipeline_reuse_mode_reports_missing_cache(tmp_path):
