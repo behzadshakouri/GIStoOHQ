@@ -17,6 +17,7 @@ from .dem_acquisition import (
 from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .osm_vectors import download_osm_vectors
 from .copernicus_dem import download_copernicus_dem
+from .landcover_crosswalk import map_landcover
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .dem_workflow import (
     DemWorkflowError,
@@ -479,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
     copernicus.add_argument("--bounds", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), required=True)
     copernicus.add_argument("--output-dir", required=True, help="Source DEM directory (for example site/source_downloads/site/demlr).")
     copernicus.add_argument("--max-tiles", type=int, default=16)
+
+    landcover_map = sub.add_parser(
+        "map-landcover",
+        help="Map a global categorical raster to reviewed NLCD-compatible classes.",
+    )
+    landcover_map.add_argument("--input", required=True, help="Source categorical GeoTIFF.")
+    landcover_map.add_argument("--crosswalk", required=True, help="Reviewed JSON class mapping and source metadata.")
+    landcover_map.add_argument("--output", required=True, help="Output GeoTIFF and provenance sidecar.")
 
     osm = sub.add_parser(
         "download-osm-vectors",
@@ -1606,6 +1615,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"HEC-HMS project complete: {result.hms_project_path}")
         if result.report_path:
             print(f"Watershed report complete: {result.report_path}")
+        return 0
+    if args.command == "map-landcover":
+        try:
+            mapped = map_landcover(args.input, args.crosswalk, args.output)
+        except (ValueError, OSError, ImportError) as exc:
+            print(f"map-landcover failed: {exc}")
+            return 2
+        print(f"Wrote reviewed land-cover class raster: {mapped}")
         return 0
     if args.command == "download-copernicus-dem":
         try:
