@@ -988,6 +988,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     full.add_argument(
+        "--skip-design-storms", action="store_true",
+        help="Offline OHQ-only run: omit write_met/HEC-HMS rather than requesting US Atlas 14.",
+    )
+    full.add_argument(
         "--max-tiles", type=int, default=None, help="Cap files per product; 0 means no cap."
     )
     full.add_argument(
@@ -1572,6 +1576,7 @@ def main(argv: list[str] | None = None) -> int:
                 maximum_area_ratio=args.maximum_area_ratio,
                 use_existing_outlet=args.use_existing_outlet,
                 reuse_downloads=args.reuse_downloads,
+                skip_design_storms=args.skip_design_storms,
                 outlet_source=outlet_source,
                 snap_outlet_to_documented_watershed=(
                     args.snap_outlet_to_documented_watershed
