@@ -1,0 +1,4 @@
+# Generated DEM/GIS data and pipeline outputs - archived to Dropbox instead
+# of committing (large, regenerable). HANDOFF.md stays tracked.
+demlr/
+outputs/
