@@ -7,12 +7,11 @@ GIStoOHQ's automated pipeline (`download-data`, `download-inputs`,
 hydrologic soil groups/texture (soil). None of these have coverage outside
 the United States.
 
-This doc gives the fallback recipe for each data category: **if the US
-source isn't available for your site, use this global substitute instead**,
-formatted to match the exact file GIStoOHQ's legacy scripts expect. This
-pattern was developed and verified end-to-end building a real international
-site (Zarrineh River Basin, Iran) — see that project's `HANDOFF.md` for the
-full worked example and troubleshooting log this doc is distilled from.
+This doc records candidate substitutes when a US source is unavailable. The
+manual DEM and hydrography steps were exercised for the Zarrineh River Basin,
+Iran. **An unattended international `full-run` is not implemented or
+verified.** Other inputs need source-specific conversion and validation. See
+that project's `HANDOFF.md` for the manual processing log.
 
 The general shape of the fallback, for every category below, is the same:
 **fetch the global equivalent, reproject/convert it to the exact filename
@@ -65,12 +64,11 @@ GLO-30 (30 m global DEM, public, no auth, no API key):
 site (outside the US), **use** OpenStreetMap `waterway=river`/`stream` ways
 via the Overpass API:
 
-- Query `https://overpass-api.de/api/interpreter` for the named river(s) in
-  a bounding box around your basin. **Use `wget`, not `curl` or Python
-  `urllib`** — on at least this network, the public Overpass endpoint
-  returns HTTP 406 to `curl`/`urllib` regardless of headers, but `wget`
-  against the identical URL works fine. Cause not fully diagnosed; just use
-  `wget`.
+- Query an Overpass instance for river/stream ways in a reviewed bounding box.
+  The optional `download-osm-vectors` command uses a bounded POST request and
+  writes line geometry as WGS84 GeoJSON. Availability depends on the public
+  Overpass service; an HTTP 406 observed on one network is not a general rule
+  about `curl` or Python clients.
 - Convert the resulting GeoJSON to a GeoPackage with `ogr2ogr`, reprojected
   to your target UTM CRS, written to `<site>/outputs/NHDFlowline_clip.gpkg`
   — the exact path `extract_reaches.py` (and the `prepare-hydrology`
@@ -85,6 +83,19 @@ via the Overpass API:
   `flow_acc.tif` — so getting real geometry here is good practice for the
   fallback path and for visual QA, not strictly load-bearing for the
   delineation math itself.
+
+For a small reviewed area, the repository can now fetch source flowlines with:
+
+```bash
+ohqbuild download-osm-vectors --product hydro \
+  --bounds WEST SOUTH EAST NORTH \
+  --output /path/to/site/source_downloads/site/hydro/OSMFlowline.geojson
+```
+
+`materialize-inputs` can read this flowline GeoJSON in the `hydro` source
+directory and clip/project it to the DEM. OSM waterways are volunteered map
+lines; they provide neither NHDPlus topology nor an independent delineated
+catchment. Review completeness, licensing/attribution, and alignment locally.
 
 ## 3. Outlet/pour-point placement: expect real offsets, snap deliberately
 
@@ -106,23 +117,16 @@ for the true mainstem cell (large, contiguous high-accumulation cluster) and
 pre-snap the point yourself before running Phase 1, rather than trusting the
 built-in tolerance to catch a large offset.
 
-## 4. Land cover: NLCD → usually skippable for an OHQ build; global equivalent otherwise
+## 4. Land cover: NLCD → globally sourced, class-mapped land cover
 
 `load_cn_inputs.py` (Phase 2) requires `landcover/nlcd_2023_<site>.tif` to
 compute SCS Curve Number. NLCD is US-only.
 
-**Confirmed on the Zarrineh build: this step is not required to write the
-`.ohq` file.** `ohq_writer.py` has documented safe defaults for every
-CN/soil-texture-derived field, and the existing Sligo Creek example already
-runs without real soil-texture data — the same is true for CN. The actual
-gate blocking progress isn't the science, it's `input_validator.py`'s schema
-check on `subwatershed_params.gpkg` (column *presence*, not values), which
-is bypassable via `--no-schema`/`--skip-input-check`, or satisfiable by
-writing a minimal params file with the expected columns directly, rather
-than sourcing real NLCD data. **Skip `load_cn_inputs.py` (and anything
-downstream that depends specifically on its CN output) for an OHQ-only
-build** — SCS Curve Number is a parallel-path input to the HEC-HMS export,
-not something the OpenHydroQual physically-based components consume.
+The standard `full-run` invokes all legacy Phase 2 steps, including
+`load_cn_inputs.py` and CN raster preparation. It has no supported `--skip-cn`
+mode. Writer defaults for some missing parameters do not establish that
+skipping land cover produces an equivalent model. Do not bypass schema
+validation or create dummy land-cover/soil rasters for a production run.
 
 This confirmation is specifically about CN. It does **not** mean land cover
 is never needed — `Mixed_Hydrologic_Response_Unit`'s `impervious_fraction`
@@ -132,27 +136,26 @@ need per-sub-basin impervious fractions). If a site genuinely needs
 land cover for that purpose, global substitutes with no US restriction
 include:
 
-- **ESA WorldCover** (10 m, global, free) — good default, similar
-  resolution to NLCD.
+- **ESA WorldCover** (10 m, global, free) — candidate global source.
 - **Copernicus Global Land Cover** (100 m, global, free).
 
-Same recipe as DEM/hydrography: fetch, reproject to your target UTM CRS,
-write to the exact path/filename the consuming script expects.
+These products use class codes different from NLCD. Reprojection and renaming
+alone would feed wrong classes into `cn_lookup.csv` and impervious-area
+calculations. A reviewed class crosswalk and appropriate hydrologic soil groups
+are required before replacing NLCD in the CN path.
 
 ## 5. Roads: Census TIGER/Line → OpenStreetMap
 
-Not yet implemented as a Python downloader even for US sites (per
-`docs/data_downloaders.md`, it only exists in the vendored C++ `TigerClient`).
-If a site needs roads, OpenStreetMap `highway=*` ways via the same Overpass
-recipe as hydrography (§2) is the natural global substitute — no separate
-tooling exists for this yet, would need to be built following the same
-pattern.
+The Python `download-data` path already supports US Census TIGER/Line roads.
+`download-osm-vectors --product roads --bounds WEST SOUTH EAST NORTH --output
+/path/to/roads.geojson` now retrieves bounded OSM highway ways. This creates
+a reviewable source vector, **not** a replacement for every TIGER consumer;
+road materialization and downstream schema integration still need a site test.
 
 ## 6. Precipitation frequency: NOAA Atlas 14 → no clean global equivalent yet
 
-Not yet implemented as a Python downloader (vendored C++ `Atlas14Client`
-only, US-only by design — Atlas 14 itself is a US NOAA product with no
-international counterpart of the same form). This is the hardest gap to
+The Python `download-data` path already supports US NOAA Atlas 14. Atlas 14
+has no international counterpart of the same form. This is the hardest gap to
 close cleanly. Candidates worth evaluating if a site needs
 IDF-curve-equivalent data:
 
@@ -164,20 +167,22 @@ IDF-curve-equivalent data:
   dense gauge network, so treat any resulting design storms with
   appropriate caution.
 
-No fallback for this was built or tested as part of the Zarrineh work —
-flagging the gap rather than a solution.
+`full-run` and its legacy `write_met.py` require a compatible precipitation
+frequency table; offline mode explicitly rejects its absence. Do not relabel
+a reanalysis estimate as Atlas 14. A global run needs a reviewed, attributed
+local design-storm table or an explicit mode that does not create design
+storms. Neither path is implemented or tested here.
 
 ## 7. Soil (hydrologic soil groups, texture): SSURGO → SoilGrids
 
 `ohqbuild download-hsg`/`download-texture` are SSURGO-based (US Soil Survey),
 per `docs/soil_data_retrieval.md`. Global substitute:
 
-- **SoilGrids** (ISRIC, ~250 m, global, free) — provides sand/silt/clay
-  fractions and derived hydraulic properties comparable to what
-  `soil_retrieval.py` extracts from SSURGO. Not yet wired into GIStoOHQ as
-  an alternate downloader; would need a new module following
-  `ohqbuilder/soil_retrieval.py`'s existing shape but querying SoilGrids'
-  REST API instead of SSURGO.
+- **SoilGrids** (ISRIC, ~250 m, global) — a candidate source for sand, silt,
+  and clay fractions. It does not directly supply US hydrologic soil group
+  classes. A documented derivation and validation are needed for `hsg.tif`,
+  along with compatible texture rasters and vector schemas. No alternate
+  downloader or validated conversion exists yet.
 
 ## Suggested next step for a real global downloader
 
@@ -189,5 +194,7 @@ site's bounding box intersects CONUS/Alaska/territories) on
 `download-data`/`download-inputs`/`full-run`, dispatching to a parallel set
 of downloader modules (Copernicus DEM, OSM hydrography/roads, ESA WorldCover,
 SoilGrids) mirroring `dem_downloader.py`/`source_materializer.py`'s existing
-structure. Nobody has built this yet — the Zarrineh site's inputs were
-prepared by the manual recipe above, run once for that one site.
+structure. The OSM vector command is one narrow building block, not an
+automatic global `full-run`. The Zarrineh inputs were prepared manually for
+that site. Define CN/soil and design-storm semantics before automating the
+remaining products.
