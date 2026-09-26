@@ -93,6 +93,14 @@ hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/networ
 inputs; and writes the final OHQ file. QGIS processing and internet access are
 required for this production path.
 
+**This automated pipeline only has downloaders for US federal data sources**
+(USGS 3DEP, NHDPlus HR, NLCD, Census TIGER, NOAA Atlas 14, SSURGO) and has no
+coverage outside the United States. For a site outside the US, see
+[`docs/international_sites.md`](docs/international_sites.md) for the
+per-category fallback recipe (global DEM/hydrography/land-cover/soil
+substitutes, formatted to the exact paths the legacy scripts expect) and the
+gotchas found building a real international site end-to-end.
+
 The WBDHU layer extracted from the hydro package is an **authoritative reference**, not automatically the
 model boundary. HUC12 units are standardized drainage units and may contain several
 named urban streams; their internal lines are not the paper-specific subcatchments
