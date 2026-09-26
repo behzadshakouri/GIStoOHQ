@@ -8,6 +8,14 @@ import json
 from pathlib import Path
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def read_crosswalk(path: str | Path) -> dict:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     for key in ("source_dataset", "source_year", "source_url", "method", "classes"):
@@ -74,9 +82,8 @@ def map_landcover(source: str | Path, crosswalk: str | Path, output: str | Path)
         if not counts:
             raise ValueError("Land-cover raster has no valid classified pixels")
         crosswalk_path = Path(crosswalk).expanduser().resolve()
-        with src.open("rb") as source_file, crosswalk_path.open("rb") as crosswalk_file:
-            source_hash = hashlib.file_digest(source_file, "sha256").hexdigest()
-            crosswalk_hash = hashlib.file_digest(crosswalk_file, "sha256").hexdigest()
+        source_hash = _sha256_file(src)
+        crosswalk_hash = _sha256_file(crosswalk_path)
         provenance = {
             "source_path": str(src), "source_sha256": source_hash,
             "crosswalk_path": str(crosswalk_path), "crosswalk_sha256": crosswalk_hash,
