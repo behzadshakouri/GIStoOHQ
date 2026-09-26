@@ -156,6 +156,18 @@ alone would feed wrong classes into `cn_lookup.csv` and impervious-area
 calculations. A reviewed class crosswalk and appropriate hydrologic soil groups
 are required before replacing NLCD in the CN path.
 
+`ohqbuild map-landcover --input SOURCE.tif --crosswalk REVIEWED.json --output
+MAPPED.tif` now applies an explicit categorical crosswalk. The JSON must
+declare `source_dataset`, `source_year`, `source_url`, `method`, and `classes`
+(an object mapping each source class code to an NLCD code in `cn_lookup.csv`).
+Every observed valid source class must be mapped; unknown classes stop the
+conversion, while source nodata remains nodata. A `.provenance.json` sidecar
+records file hashes, class counts, and the mapping. **No WorldCover-to-NLCD
+mapping is bundled:** its CN and impervious-fraction interpretation requires
+local hydrologic review. Copying an unreviewed mapped raster to the legacy
+`nlcd_2023_<site>.tif` path would also misstate the source vintage; the
+provenance sidecar must accompany any approved compatibility use.
+
 ## 5. Roads: Census TIGER/Line → OpenStreetMap
 
 The Python `download-data` path already supports US Census TIGER/Line roads.
