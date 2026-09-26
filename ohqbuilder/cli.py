@@ -16,6 +16,7 @@ from .dem_acquisition import (
 )
 from .dem_downloader import download_dem_manifest, parse_products, process_csv
 from .osm_vectors import download_osm_vectors
+from .copernicus_dem import download_copernicus_dem
 from .dem_materializer import DemMaterializeError, materialize_dem
 from .dem_workflow import (
     DemWorkflowError,
@@ -470,6 +471,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--tiger-year", type=int, default=2025, help="Census TIGER/Line vintage year for roads."
     )
     dl.add_argument("--nlcd-year", type=int, default=2023, help="Annual NLCD land-cover year.")
+
+    copernicus = sub.add_parser(
+        "download-copernicus-dem",
+        help="Download and verify bounded Copernicus GLO-30 Public DEM source tiles.",
+    )
+    copernicus.add_argument("--bounds", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), required=True)
+    copernicus.add_argument("--output-dir", required=True, help="Source DEM directory (for example site/source_downloads/site/demlr).")
+    copernicus.add_argument("--max-tiles", type=int, default=16)
 
     osm = sub.add_parser(
         "download-osm-vectors",
@@ -1597,6 +1606,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"HEC-HMS project complete: {result.hms_project_path}")
         if result.report_path:
             print(f"Watershed report complete: {result.report_path}")
+        return 0
+    if args.command == "download-copernicus-dem":
+        try:
+            manifest = download_copernicus_dem(tuple(args.bounds), args.output_dir, max_tiles=args.max_tiles)
+        except (ValueError, OSError, RuntimeError) as exc:
+            print(f"download-copernicus-dem failed: {exc}")
+            return 2
+        print(f"Verified Copernicus DEM tiles: {manifest}")
         return 0
     if args.command == "download-osm-vectors":
         try:
