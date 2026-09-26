@@ -176,26 +176,46 @@ The Python `download-data` path already supports US Census TIGER/Line roads.
 a reviewable source vector, **not** a replacement for every TIGER consumer;
 road materialization and downstream schema integration still need a site test.
 
-## 6. Precipitation frequency: NOAA Atlas 14 → no clean global equivalent yet
+## 6. Precipitation frequency: NOAA Atlas 14 → local IDF or OHQ-only mode
 
-The Python `download-data` path already supports US NOAA Atlas 14. Atlas 14
-has no international counterpart of the same form. This is the hardest gap to
-close cleanly. Candidates worth evaluating if a site needs
-IDF-curve-equivalent data:
+The Python `download-data` path already supports US NOAA Atlas 14. The
+international choice depends on whether design-storm HEC-HMS outputs are
+needed. If they are not, an offline run can explicitly omit them:
+
+```bash
+ohqbuild full-run --root ROOT --site SITE --lon LON --lat LAT \
+  --reuse-downloads --skip-design-storms
+```
+
+This still runs all Phase 1 and Phase 2 watershed/CN steps and validates the
+OHQ inputs, but omits `write_met.py`, `write_hms_project.py`, and the later
+HEC-HMS fallback. It does not need `atlas14_pf.csv`, and reports the omitted
+product. Source DEM/hydrography and soil/land-cover inputs still have to be
+prepared and reviewed. This is an **OHQ-only model run**, not an HEC-HMS
+design-storm run.
+
+If design storms are needed, candidate sources include:
 
 - National meteorological agency IDF studies/curves for the site's country,
   if published (variable quality/availability, not a single global source).
+- [GSDR-IDF (Green et al., 2026)](https://doi.org/10.1038/s41597-026-06858-4)
+  is an open gauge-based global research dataset with 1-, 3-, 6-, and 24-hour
+  estimates at 10-, 30-, and 100-year return periods. Station availability
+  and representativeness vary; the authors caution against extrapolation
+  beyond the 1–24-hour fit range and against distant station transfers.
 - Deriving return-period intensities from a long global reanalysis
   precipitation record (e.g. ERA5, CHIRPS) — more effort, and reanalysis
   precipitation is a much noisier basis for extreme-value statistics than a
   dense gauge network, so treat any resulting design storms with
   appropriate caution.
 
-`full-run` and its legacy `write_met.py` require a compatible precipitation
-frequency table; offline mode explicitly rejects its absence. Do not relabel
-a reanalysis estimate as Atlas 14. A global run needs a reviewed, attributed
-local design-storm table or an explicit mode that does not create design
-storms. Neither path is implemented or tested here.
+Do not relabel an international estimate as Atlas 14. The existing
+`write_met.py` also constructs an SCS Type II storm from a table named
+`atlas14_pf.csv`, which is not automatically appropriate outside its design
+context. A sourced IDF adapter and an explicitly selected local temporal
+pattern need separate implementation and validation before a global
+HEC-HMS design-storm run can be supported. The OHQ-only mode above avoids
+silently generating that storm.
 
 ## 7. Soil (hydrologic soil groups, texture): SSURGO → SoilGrids
 
