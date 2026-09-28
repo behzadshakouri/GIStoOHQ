@@ -4,7 +4,7 @@ def test_import_pipeline():
     assert build_ohq_project
 
 
-def test_pipeline_writes_legacy_and_mixed_hru_files(monkeypatch, tmp_path):
+def test_pipeline_writes_legacy_mixed_and_standard_hru_files(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     from ohqbuilder.pipeline import build_ohq_project
@@ -46,4 +46,5 @@ def test_pipeline_writes_legacy_and_mixed_hru_files(monkeypatch, tmp_path):
     assert writes == [
         ("legacy", tmp_path / "model_legacy.ohq"),
         ("mixed_hru", tmp_path / "model_mixed_hru.ohq"),
+        ("standard_hru", tmp_path / "model_standard_hru.ohq"),
     ]
