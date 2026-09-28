@@ -7,7 +7,8 @@
 | `Junction_i` | `Junction` | mixer/junction block |
 | `Outlet` | `Outlet` | outlet/sink block |
 
-Each OHQ build emits `<name>_legacy.ohq` and `<name>_mixed_hru.ohq`. The
+Each OHQ build emits `<name>_legacy.ohq`, `<name>_mixed_hru.ohq`, and
+`<name>_standard_hru.ohq`. The
 legacy model retains the curve-number-derived runoff coefficient. The mixed
 HRU model reads a GIS impervious fraction (or percent) when available and
 partitions the subbasin between infiltrating and impervious catchments; when
@@ -32,3 +33,23 @@ comparison, for example
 Set `OHQ_RAINFALL_FILE` to a real file in OpenHydroQual's precipitation format
 when building a model with assigned rainfall. If it is unset, GIStoOHQ creates
 an unassigned `Rain` source instead of referencing a nonexistent default file.
+
+To apply ET, set `OHQ_ET_FILE` to an existing OpenHydroQual time-series CSV
+containing nonnegative **depth rates in m/day** (time in OpenHydroQual days in
+the first column, rate in the second). The writer loads
+`soil_evapotranspiration_models.json`, creates an
+`Evapotranspiration_Time_Series (Soil)` source with `ET_timeseries=...`, and
+assigns it to each standard and mixed HRU. OpenHydroQual applies this source
+to `Soil_1` and removes water using its corrected negative rate. Without this
+setting the HRU ET property remains unassigned. The legacy `CN_Catchment`
+output does not receive ET.
+
+The separately downloaded NASA POWER `EVPTRNS` asset is **not** assigned to
+`OHQ_ET_FILE` automatically. It may have units of `MJ/m²/day`, which require
+an explicit latent-heat conversion, or `mm/day`, which must be divided by
+1000 to obtain m/day. Preserve the actual time axis when preparing the OHQ
+CSV; the data acquisition package does not convert or upsample the daily ET.
+The standard HRU output requires the OpenHydroQual
+`Hydrologic_Response_Unit` template with the `groundwater_to_stream` external
+port (added alongside this writer feature) to route groundwater into the GIS
+reach network.
