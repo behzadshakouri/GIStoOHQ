@@ -33,6 +33,7 @@ def build_ohq_project(
     base = output_path.with_suffix("")
     legacy_path = base.with_name(f"{base.name}_legacy").with_suffix(suffix)
     mixed_hru_path = base.with_name(f"{base.name}_mixed_hru").with_suffix(suffix)
+    standard_hru_path = base.with_name(f"{base.name}_standard_hru").with_suffix(suffix)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     OHQWriter(
@@ -43,8 +44,13 @@ def build_ohq_project(
         include_comments=settings.ohq.include_comments,
         formulation="mixed_hru",
     ).write(watershed, mixed_hru_path)
+    OHQWriter(
+        include_comments=settings.ohq.include_comments,
+        formulation="standard_hru",
+    ).write(watershed, standard_hru_path)
     log.info("Wrote legacy OHQ file: %s", legacy_path)
     log.info("Wrote mixed-HRU OHQ file: %s", mixed_hru_path)
+    log.info("Wrote standard-HRU OHQ file: %s", standard_hru_path)
     # Preserve the historical single-path return contract for callers while
-    # both alternatives are always emitted together.
+    # all alternatives are emitted together.
     return str(legacy_path)
