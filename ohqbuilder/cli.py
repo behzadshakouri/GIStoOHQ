@@ -53,6 +53,7 @@ from .full_runner import FullRunError, run_full_pipeline
 from .hms_pipeline import build_hms_project, validate_hms_project
 from .input_downloader import download_all_inputs
 from .pipeline import build_ohq_project
+from .channel_profile_sampler import sample_channel_profiles
 from .settings import BuilderSettings
 from .soil_retrieval import (
     SoilRetrievalError,
@@ -87,6 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ohqbuild", description="Build OpenHydroQual OHQ files from GIS outputs."
     )
     sub = p.add_subparsers(dest="command", required=True)
+
+    channel_sample = sub.add_parser("sample-channel-profiles", help="Sample candidate reach cross sections from a DEM for bank review.")
+    channel_sample.add_argument("--reaches", required=True)
+    channel_sample.add_argument("--dem", required=True)
+    channel_sample.add_argument("--output", required=True)
+    channel_sample.add_argument("--spacing-m", type=float, default=50)
+    channel_sample.add_argument("--half-width-m", type=float, default=30)
+    channel_sample.add_argument("--sample-step-m", type=float, default=1)
 
     data = sub.add_parser(
         "data",
@@ -1217,6 +1226,17 @@ def _resolve_cli_path(config_path: str, value, default: str | None = None) -> st
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "sample-channel-profiles":
+        try:
+            count = sample_channel_profiles(args.reaches, args.dem, args.output,
+                                            spacing_m=args.spacing_m,
+                                            half_width_m=args.half_width_m,
+                                            sample_step_m=args.sample_step_m)
+        except (ValueError, OSError, ImportError) as exc:
+            print(f"sample-channel-profiles failed: {exc}")
+            return 2
+        print(f"Sampled {count} DEM elevations to {args.output}; review bank offsets before building")
+        return 0
     if args.command == "data":
         try:
             if args.data_command == "init-site":
