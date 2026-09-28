@@ -10,6 +10,7 @@ from ..model.watershed import Watershed
 from ..soil_pedotransfer import van_genuchten_params
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
+from .et_writer import et_filename, et_lines
 from .routing_writer import reach_bottom_elevation, trapezoidal_channel_properties
 
 
@@ -328,14 +329,16 @@ class OHQWriter:
     Representation
     --------------
     * GIS subbasins become ``CN_Catchment`` composites (formulation="legacy")
-      or ``Mixed_Hydrologic_Response_Unit`` composites (formulation="mixed_hru").
+      or ``Mixed_Hydrologic_Response_Unit`` composites (formulation="mixed_hru")
+      or ``Hydrologic_Response_Unit`` composites (formulation="standard_hru").
       Both are composite types and are emitted with ``create composite``, not
       ``create block`` - the latter never instantiates a composite's internal
       members.
     * GIS reaches become ``Trapezoidal Channel Segment`` blocks.
-    * Catchments discharge directly to their first downstream reach using
-      ``CN_outlet`` (legacy) or ``Trapezoidal_Channel_link``/
-      ``groundwater_to_stream`` (mixed_hru).
+    * Catchments discharge to their first downstream reach using
+      ``CN_outlet`` (legacy), reach ports (mixed_hru), or
+      ``Catchment_link`` (standard_hru). Both HRU types also route groundwater
+      to the reach with ``groundwater_to_stream``.
     * Consecutive reaches are connected by ``Trapezoidal_Channel_link``.
     * Terminal reaches discharge to one ``fixed_head`` outlet through
       ``channel2fixed``.
@@ -348,7 +351,7 @@ class OHQWriter:
     """
 
     def __init__(self, include_comments: bool = True, formulation: str = "legacy"):
-        if formulation not in {"legacy", "mixed_hru"}:
+        if formulation not in {"legacy", "mixed_hru", "standard_hru"}:
             raise ValueError(f"Unsupported OHQ formulation: {formulation}")
         self.include_comments = include_comments
         self.formulation = formulation
@@ -641,7 +644,7 @@ class OHQWriter:
                 )
             )
             writer.comment(
-                "Set OPENHYDROQUAL_RESOURCES and OHQ_RAINFALL_FILE when local paths differ."
+                "Set OPENHYDROQUAL_RESOURCES, OHQ_RAINFALL_FILE and OHQ_ET_FILE as needed."
             )
 
         writer.loadtemplate(_resource_path("main_components.json"))
@@ -649,14 +652,22 @@ class OHQWriter:
         writer.addtemplate(_resource_path("open_channel.json"))
         if self.formulation == "mixed_hru":
             writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
+        elif self.formulation == "standard_hru":
+            writer.addtemplate(_resource_path("hydrologic_response_unit.json"))
         else:
             writer.addtemplate(_resource_path("cn_catchment.json"))
+        forcing_et = et_filename() if self.formulation != "legacy" else None
+        if forcing_et:
+            writer.addtemplate(_resource_path("soil_evapotranspiration_models.json"))
         writer.line()
 
         if self.include_comments:
             writer.comment("Meteorological source")
         for line in rainfall_lines(watershed):
             writer.line(line)
+        if forcing_et:
+            for line in et_lines(forcing_et):
+                writer.line(line)
         writer.line()
 
         if self.include_comments:
@@ -716,6 +727,8 @@ class OHQWriter:
             block_type = (
                 "Mixed_Hydrologic_Response_Unit"
                 if self.formulation == "mixed_hru"
+                else "Hydrologic_Response_Unit"
+                if self.formulation == "standard_hru"
                 else "CN_Catchment"
             )
             properties = (
@@ -726,6 +739,7 @@ class OHQWriter:
                     ("catchment_width", f"{width:.12g}[m]"),
                     *soil_properties,
                     ("Precipitation", "Rain"),
+                    *([("Evapotranspiration", "ET")] if forcing_et else []),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
                     ("y", y),
@@ -733,6 +747,21 @@ class OHQWriter:
                     ("_height", block_height),
                 ]
                 if self.formulation == "mixed_hru"
+                else [
+                    ("area", f"{area_m2:.12g}[m~^2]"),
+                    ("catchment_slope", f"{slope:.12g}"),
+                    ("catchment_width", f"{width:.12g}[m]"),
+                    ("runoff_coefficient", "1"),
+                    *soil_properties,
+                    ("Precipitation", "Rain"),
+                    *([("Evapotranspiration", "ET")] if forcing_et else []),
+                    ("surface_elevation", f"{elevation:.12g}[m]"),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", block_width),
+                    ("_height", block_height),
+                ]
+                if self.formulation == "standard_hru"
                 else [
                     ("CN", f"{curve_number:.12g}"),
                     ("area", f"{area_m2:.12g}[m~^2]"),
@@ -823,6 +852,8 @@ class OHQWriter:
                     ("groundwater_to_stream", "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
+                else (("Catchment_link", "surface"), ("groundwater_to_stream", "baseflow"))
+                if self.formulation == "standard_hru"
                 # CN_Catchment exposes its outflow through the CN_outlet
                 # interface (from its internal final cascade reservoir), not
                 # the plain-Catchment Catchment_link connector; see the real
