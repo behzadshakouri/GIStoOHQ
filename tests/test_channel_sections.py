@@ -90,3 +90,45 @@ def test_profile_requires_reviewed_bank_offsets(tmp_path):
 def test_sampler_rejects_nonpositive_spacing_before_loading_gis(tmp_path):
     with pytest.raises(ValueError, match="positive metres"):
         sample_channel_profiles("reaches.gpkg", "dem.tif", tmp_path / "profiles.csv", spacing_m=0)
+
+
+def test_geopackage_dem_sampling_and_reviewed_fit(tmp_path):
+    gpd = pytest.importorskip("geopandas")
+    rasterio = pytest.importorskip("rasterio")
+    np = pytest.importorskip("numpy")
+    from rasterio.transform import from_origin
+    from shapely.geometry import LineString
+
+    reaches = tmp_path / "reaches.gpkg"
+    dem = tmp_path / "dem.tif"
+    profiles = tmp_path / "profiles.csv"
+    gpd.GeoDataFrame([{"reach_id": 1, "length_m": 100.0, "z_up_m": 100.0,
+                       "z_dn_m": 99.0, "geometry": LineString([(0, 0), (100, 0)])}],
+                     crs="EPSG:32618").to_file(reaches)
+    yy, xx = np.mgrid[0:80, 0:180]
+    x, y = -40 + xx + 0.5, 40 - yy - 0.5
+    elevations = (100 - x/100 + np.maximum(0, np.abs(y)-1)).astype("float32")
+    with rasterio.open(dem, "w", driver="GTiff", height=80, width=180, count=1,
+                       dtype="float32", crs="EPSG:32618", transform=from_origin(-40, 40, 1, 1),
+                       nodata=-9999) as raster:
+        raster.write(elevations, 1)
+    count = sample_channel_profiles(reaches, dem, profiles, spacing_m=50,
+                                    half_width_m=3, sample_step_m=0.5)
+    with profiles.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert count == len(rows) > 20
+    assert {row["station_m"] for row in rows} == {"25.0", "75.0"}
+    assert all(row["bank_left_m"] == row["bank_right_m"] == "" for row in rows)
+    for row in rows:
+        row.update(bank_left_m="-3", bank_right_m="3")
+    with profiles.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=rows[0])
+        writer.writeheader()
+        writer.writerows(rows)
+    reach = Reach(1, "Reach_1", length_m=100, z_up_m=100, z_dn_m=99)
+    segments = load_channel_segments(profiles, {"Reach_1": reach})["Reach_1"]
+    assert len(segments) == 2
+    for segment in segments:
+        # Raster cell centers discretize an ideal 2 m/1H:1V trapezoid.
+        assert 1.5 < segment.base_width_m < 2.5
+        assert 0.7 < segment.side_slope_z < 1.3
