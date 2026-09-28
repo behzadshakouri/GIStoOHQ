@@ -7,6 +7,7 @@ from ohqbuilder.model.subbasin import Subbasin
 from ohqbuilder.model.topology import TopologyLink
 from ohqbuilder.writers.ohq_writer import OHQWriter
 from ohqbuilder.writers.rainfall_writer import rainfall_lines
+from ohqbuilder.writers.et_writer import et_lines
 
 
 def test_writer_renders_subbasin():
@@ -155,6 +156,44 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     assert "n_vG=" not in text
     assert "theta_sat=" not in text
     assert "theta_res=" not in text
+
+
+def test_et_is_opt_in_and_connects_both_hru_types(monkeypatch):
+    ws = Watershed(
+        name="ETCheck",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+    monkeypatch.delenv("OHQ_ET_FILE", raising=False)
+    assert "Evapotranspiration=ET" not in OHQWriter(formulation="mixed_hru").render(ws)
+    monkeypatch.setenv("OHQ_ET_FILE", "/data/et_m_per_day.csv")
+    for formulation, composite in (
+        ("mixed_hru", "Mixed_Hydrologic_Response_Unit"),
+        ("standard_hru", "Hydrologic_Response_Unit"),
+    ):
+        text = OHQWriter(formulation=formulation).render(ws)
+        assert "addtemplate; filename = /" in text
+        assert "soil_evapotranspiration_models.json" in text
+        assert "create source;type=Evapotranspiration_Time_Series (Soil),name=ET,ET_timeseries=/data/et_m_per_day.csv" in text
+        assert f"create composite;type={composite},name=Subbasin_1," in text
+        assert "Evapotranspiration=ET" in text
+        assert "timeseries=/data/et_m_per_day.csv" not in text.replace("ET_timeseries=", "")
+    standard = OHQWriter(formulation="standard_hru").render(ws)
+    assert "type=Catchment_link,name=Subbasin_1 to Reach_1 surface" in standard
+    assert "type=groundwater_to_stream,name=Subbasin_1 to Reach_1 baseflow" in standard
+    legacy = OHQWriter(formulation="legacy").render(ws)
+    assert "Evapotranspiration=ET" not in legacy
+
+
+def test_et_file_path_cannot_change_ohq_commands():
+    with pytest.raises(ValueError, match="delimiter"):
+        et_lines("et.csv;create block")
 
 
 def test_writer_renders_mixed_hru_soil_texture_as_van_genuchten_parameters():
