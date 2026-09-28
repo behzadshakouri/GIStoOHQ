@@ -672,6 +672,7 @@ def run_full_pipeline(
     documented_watershed_organization: str | None = None,
     documented_watershed_url: str | None = None,
     documented_watershed_license: str | None = None,
+    documented_watershed_role: str = "validation",
     documented_watershed_allow_outlet_outside: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> FullRunResult:
@@ -753,6 +754,7 @@ def run_full_pipeline(
                     source_organization=documented_watershed_organization,
                     source_url=documented_watershed_url,
                     license_text=documented_watershed_license,
+                    reference_role=documented_watershed_role,
                     require_outlet_containment=(
                         not documented_watershed_allow_outlet_outside
                         and not (boundary_snap is not None and not boundary_snap.was_inside)

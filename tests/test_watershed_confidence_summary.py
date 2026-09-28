@@ -6,9 +6,19 @@ from ohqbuilder.watershed_confidence_summary import (
 )
 
 
-def _write_comparison(outputs, filename, *, iou, area_ratio, contains_outlet=True, scope="comparable_scale"):
+def _write_comparison(
+    outputs,
+    filename,
+    *,
+    iou,
+    area_ratio,
+    contains_outlet=True,
+    scope="comparable_scale",
+    reference_role="validation",
+):
     payload = {
         "reference_kind": "wbd_huc12",
+        "reference_role": reference_role,
         "best_match": {
             "generated_area_km2": 23.75,
             "reference_area_km2": 23.75 * area_ratio,
@@ -55,6 +65,25 @@ def test_mixed_high_and_moderate_reports_take_the_lower_overall_rating(tmp_path)
     assert summary["boundary_comparisons"]["wbd"]["confidence"] == "high"
     assert summary["boundary_comparisons"]["documented"]["confidence"] == "moderate"
     assert summary["overall_confidence"] == "moderate"
+
+
+def test_acquisition_estimate_is_informational_and_excluded_from_rating(tmp_path):
+    _write_comparison(tmp_path, "watershed_wbd_comparison.json", iou=0.92, area_ratio=1.02)
+    _write_comparison(
+        tmp_path,
+        "watershed_documented_comparison.json",
+        iou=0.2,
+        area_ratio=1.8,
+        contains_outlet=False,
+        reference_role="acquisition_estimate",
+    )
+    summary = build_delineation_confidence_summary(tmp_path)
+    documented = summary["boundary_comparisons"]["documented"]
+    assert documented["reference_role"] == "acquisition_estimate"
+    assert documented["confidence"] == "informational"
+    assert summary["overall_confidence"] == "high"
+    assert any("excluded from delineation confidence" in c for c in summary["caveats"])
+    assert not any("does not contain the modeled outlet" in c for c in summary["caveats"])
 
 
 def test_outlet_snap_distance_classified_against_green_yellow_red_thresholds(tmp_path):

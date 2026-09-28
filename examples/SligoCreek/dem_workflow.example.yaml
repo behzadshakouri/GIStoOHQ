@@ -42,6 +42,7 @@ dem_acquisition:
 
 documented_watershed:
   source: Estimated Sligo Creek.kmz
+  role: acquisition_estimate
   title: Estimated Sligo Creek review outline
   organization: Operator digitized Google Earth review
   url: examples/SligoCreek/Estimated Sligo Creek.kmz

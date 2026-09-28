@@ -83,8 +83,10 @@ def test_sligo_example_declares_authoritative_catchment_metadata():
     spec = SiteSpec.from_file("examples/SligoCreek/sites/sligocreekdemo.yaml")
 
     assert spec.site_id == "sligocreekdemo"
-    assert spec.catchment_area_m2 == 23_754_600.0
-    assert spec.catchment_area_source == "GIStoOHQ watershed delineation"
+    assert spec.catchment_area_m2 == 23_670_000.0
+    assert spec.catchment_area_source == (
+        "Reviewed GIStoOHQ watershed delineation (23.67 km2 accepted)"
+    )
     assert spec.digest != "99aeb6d9ac7c81f5c61b346c509c4eb5c4bfa6af6c1a5d40ac9c7fc2e08a2faa"
 
 

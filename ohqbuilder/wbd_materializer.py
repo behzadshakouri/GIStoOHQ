@@ -17,7 +17,7 @@ class WbdMaterializeError(RuntimeError):
 WBD_MAPSERVER_URL = "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer"
 
 
-def _safe_extract(archive: Path, destination: Path) -> None:
+def _safe_extract(archive: Path, destination: Path, members: list[str] | None = None) -> None:
     """Extract an archive without allowing members to escape the temporary directory."""
 
     root = destination.resolve()
@@ -28,7 +28,7 @@ def _safe_extract(archive: Path, destination: Path) -> None:
                 raise WbdMaterializeError(
                     f"Unsafe path in WBD archive {archive.name}: {member.filename}"
                 )
-        zipped.extractall(destination)
+        zipped.extractall(destination, members=members)
 
 
 def _normalized_layer_name(name: str) -> str:
@@ -178,25 +178,67 @@ def materialize_wbd_reference(
     from shapely.geometry import box
 
     source = Path(source_dir).expanduser().resolve()
-    archives = sorted(source.glob("*.zip"))
+    # Catalog searches can return multi-gigabyte NHDPlus raster packages for
+    # WBD. Inspect their directories before extracting data we cannot use.
+    archives = []
+    for archive in sorted(source.glob("*.zip")):
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                members = []
+                for name in zipped.namelist():
+                    parts = Path(name).parts
+                    # GDB table names are opaque; retain the whole container.
+                    # NHD raster packages carry elevation-provenance containers,
+                    # which cannot provide the WBD reference we need.
+                    is_gdb = any(part.lower().endswith(".gdb")
+                                 and part.lower() != "elev_source.gdb" for part in parts)
+                    is_gpkg = (name.lower().endswith(".gpkg")
+                               and Path(name).stem.lower() != "elev_source")
+                    is_huc = _find_hu12_layer([Path(name).stem]) is not None
+                    if is_gdb or is_gpkg or is_huc:
+                        members.append(name)
+                if members:
+                    archives.append((archive, members))
+        except zipfile.BadZipFile as exc:
+            raise WbdMaterializeError(f"Invalid WBD archive: {archive.name}") from exc
     direct_sources = sorted(source.rglob("WBDHU12.shp"))
     direct_containers = sorted(source.glob("*.gdb")) + sorted(source.glob("*.gpkg"))
     if not archives and not direct_sources and not direct_containers:
         raise WbdMaterializeError(f"No WBD vector package found under {source}")
 
+    import fiona
+    import pandas as pd
+    selected_frames = []
     with tempfile.TemporaryDirectory(prefix="gistoohq-wbd-") as temporary:
         extracted = Path(temporary)
-        for index, archive in enumerate(archives):
-            _safe_extract(archive, extracted / str(index))
-        dataset, layer = _find_huc12_source(extracted if archives else source)
-        frame = gpd.read_file(dataset, layer=layer) if layer else gpd.read_file(dataset)
-
-    if frame.crs is None:
-        raise WbdMaterializeError("WBDHU12 layer has no coordinate reference system")
-    bounds_geometry = gpd.GeoSeries([box(*clip_bounds)], crs=clip_bounds_crs).to_crs(frame.crs)[0]
-    selected = frame[frame.geometry.intersects(bounds_geometry)].copy()
-    if selected.empty:
+        for index, (archive, members) in enumerate(archives):
+            _safe_extract(archive, extracted / str(index), members)
+        roots = [source, extracted] if archives else [source]
+        datasets = []
+        for scan_root in roots:
+            datasets.extend((path, None) for path in sorted(scan_root.rglob("*.shp"))
+                            if _find_hu12_layer([path.stem]) is not None)
+            for path in sorted(scan_root.rglob("*.gpkg")) + sorted(scan_root.rglob("*.gdb")):
+                layer = _find_hu12_layer(fiona.listlayers(path))
+                if layer:
+                    datasets.append((path, layer))
+        if not datasets:
+            raise WbdMaterializeError("No recognizable WBD HUC12 vector layer in local packages")
+        for dataset, layer in datasets:
+            with fiona.open(dataset, layer=layer) as vector:
+                crs = vector.crs_wkt or vector.crs
+            if not crs:
+                raise WbdMaterializeError("WBDHU12 layer has no coordinate reference system")
+            bounds_geometry = gpd.GeoSeries([box(*clip_bounds)], crs=clip_bounds_crs).to_crs(crs)[0]
+            frame = gpd.read_file(dataset, layer=layer, bbox=bounds_geometry.bounds)
+            frame = frame[frame.geometry.intersects(bounds_geometry)].copy()
+            if not frame.empty:
+                selected_frames.append(frame.to_crs(clip_bounds_crs))
+    if not selected_frames:
         raise WbdMaterializeError("No WBD HUC12 polygon intersects the materialization bounds")
+    selected = gpd.GeoDataFrame(pd.concat(selected_frames, ignore_index=True), crs=clip_bounds_crs)
+    # Overlapping downloaded packages may repeat the same HUC geometry.
+    selected = selected.loc[~selected.geometry.to_wkb().duplicated()].copy()
 
     target = Path(output_path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)

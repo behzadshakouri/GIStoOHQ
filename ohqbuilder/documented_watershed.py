@@ -17,6 +17,7 @@ class DocumentedWatershedError(RuntimeError):
 
 REFERENCE_FILENAME = "DocumentedWatershed_reference.gpkg"
 REFERENCE_LAYER = "documented_watershed_reference"
+REFERENCE_ROLES = ("validation", "acquisition_estimate")
 
 
 def export_boundary_vertices(
@@ -241,6 +242,7 @@ def import_documented_watershed(
     source_organization: str,
     source_url: str | None = None,
     license_text: str | None = None,
+    reference_role: str = "validation",
     require_outlet_containment: bool = True,
     timeout: float = 60.0,
 ) -> Path:
@@ -254,6 +256,12 @@ def import_documented_watershed(
     _require_gis()
     import geopandas as gpd
     from shapely.geometry import Point
+
+    if reference_role not in REFERENCE_ROLES:
+        raise DocumentedWatershedError(
+            f"Unsupported reference role {reference_role!r}; choose one of "
+            f"{', '.join(REFERENCE_ROLES)}."
+        )
 
     source_text = str(source)
     is_service = source_text.lower().startswith(("http://", "https://"))
@@ -347,6 +355,7 @@ def import_documented_watershed(
     frame["ref_org"] = source_organization
     frame["ref_url"] = source_url or (source_text if is_service else "")
     frame["ref_kind"] = "documented_named_watershed"
+    frame["ref_role"] = reference_role
     frame["retrieved"] = retrieved
     frame["license"] = license_text or "not specified"
 
@@ -355,6 +364,7 @@ def import_documented_watershed(
     frame.to_file(target, layer=REFERENCE_LAYER, driver="GPKG")
     metadata = {
         "reference_kind": "documented_named_watershed",
+        "reference_role": reference_role,
         "source_title": source_title,
         "source_organization": source_organization,
         "source_url": source_url or (source_text if is_service else None),
@@ -372,7 +382,8 @@ def import_documented_watershed(
         "license": license_text or "not specified",
         "important": (
             "This is a cited reference boundary. It is not automatically substituted "
-            "for the DEM-derived watershed."
+            "for the DEM-derived watershed. Acquisition estimates are retained for "
+            "review and coverage planning but excluded from delineation confidence."
         ),
     }
     target.with_suffix(".json").write_text(

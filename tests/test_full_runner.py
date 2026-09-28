@@ -830,6 +830,7 @@ def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatc
         documented_watershed_source=source,
         documented_watershed_title="Estimated Sligo Creek review outline",
         documented_watershed_organization="Operator digitized Google Earth review",
+        documented_watershed_role="acquisition_estimate",
         documented_watershed_license="review artifact",
         documented_watershed_allow_outlet_outside=True,
     )
@@ -838,6 +839,7 @@ def test_full_pipeline_imports_documented_reference_before_comparison(monkeypatc
     assert import_call[1] == source
     assert import_call[2] == outputs / "DocumentedWatershed_reference.gpkg"
     assert import_call[3]["source_title"] == "Estimated Sligo Creek review outline"
+    assert import_call[3]["reference_role"] == "acquisition_estimate"
     assert import_call[3]["require_outlet_containment"] is False
     compare_call = next(call for call in calls if call[0] == "compare")
     assert compare_call[2] == outputs / "DocumentedWatershed_reference.gpkg"

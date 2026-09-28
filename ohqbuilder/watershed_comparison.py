@@ -78,6 +78,7 @@ def compare_watersheds(
                 "reference_title": str(row.get("ref_title", reference_id)),
                 "reference_organization": str(row.get("ref_org", "")),
                 "reference_url": str(row.get("ref_url", "")),
+                "reference_role": str(row.get("ref_role", "validation")),
                 "generated_area_km2": basin_area / 1_000_000.0,
                 "reference_area_km2": reference_area / 1_000_000.0,
                 "intersection_area_km2": intersection_area / 1_000_000.0,
@@ -140,6 +141,7 @@ def compare_watersheds(
         if reference_kind == "wbd_huc12"
         else None,
         "reference_kind": reference_kind,
+        "reference_role": best_match["reference_role"],
         "measurement_crs": metric_crs.to_string(),
         "reference_layer": reference_layer,
         "disagreement_geopackage": str(disagreement_target) if disagreement_target else None,

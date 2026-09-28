@@ -361,9 +361,9 @@ class OHQWriter:
 
     def write(self, watershed: Watershed, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.render(watershed), encoding="utf-8")
+        path.write_text(self.render(watershed, output_name=path.stem), encoding="utf-8")
 
-    def render(self, watershed: Watershed) -> str:
+    def render(self, watershed: Watershed, *, output_name: str | None = None) -> str:
         writer = BlockWriter()
 
         model_name = _safe_name(getattr(watershed, "name", None), "Watershed")
@@ -1052,6 +1052,10 @@ class OHQWriter:
         sim_start, sim_end = _simulation_window()
         writer.setvalue("system", "simulation_start_time", sim_start)
         writer.setvalue("system", "simulation_end_time", sim_end)
-        writer.setvalue("system", "outputfile", f"{model_name}_OHQ_output.txt")
+        # outputfile is the GA optimizer log; alloutputfile controls simulation
+        # results. Use the emitted model filename to keep formulations separate.
+        result_name = output_name or model_name
+        writer.setvalue("system", "alloutputfile", f"{result_name}_OHQ_output.txt")
+        writer.setvalue("system", "observed_outputfile", f"{result_name}_observed.txt")
 
         return writer.text()

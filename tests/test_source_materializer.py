@@ -387,3 +387,29 @@ def test_cli_materialize_inputs(monkeypatch, tmp_path, capsys):
     assert calls[0]["clip_buffer_m"] == 20000
     output = capsys.readouterr().out
     assert "Wrote DEM: dem.tif" in output
+
+
+def test_invalid_wbd_uses_local_hydro_before_stale_output_or_service(tmp_path, monkeypatch):
+    downloads = tmp_path / "downloads"
+    for name in ("wbd", "hydro"):
+        (downloads / name).mkdir(parents=True)
+    target = tmp_path / "SITE_A/outputs/WBDHU12_reference.gpkg"
+    target.parent.mkdir(parents=True)
+    target.write_text("stale")
+    warning = target.with_name("WBD_MATERIALIZATION_WARNING.txt")
+    warning.write_text("old failure")
+    calls = []
+    def materialize(source, output, **kwargs):
+        calls.append(source.name)
+        if source.name == "wbd":
+            raise WbdMaterializeError("Raster-only package")
+        output.write_text("fresh vector reference")
+        return output
+    monkeypatch.setattr("ohqbuilder.source_materializer.materialize_wbd_reference", materialize)
+    monkeypatch.setattr("ohqbuilder.source_materializer.materialize_wbd_service_reference",
+                        lambda *a, **k: pytest.fail("Local hydro should avoid service calls"))
+    result = materialize_optional_wbd(tmp_path, "SITE_A", downloads, (-77, 38, -76, 39),
+                                      "EPSG:4326", allow_service_fallback=False)
+    assert calls == ["wbd", "hydro"]
+    assert result.read_text() == "fresh vector reference"
+    assert not warning.exists()

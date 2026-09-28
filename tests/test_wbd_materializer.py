@@ -87,3 +87,49 @@ def test_materialize_wbd_reference_selects_intersecting_huc12(tmp_path):
 
     selected = geopandas.read_file(result, layer="WBDHU12_reference")
     assert selected["huc12"].tolist() == ["020700100101"]
+
+
+def test_raster_only_archive_is_rejected_without_extraction(tmp_path, monkeypatch):
+    source = tmp_path / "wbd"
+    source.mkdir()
+    with zipfile.ZipFile(source / "NHD_RASTER.zip", "w") as archive:
+        archive.writestr("elevation/dem.tif", b"not a vector dataset")
+    def unexpected_extraction(*args):
+        pytest.fail("Raster-only archive must not be extracted")
+    monkeypatch.setattr("ohqbuilder.wbd_materializer._safe_extract", unexpected_extraction)
+    with pytest.raises(WbdMaterializeError, match="No WBD vector package"):
+        materialize_wbd_reference(source, tmp_path / "result.gpkg", clip_bounds=(-77, 38, -76, 39))
+
+
+def test_huc12_selection_searches_later_regional_archives(tmp_path):
+    gpd = pytest.importorskip("geopandas")
+    geometry = pytest.importorskip("shapely.geometry")
+    source = tmp_path / "downloads"
+    source.mkdir()
+    for index, bounds in enumerate(((-80, 35, -79, 36), (-77.1, 38.9, -77, 39))):
+        folder = tmp_path / f"region{index}"
+        folder.mkdir()
+        shp = folder / "WBDHU12.shp"
+        gpd.GeoDataFrame({"huc12": [str(index)]}, geometry=[geometry.box(*bounds)],
+                         crs="EPSG:4326").to_file(shp)
+        with zipfile.ZipFile(source / f"region{index}.zip", "w") as archive:
+            for item in folder.iterdir():
+                archive.write(item, item.name)
+            archive.writestr("unused/dem.tif", b"unrelated raster")
+    result = materialize_wbd_reference(source, tmp_path / "selected.gpkg",
+                                       clip_bounds=(-77.2, 38.8, -76.9, 39.1))
+    assert gpd.read_file(result)["huc12"].tolist() == ["1"]
+
+
+def test_raster_provenance_containers_do_not_trigger_extraction(tmp_path, monkeypatch):
+    source = tmp_path / "wbd"
+    source.mkdir()
+    with zipfile.ZipFile(source / "NHD_RASTER.zip", "w") as archive:
+        archive.writestr("raster/elev_source.gdb/a00001.gdbtable", b"provenance")
+        archive.writestr("raster/elev_source.gpkg", b"provenance")
+        archive.writestr("raster/dem.tif", b"raster")
+    monkeypatch.setattr("ohqbuilder.wbd_materializer._safe_extract",
+                        lambda *a: pytest.fail("No WBD dataset to extract"))
+    with pytest.raises(WbdMaterializeError, match="No WBD vector package"):
+        materialize_wbd_reference(source, tmp_path / "selected.gpkg",
+                                  clip_bounds=(-77.2, 38.8, -76.9, 39.1))

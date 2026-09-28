@@ -77,3 +77,31 @@ def test_compare_watersheds_prioritizes_outlet_containing_huc_and_labels_scale(t
 def test_compare_watersheds_requires_complete_outlet_coordinate_pair(tmp_path):
     with pytest.raises(WatershedComparisonError, match="Both outlet"):
         compare_watersheds("generated", "reference", tmp_path / "out.json", outlet_lon=-77.0)
+
+
+def test_compare_watersheds_propagates_reference_role(tmp_path):
+    gpd = pytest.importorskip("geopandas")
+    geometry = pytest.importorskip("shapely.geometry")
+    generated = tmp_path / "generated.gpkg"
+    reference = tmp_path / "reference.gpkg"
+    shape = geometry.box(-77.05, 38.95, -77.0, 39.0)
+    gpd.GeoDataFrame({"id": [1]}, geometry=[shape], crs="EPSG:4326").to_file(
+        generated, layer="watershed", driver="GPKG"
+    )
+    gpd.GeoDataFrame(
+        {"ref_title": ["Estimated outline"], "ref_role": ["acquisition_estimate"]},
+        geometry=[shape],
+        crs="EPSG:4326",
+    ).to_file(reference, layer="documented_watershed_reference", driver="GPKG")
+
+    result = compare_watersheds(
+        generated,
+        reference,
+        tmp_path / "comparison.json",
+        reference_layer="documented_watershed_reference",
+        reference_id_fields=("ref_title",),
+        reference_kind="documented_named_watershed",
+    )
+    payload = json.loads(result.read_text())
+    assert payload["reference_role"] == "acquisition_estimate"
+    assert payload["best_match"]["reference_role"] == "acquisition_estimate"

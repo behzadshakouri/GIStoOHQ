@@ -729,7 +729,18 @@ def test_sligo_creek_demo_config_runs_prepare(tmp_path):
 
     source = Path("examples/SligoCreek")
     project = tmp_path / "SligoCreek"
-    shutil.copytree(source, project)
+    # A developer's example directory can contain many gigabytes of real
+    # downloads and generated models. This smoke test needs only its fixtures.
+    project.mkdir()
+    for name in (
+        "dem_workflow.example.yaml", "SC outlet.kmz",
+        "Estimated Sligo Creek.kmz", "fixtures", "indexes", "hydro",
+    ):
+        item = source / name
+        if item.is_dir():
+            shutil.copytree(item, project / name)
+        else:
+            shutil.copy2(item, project / name)
 
     assert main(["run-dem-prep", "--config", str(project / "dem_workflow.example.yaml")]) == 0
 

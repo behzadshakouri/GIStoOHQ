@@ -34,6 +34,7 @@ BOUNDARY_COMPARISON_REPORTS = (
     ("documented", "watershed_documented_comparison.json"),
     ("nhdplus", "watershed_nhdplus_comparison.json"),
 )
+INFORMATIONAL_REFERENCE_ROLES = {"acquisition_estimate"}
 REACH_COMPARISON_REPORT = "reaches_nhd_comparison.json"
 DEM_WORKFLOW_SUMMARY = "intermediate/dem_workflow_summary.json"
 
@@ -149,10 +150,16 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
         if payload is None:
             continue
         best_match = payload.get("best_match", {})
+        reference_role = payload.get("reference_role") or best_match.get(
+            "reference_role", "validation"
+        )
+        informational = reference_role in INFORMATIONAL_REFERENCE_ROLES
         rating, comparison_caveats = _boundary_confidence(best_match)
+        displayed_rating = "informational" if informational else rating
         boundary_comparisons[key] = {
             "report": filename,
             "reference_kind": payload.get("reference_kind"),
+            "reference_role": reference_role,
             "generated_area_km2": best_match.get("generated_area_km2"),
             "reference_area_km2": best_match.get("reference_area_km2"),
             "reference_to_generated_area_ratio": best_match.get("reference_to_generated_area_ratio"),
@@ -160,10 +167,16 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
             "boundary_hausdorff_m": best_match.get("boundary_hausdorff_m"),
             "contains_outlet": best_match.get("contains_outlet"),
             "reference_scope": best_match.get("reference_scope"),
-            "confidence": rating,
+            "confidence": displayed_rating,
         }
-        ratings.append(rating)
-        caveats.extend(f"[{key}] {c}" for c in comparison_caveats)
+        if informational:
+            caveats.append(
+                f"[{key}] The reference is an acquisition estimate; its comparison is "
+                "informational and excluded from delineation confidence."
+            )
+        else:
+            ratings.append(rating)
+            caveats.extend(f"[{key}] {c}" for c in comparison_caveats)
 
     reach_summary = None
     reach_payload = _load_json(outputs / REACH_COMPARISON_REPORT)

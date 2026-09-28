@@ -110,6 +110,10 @@ def materialize_optional_wbd(
     if bounds is None:
         return None
     target = root / site / "outputs" / "WBDHU12_reference.gpkg"
+    def completed(path: Path) -> Path:
+        target.with_name("WBD_MATERIALIZATION_WARNING.txt").unlink(missing_ok=True)
+        return path
+
     hydro_fallback = False
     try:
         wbd_dir = find_product_dir(source_dir, "wbd")
@@ -125,14 +129,29 @@ def materialize_optional_wbd(
     local_error = None
     if wbd_dir is not None:
         try:
-            return materialize_wbd_reference(
+            return completed(materialize_wbd_reference(
                 wbd_dir,
                 target,
                 clip_bounds=bounds,
                 clip_bounds_crs=bounds_crs,
-            )
+            ))
         except WbdMaterializeError as exc:
             local_error = exc
+    # A populated WBD directory may contain only miscataloged raster packages.
+    # Try the local NHDPlus vector copy before reusing old output or going online.
+    if not hydro_fallback:
+        try:
+            hydro_dir = find_product_dir(source_dir, "hydro")
+        except FileNotFoundError:
+            hydro_dir = None
+        if hydro_dir is not None:
+            hydro_fallback = True
+            try:
+                return completed(materialize_wbd_reference(
+                    hydro_dir, target, clip_bounds=bounds, clip_bounds_crs=bounds_crs,
+                ))
+            except WbdMaterializeError as exc:
+                local_error = WbdMaterializeError(f"{local_error}; hydro fallback: {exc}")
     if not allow_service_fallback:
         if target.is_file():
             return target
@@ -147,11 +166,11 @@ def materialize_optional_wbd(
         )
         return None
     try:
-        return materialize_wbd_service_reference(
+        return completed(materialize_wbd_service_reference(
             target,
             clip_bounds=bounds,
             clip_bounds_crs=bounds_crs,
-        )
+        ))
     except WbdMaterializeError as exc:
         warning = root / site / "outputs" / "WBD_MATERIALIZATION_WARNING.txt"
         warning.parent.mkdir(parents=True, exist_ok=True)

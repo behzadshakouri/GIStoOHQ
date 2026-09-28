@@ -22,5 +22,5 @@ sources:
     selection: auto
     policy_version: '1.0'
 catchment:
-  area_m2: 23754600.0
-  source: GIStoOHQ watershed delineation
+  area_m2: 23670000.0
+  source: Reviewed GIStoOHQ watershed delineation (23.67 km2 accepted)

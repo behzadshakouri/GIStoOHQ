@@ -88,15 +88,18 @@ def test_import_local_named_boundary_records_provenance(tmp_path):
         source_organization="Example County",
         source_url="https://example.gov/watersheds",
         license_text="Public domain",
+        reference_role="acquisition_estimate",
     )
 
     frame = gpd.read_file(result, layer=REFERENCE_LAYER)
     assert frame["BASIN"].tolist() == ["Sligo Creek"]
     assert frame["ref_kind"].tolist() == ["documented_named_watershed"]
     assert frame["ref_org"].tolist() == ["Example County"]
+    assert frame["ref_role"].tolist() == ["acquisition_estimate"]
     metadata = json.loads(result.with_suffix(".json").read_text())
     assert metadata["selection_name"] == "Sligo Creek"
     assert metadata["feature_count"] == 1
+    assert metadata["reference_role"] == "acquisition_estimate"
 
 
 def test_import_rejects_polygon_that_misses_outlet(tmp_path):

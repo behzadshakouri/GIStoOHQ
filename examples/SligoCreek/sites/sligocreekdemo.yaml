@@ -11,8 +11,8 @@ study_period:
   start: '2024-01-01T00:00:00Z'
   end: '2024-12-31T23:00:00Z'
 catchment:
-  area_m2: 23754600.0
-  source: GIStoOHQ watershed delineation
+  area_m2: 23670000.0
+  source: Reviewed GIStoOHQ watershed delineation (23.67 km2 accepted)
 target_timestep: 1h
 sources:
   discharge:

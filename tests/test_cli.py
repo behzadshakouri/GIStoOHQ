@@ -548,9 +548,12 @@ def test_import_documented_watershed_cli_records_source(monkeypatch, tmp_path):
             "Sligo Creek watershed",
             "--source-organization",
             "Example County",
+            "--reference-role",
+            "acquisition_estimate",
         ]
     )
 
     assert status == 0
     assert calls[0][1].name == "DocumentedWatershed_reference.gpkg"
     assert calls[0][2]["source_organization"] == "Example County"
+    assert calls[0][2]["reference_role"] == "acquisition_estimate"
