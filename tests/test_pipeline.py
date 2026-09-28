@@ -10,6 +10,7 @@ def test_pipeline_writes_legacy_mixed_and_standard_hru_files(monkeypatch, tmp_pa
     from ohqbuilder.pipeline import build_ohq_project
 
     watershed = SimpleNamespace(summary=lambda: "test watershed")
+    monkeypatch.delenv("OHQ_CHANNEL_PROFILES_FILE", raising=False)
     settings = SimpleNamespace(
         project_name="Test",
         paths=SimpleNamespace(outputs_path=tmp_path),

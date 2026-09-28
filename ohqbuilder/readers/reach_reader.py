@@ -35,6 +35,7 @@ class ReachReader:
             line = _longest_line_part(row_get(row, "geometry"))
             x_act = y_act = x_up = y_up = x_dn = y_dn = None
             layout_source = ""
+            swap = False
             if line is not None and line.length > 0:
                 coords = list(line.coords)
                 first_x, first_y = map(float, coords[0][:2])
@@ -73,6 +74,10 @@ class ReachReader:
                 y_dn_act=y_dn,
                 crs_authid=crs_authid,
                 layout_source=layout_source,
+                centerline_xy=tuple(
+                    (float(point[0]), float(point[1]))
+                    for point in (reversed(coords) if swap else coords)
+                ) if line is not None and line.length > 0 else (),
                 attributes={k: row_get(row, k) for k in getattr(df, "columns", []) if k != "geometry"},
             ))
         return out

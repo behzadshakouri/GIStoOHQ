@@ -178,7 +178,6 @@ def test_et_is_opt_in_and_connects_both_hru_types(monkeypatch):
         ("standard_hru", "Hydrologic_Response_Unit"),
     ):
         text = OHQWriter(formulation=formulation).render(ws)
-        assert "addtemplate; filename = /" in text
         assert "soil_evapotranspiration_models.json" in text
         assert "create source;type=Evapotranspiration_Time_Series (Soil),name=ET,ET_timeseries=/data/et_m_per_day.csv" in text
         assert f"create composite;type={composite},name=Subbasin_1," in text

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import replace
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Iterable
 
 from ..model.watershed import Watershed
 from ..soil_pedotransfer import van_genuchten_params
+from ..channel_sections import load_channel_segments, position_on_reach, segment_at_station, station_on_reach
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
 from .et_writer import et_filename, et_lines
@@ -350,11 +352,12 @@ class OHQWriter:
         watershed -> stream reach -> downstream stream reach -> outlet
     """
 
-    def __init__(self, include_comments: bool = True, formulation: str = "legacy"):
+    def __init__(self, include_comments: bool = True, formulation: str = "legacy", channel_profiles_path: Path | None = None):
         if formulation not in {"legacy", "mixed_hru", "standard_hru"}:
             raise ValueError(f"Unsupported OHQ formulation: {formulation}")
         self.include_comments = include_comments
         self.formulation = formulation
+        self.channel_profiles_path = channel_profiles_path
 
     def write(self, watershed: Watershed, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,6 +386,12 @@ class OHQWriter:
             _safe_name(getattr(item, "name", None), f"Reach {index + 1}"): item
             for index, item in enumerate(reaches)
         }
+        channel_segments = (
+            load_channel_segments(self.channel_profiles_path, reach_by_name)
+            if self.channel_profiles_path else {}
+        )
+        if channel_segments and self.formulation != "mixed_hru":
+            raise ValueError("Detailed channel segmentation currently supports mixed_hru only")
         junction_by_name = {
             _safe_name(getattr(item, "name", None), f"Junction {index + 1}"): item
             for index, item in enumerate(junctions)
@@ -559,6 +568,14 @@ class OHQWriter:
                 )
             else:
                 reach_positions[name] = (x_act, y_act)
+            if name in channel_segments:
+                for section in channel_segments[name]:
+                    midpoint = (section.start_m + section.end_m) / (2 * reach_by_name[name].length_m)
+                    position = position_on_reach(reach_by_name[name], midpoint)
+                    if position is None:
+                        missing_coordinates.append(f"{section.name}: missing centerline position")
+                    else:
+                        reach_positions[section.name] = position
 
         terminal_reaches = [
             source for source, target in reach_targets.items() if target == outlet_name
@@ -791,20 +808,32 @@ class OHQWriter:
         if self.include_comments:
             writer.comment("Trapezoidal stream-reach blocks")
 
+        emitted_reaches = dict(reach_by_name)
         for name in active_reaches:
             reach = reach_by_name[name]
-            x, y = reach_positions.get(name, (0, 0))
-            writer.create_block(
-                "Trapezoidal Channel Segment",
-                name=name,
-                properties=[
-                    *trapezoidal_channel_properties(reach),
-                    ("x", x),
-                    ("y", y),
-                    ("_width", block_width),
-                    ("_height", block_height),
-                ],
-            )
+            sections = channel_segments.get(name)
+            if sections:
+                z_up = max(reach.z_up_m, reach.z_dn_m)
+                z_dn = min(reach.z_up_m, reach.z_dn_m)
+                for section in sections:
+                    invert = z_up + (z_dn-z_up) * section.end_m/reach.length_m
+                    block = replace(reach, length_m=section.end_m-section.start_m,
+                                    base_width_m=section.base_width_m,
+                                    side_slope_z=section.side_slope_z, z_up_m=invert,
+                                    z_dn_m=invert)
+                    emitted_reaches[section.name] = block
+                    x,y = reach_positions[section.name]
+                    writer.create_block("Trapezoidal Channel Segment", name=section.name,
+                        properties=[*trapezoidal_channel_properties(block),
+                                    ("x",x),("y",y),("_width",block_width),("_height",block_height)])
+                    if self.include_comments:
+                        writer.comment(f"{section.name}: DEM profile at {section.profile_station_m:g} m; "
+                                       f"area-fit RMSE={section.fit_rmse_m2:.4g} m2; bed unverified")
+            else:
+                x, y = reach_positions.get(name, (0, 0))
+                writer.create_block("Trapezoidal Channel Segment", name=name,
+                    properties=[*trapezoidal_channel_properties(reach),
+                                ("x",x),("y",y),("_width",block_width),("_height",block_height)])
 
         writer.create_block(
             "fixed_head",
@@ -832,6 +861,18 @@ class OHQWriter:
                 (source, first_step),
                 f"{source} to {target}",
             )
+            target_reach = target
+            if target in channel_segments:
+                outfall = next((link for link in topology if getattr(link, "name", None) == source
+                                and getattr(link, "ds_name", None) == target), None)
+                station = (station_on_reach(reach_by_name[target], outfall.x_dn_act, outfall.y_dn_act)
+                           if outfall is not None and None not in (outfall.x_dn_act, outfall.y_dn_act)
+                           else None)
+                if station is None:
+                    station = reach_by_name[target].length_m
+                    if self.include_comments:
+                        writer.comment(f"{source}: no mapped outfall on {target}; attached to downstream segment")
+                target_reach = segment_at_station(channel_segments[target], station)
             link_types = (
                 (
                     # Mixed_Hydrologic_Response_Unit's Reach and Impervious_Reach
@@ -931,7 +972,7 @@ class OHQWriter:
                             _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
                         ),
                     )
-                    reach_elevation_m = reach_bottom_elevation(reach_by_name.get(target))
+                    reach_elevation_m = reach_bottom_elevation(emitted_reaches.get(target_reach))
                     relief_m = abs(surface_elevation_m - reach_elevation_m)
                     flow_path_length_m = max(relief_m / TARGET_GRADIENT, MIN_FLOWPATH_M)
                     link_properties = [
@@ -942,14 +983,23 @@ class OHQWriter:
                     link_type,
                     name=f"{link_name} {suffix}".strip(),
                     source=source,
-                    target=target,
+                    target=target_reach,
                     properties=link_properties,
                 )
 
         if self.include_comments:
             writer.comment("Stream-reach routing links")
 
+        for name, sections in channel_segments.items():
+            if name not in active_reach_names:
+                continue
+            for first, second in zip(sections, sections[1:]):
+                writer.create_link("Trapezoidal_Channel_link", name=f"{first.name} to {second.name}",
+                                   source=first.name, target=second.name)
+
         for source, target in reach_targets.items():
+            source_block = channel_segments[source][-1].name if source in channel_segments else source
+            target_block = channel_segments[target][0].name if target in channel_segments else target
             if target in reach_names:
                 link_type = "Trapezoidal_Channel_link"
             elif target == outlet_name:
@@ -957,7 +1007,7 @@ class OHQWriter:
             else:
                 continue
 
-            key = (source, target, link_type)
+            key = (source_block, target_block, link_type)
             if key in emitted_links:
                 continue
             emitted_links.add(key)
@@ -970,8 +1020,8 @@ class OHQWriter:
             writer.create_link(
                 link_type,
                 name=link_name,
-                source=source,
-                target=target,
+                source=source_block,
+                target=target_block,
             )
 
         if self.include_comments:

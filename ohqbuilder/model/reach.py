@@ -23,3 +23,4 @@ class Reach:
     crs_authid: str | None = None
     layout_source: str = ""
     attributes: dict[str, Any] = field(default_factory=dict)
+    centerline_xy: tuple[tuple[float, float], ...] = ()
