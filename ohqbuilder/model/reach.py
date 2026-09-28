@@ -22,5 +22,5 @@ class Reach:
     y_dn_act: float | None = None
     crs_authid: str | None = None
     layout_source: str = ""
-    centerline_xy: tuple[tuple[float, float], ...] = ()
     attributes: dict[str, Any] = field(default_factory=dict)
+    centerline_xy: tuple[tuple[float, float], ...] = ()
