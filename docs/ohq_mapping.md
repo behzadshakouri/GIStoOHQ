@@ -46,6 +46,9 @@ areas sum to the GIS subbasin area. The default transition is -1 to 1 °C and
 the default degree-day factor is 0.003 m/day/°C; edit or calibrate those values
 where local snow observations support different parameters. When
 `OHQ_TEMPERATURE_FILE` is unset, the existing direct-rainfall model is emitted.
+Correct snow accumulation does not by itself validate HRU runoff generation;
+see [HRU runoff generation at regional subbasin scale](hru_scale_limitations.md)
+for the verified standard and mixed HRU limitations.
 
 Snow generation is supported for `standard_hru` and `mixed_hru`. GIStoOHQ
 rejects the legacy `CN_Catchment` formulation when temperature forcing is

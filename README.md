@@ -2,6 +2,10 @@
 
 GIStoOHQ converts GIS-derived watershed products into OpenHydroQual (`.ohq`) model files.
 
+For the verified limits of applying the standard and mixed HRU formulations to
+large aggregated subbasins, including how to interpret snow-aware regional
+runs, see [`docs/hru_scale_limitations.md`](docs/hru_scale_limitations.md).
+
 ```text
 GIS preprocessing
     ↓
