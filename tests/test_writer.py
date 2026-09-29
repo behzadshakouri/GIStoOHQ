@@ -96,6 +96,7 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
                 name="Subbasin_1",
                 area_km2=1.0,
                 impervious_fraction=0.27,
+                flow_len_ft=2000.0,
                 surface_elevation_m=84.2,
                 centroid_x=100.0,
                 centroid_y=200.0,
@@ -120,6 +121,7 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     assert "create composite;type=Mixed_Hydrologic_Response_Unit,name=Subbasin_1" in text
     assert "create block;type=Mixed_Hydrologic_Response_Unit" not in text
     assert "impervious_fraction=0.27" in text
+    assert "impervious_reach_length=609.6[m]" in text
     assert "surface_elevation=84.2[m]" in text
     assert "Runoff_coeff=" not in text
     # Mixed_Hydrologic_Response_Unit's Reach/Impervious_Reach members can only
@@ -156,6 +158,24 @@ def test_writer_renders_mixed_hru_with_area_fraction_and_three_outflows():
     assert "n_vG=" not in text
     assert "theta_sat=" not in text
     assert "theta_res=" not in text
+
+
+def test_mixed_hru_impervious_reach_length_falls_back_to_basin_dimension():
+    ws = Watershed(
+        name="MixedFallback",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="mixed_hru").render(ws)
+
+    assert "impervious_reach_length=1000[m]" in text
 
 
 def test_et_is_opt_in_and_connects_both_hru_types(monkeypatch):

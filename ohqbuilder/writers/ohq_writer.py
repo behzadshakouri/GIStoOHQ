@@ -706,13 +706,23 @@ class OHQWriter:
             # longest_flow_paths.gpkg) and it is already read onto Subbasin by
             # subbasin_reader.py, just unused by this writer until now.
             flow_len_ft = _optional_finite(getattr(subbasin, "flow_len_ft", None))
-            hydraulic_length = flow_len_ft * 0.3048 if flow_len_ft else None
+            hydraulic_length = (
+                flow_len_ft * 0.3048
+                if flow_len_ft is not None and flow_len_ft > 0
+                else None
+            )
             impervious_fraction = _finite(
                 getattr(subbasin, "impervious_fraction", None), 0.2
             )
             # The mixed composite deliberately excludes zero-area members.
             impervious_fraction = min(max(impervious_fraction, 1.0e-6), 1.0 - 1.0e-6)
             width = max(math.sqrt(area_m2), 1.0)
+            # The mixed HRU's internal impervious reach needs a travel length.
+            # Prefer the GIS-derived longest flow path already carried by the
+            # subbasin.  Fall back to the characteristic basin dimension when
+            # older inputs do not provide that field, and retain the template's
+            # positive 10 m nominal minimum for very small synthetic fixtures.
+            impervious_reach_length = max(hydraulic_length or width, 10.0)
             elevation = _finite(
                 getattr(subbasin, "surface_elevation_m", None),
                 _finite(
@@ -754,6 +764,7 @@ class OHQWriter:
                     ("impervious_fraction", f"{impervious_fraction:.12g}"),
                     ("catchment_slope", f"{slope:.12g}"),
                     ("catchment_width", f"{width:.12g}[m]"),
+                    ("impervious_reach_length", f"{impervious_reach_length:.12g}[m]"),
                     *soil_properties,
                     ("Precipitation", "Rain"),
                     *([("Evapotranspiration", "ET")] if forcing_et else []),
