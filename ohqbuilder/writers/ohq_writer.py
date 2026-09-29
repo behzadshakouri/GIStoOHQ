@@ -13,7 +13,14 @@ from ..channel_sections import load_channel_segments, position_on_reach, segment
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
 from .et_writer import et_filename, et_lines
-from .snow_writer import snow_forcing_lines, temperature_filename
+from .snow_writer import (
+    air_temperature_lines,
+    snow_partition_lines,
+    snow_source_names,
+    temperature_adjustment_settings,
+    temperature_filename,
+    temperature_offset_c,
+)
 from .routing_writer import reach_bottom_elevation, trapezoidal_channel_properties
 
 
@@ -368,6 +375,16 @@ class OHQWriter:
         writer = BlockWriter()
 
         model_name = _safe_name(getattr(watershed, "name", None), "Watershed")
+        forcing_snow = temperature_filename()
+        if forcing_snow and self.formulation == "legacy":
+            raise ValueError(
+                "Snow generation is not supported for the legacy CN_Catchment "
+                "formulation: its generic snowmelt inlet bypasses curve-number "
+                "abstraction. Use standard_hru or mixed_hru."
+            )
+        temperature_reference_m, temperature_lapse_rate = (
+            temperature_adjustment_settings() if forcing_snow else (None, -6.5)
+        )
         outlet_obj = getattr(watershed, "outlet", None)
         outlet_name = _safe_name(
             getattr(outlet_obj, "name", None),
@@ -668,7 +685,6 @@ class OHQWriter:
         writer.loadtemplate(_resource_path("main_components.json"))
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
         writer.addtemplate(_resource_path("open_channel.json"))
-        forcing_snow = temperature_filename()
         if forcing_snow:
             writer.addtemplate(_resource_path("snowmelt.json"))
         if self.formulation == "mixed_hru":
@@ -685,7 +701,7 @@ class OHQWriter:
         if self.include_comments:
             writer.comment("Meteorological source")
         forcing_lines = (
-            snow_forcing_lines(watershed, forcing_snow)
+            air_temperature_lines(forcing_snow)
             if forcing_snow
             else rainfall_lines(watershed)
         )
@@ -732,14 +748,38 @@ class OHQWriter:
             # older inputs do not provide that field, and retain the template's
             # positive 10 m nominal minimum for very small synthetic fixtures.
             impervious_reach_length = max(hydraulic_length or width, 10.0)
-            elevation = _finite(
-                getattr(subbasin, "surface_elevation_m", None),
-                _finite(
-                    getattr(subbasin, "elevation_m", None),
-                    _finite(getattr(subbasin, "mean_elevation_m", None), 0.0),
+            elevation_value = next(
+                (
+                    value
+                    for value in (
+                        _optional_finite(getattr(subbasin, "surface_elevation_m", None)),
+                        _optional_finite(getattr(subbasin, "elevation_m", None)),
+                        _optional_finite(getattr(subbasin, "mean_elevation_m", None)),
+                    )
+                    if value is not None
                 ),
+                None,
             )
+            if temperature_reference_m is not None and elevation_value is None:
+                raise ValueError(
+                    f"{name} has no finite subbasin elevation required for "
+                    "OHQ_TEMPERATURE_REFERENCE_ELEVATION_M"
+                )
+            elevation = elevation_value if elevation_value is not None else 0.0
             x, y = catchment_positions[name]
+            temperature_offset = temperature_offset_c(
+                elevation,
+                temperature_reference_m,
+                temperature_lapse_rate,
+            )
+            if forcing_snow:
+                for line in snow_partition_lines(
+                    watershed, forcing_snow, name, temperature_offset
+                ):
+                    writer.line(line)
+                liquid_rain_name, snowfall_name = snow_source_names(name)
+            else:
+                liquid_rain_name, snowfall_name = "Rain", ""
 
             # SSURGO-derived sand/clay percentages, when available from the
             # GIS pipeline (extract_soil_texture.py), are converted into
@@ -775,7 +815,7 @@ class OHQWriter:
                     ("catchment_width", f"{width:.12g}[m]"),
                     ("impervious_reach_length", f"{impervious_reach_length:.12g}[m]"),
                     *soil_properties,
-                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
+                    ("Precipitation", liquid_rain_name),
                     *([("Evapotranspiration", "ET")] if forcing_et else []),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
@@ -790,7 +830,7 @@ class OHQWriter:
                     ("catchment_width", f"{width:.12g}[m]"),
                     ("runoff_coefficient", "1"),
                     *soil_properties,
-                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
+                    ("Precipitation", liquid_rain_name),
                     *([("Evapotranspiration", "ET")] if forcing_et else []),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
@@ -810,7 +850,7 @@ class OHQWriter:
                     ("slope", f"{slope:.12g}"),
                     ("recovery_coefficient", "0.1[1/day]"),
                     ("initial_abstraction_depth", "0[m]"),
-                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
+                    ("Precipitation", liquid_rain_name),
                     ("x", x),
                     ("y", y),
                     ("_width", block_width),
@@ -842,8 +882,9 @@ class OHQWriter:
                         name=snow_name,
                         properties=[
                             ("area", f"{snow_area:.12g}[m~^2]"),
-                            ("Snowfall", "Snowfall"),
+                            ("Snowfall", snowfall_name),
                             ("Temperature", "AirTemperature"),
+                            ("temperature_offset", f"{temperature_offset:.12g}"),
                             ("x", x - 300 if surface != "Impervious" else x + 300),
                             ("y", y - 300),
                             ("_width", 240),

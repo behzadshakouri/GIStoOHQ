@@ -39,10 +39,20 @@ def build_ohq_project(
     detailed_hru_path = base.with_name(f"{base.name}_detailed_mixed_hru").with_suffix(suffix)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    OHQWriter(
-        include_comments=settings.ohq.include_comments,
-        formulation="legacy",
-    ).write(watershed, legacy_path)
+    snow_enabled = bool(os.environ.get("OHQ_TEMPERATURE_FILE", "").strip())
+    if not snow_enabled:
+        OHQWriter(
+            include_comments=settings.ohq.include_comments,
+            formulation="legacy",
+        ).write(watershed, legacy_path)
+    else:
+        legacy_path.unlink(missing_ok=True)
+        log.warning(
+            "Skipped legacy CN model: snowmelt cannot enter CN_Catchment "
+            "without bypassing curve-number abstraction; removed any stale "
+            "legacy output at %s",
+            legacy_path,
+        )
     OHQWriter(
         include_comments=settings.ohq.include_comments,
         formulation="mixed_hru",
@@ -63,9 +73,10 @@ def build_ohq_project(
                          load_channel_segments(profiles_file, {r.name: r for r in watershed.reaches}),
                          {r.name: r for r in watershed.reaches})
         log.info("Wrote detailed-channel mixed-HRU OHQ file: %s", detailed_hru_path)
-    log.info("Wrote legacy OHQ file: %s", legacy_path)
+    if not snow_enabled:
+        log.info("Wrote legacy OHQ file: %s", legacy_path)
     log.info("Wrote mixed-HRU OHQ file: %s", mixed_hru_path)
     log.info("Wrote standard-HRU OHQ file: %s", standard_hru_path)
-    # Preserve the historical single-path return contract for callers while
-    # all alternatives are emitted together.
-    return str(legacy_path)
+    # Preserve the historical legacy-path return when snow is disabled. With
+    # snow enabled, return the first model that was actually written.
+    return str(mixed_hru_path if snow_enabled else legacy_path)

@@ -5,6 +5,13 @@ The repository does not include the plan-set documents or authoritative survey, 
 
 The configured acquisition area uses a **500 m half-width** (a 1 km by 1 km window) around the candidate. That scale provides more local drainage context around John McCormack Road for bioretention screening; it is still not a watershed-scale delineation. The machine-readable point, extent, and limitations are recorded in `outlet_and_extent.geojson`. Useful authoritative follow-up sources are the [DC Open Data portal](https://opendata.dc.gov/) and [DC Water](https://www.dcwater.com/), because a surface-water web map alone cannot verify a buried storm-sewer outlet.
 
+The checked-in generated parameter layer predates the
+`surface_elevation_m` field. A snow run can use the unadjusted temperature
+forcing by omitting `OHQ_TEMPERATURE_REFERENCE_ELEVATION_M`, but it cannot apply
+a defensible lapse-rate correction until Phase 2 (including `extract_slope.py`)
+is rerun against the DEM. GIStoOHQ deliberately rejects a configured reference
+elevation when that subbasin elevation is missing.
+
 If **FULL RUN** is pressed without drawing an area, the UI first regenerates the
 configured 1 km by 1 km default polygon and passes it to `full-run`. Because
 the outlet is already inside that polygon, full-run preserves its clipping

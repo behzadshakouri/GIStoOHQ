@@ -7,8 +7,10 @@
 | `Junction_i` | `Junction` | mixer/junction block |
 | `Outlet` | `Outlet` | outlet/sink block |
 
-Each OHQ build emits `<name>_legacy.ohq`, `<name>_mixed_hru.ohq`, and
-`<name>_standard_hru.ohq`. The
+Each rain-only OHQ build emits `<name>_legacy.ohq`, `<name>_mixed_hru.ohq`, and
+`<name>_standard_hru.ohq`. A snow-enabled build emits the mixed and standard
+files, skips the unsupported legacy file, and removes a stale legacy output at
+the same target path. The
 legacy model retains the curve-number-derived runoff coefficient. The mixed
 HRU model reads a GIS impervious fraction (or percent) when available and
 partitions the subbasin between infiltrating and impervious catchments; when
@@ -44,6 +46,34 @@ areas sum to the GIS subbasin area. The default transition is -1 to 1 °C and
 the default degree-day factor is 0.003 m/day/°C; edit or calibrate those values
 where local snow observations support different parameters. When
 `OHQ_TEMPERATURE_FILE` is unset, the existing direct-rainfall model is emitted.
+
+Snow generation is supported for `standard_hru` and `mixed_hru`. GIStoOHQ
+rejects the legacy `CN_Catchment` formulation when temperature forcing is
+enabled. Its generic external inflow enters the first routing reservoir after
+the curve-number abstraction, so attaching snowmelt there would bypass the CN
+loss calculation and overstate runoff. A dedicated CN melt partition is needed
+before that combination can be modeled correctly.
+
+If the temperature series represents a station or gridded cell at a known
+elevation, set `OHQ_TEMPERATURE_REFERENCE_ELEVATION_M` to that elevation.
+GIStoOHQ then creates a separate rain/snow partition for each subbasin and
+applies
+`offset = lapse_rate * (subbasin_elevation - reference_elevation) / 1000`.
+The default environmental lapse rate is -6.5 °C/km; override it with
+`OHQ_TEMPERATURE_LAPSE_RATE_C_PER_KM` when local evidence supports another
+value. A lapse rate without a reference elevation is rejected. If the reference
+elevation is omitted, the offset is zero everywhere rather than assuming sea
+level. When a reference elevation is supplied, every subbasin must have a
+finite GIS elevation; the writer rejects missing elevations instead of treating
+them as zero.
+
+Rainfall and temperature files must use the same model-time origin and cover
+the complete simulation window. Preserve the source, location, elevation,
+units, time zone, missing-data treatment, and aggregation method for both
+forcings. Observed or otherwise defensible event-scale series are required for
+calibration and validation. A smoothed climatology or synthetic temperature
+series can support a sensitivity test, but its resulting peak timing is not
+evidence that the model reproduced an observed snowmelt event.
 
 To apply ET, set `OHQ_ET_FILE` to an existing OpenHydroQual time-series CSV
 containing nonnegative **depth rates in m/day** (time in OpenHydroQual days in

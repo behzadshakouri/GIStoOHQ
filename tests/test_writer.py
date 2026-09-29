@@ -197,19 +197,19 @@ def test_temperature_forcing_adds_mass_conserving_snowpacks(monkeypatch):
     text = OHQWriter(formulation="mixed_hru").render(ws)
 
     assert "snowmelt.json" in text
-    assert "type=Liquid_Precipitation,name=LiquidRain" in text
-    assert "type=Snowfall,name=Snowfall" in text
+    assert "type=Liquid_Precipitation,name=LiquidRain_Subbasin_1" in text
+    assert "type=Snowfall,name=Snowfall_Subbasin_1" in text
     assert "type=Air_Temperature,name=AirTemperature" in text
-    assert "Precipitation=LiquidRain" in text
+    assert "Precipitation=LiquidRain_Subbasin_1" in text
+    assert "Snowfall=Snowfall_Subbasin_1" in text
+    assert "temperature_offset=0" in text
     assert "name=Snowpack_Subbasin_1_Pervious,area=750000[m~^2]" in text
     assert "name=Snowpack_Subbasin_1_Impervious,area=250000[m~^2]" in text
     assert "type=Pervious_Snowmelt_link" in text
     assert "type=Impervious_Snowmelt_link" in text
 
 
-@pytest.mark.parametrize("formulation", ["legacy", "standard_hru"])
-def test_temperature_forcing_connects_single_surface_snowpack(monkeypatch,
-                                                               formulation):
+def test_temperature_forcing_connects_standard_hru_snowpack(monkeypatch):
     monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
     monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
     ws = Watershed(
@@ -224,12 +224,99 @@ def test_temperature_forcing_connects_single_surface_snowpack(monkeypatch,
         ],
     )
 
-    text = OHQWriter(formulation=formulation).render(ws)
+    text = OHQWriter(formulation="standard_hru").render(ws)
 
     assert "name=Snowpack_Subbasin_1,area=1000000[m~^2]" in text
     assert "type=Snowmelt_link,name=Snowpack_Subbasin_1 melt" in text
     assert "type=Pervious_Snowmelt_link" not in text
     assert "type=Impervious_Snowmelt_link" not in text
+
+
+def test_temperature_forcing_rejects_legacy_cn_catchment(monkeypatch):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    ws = Watershed(
+        name="SnowLegacy",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0)],
+        outlet=Outlet(x_act=0.0, y_act=0.0),
+        topology=[TopologyLink(1, "subbasin", "Subbasin_1", "sink", None,
+                               "Outlet")],
+    )
+
+    with pytest.raises(ValueError, match="bypasses curve-number abstraction"):
+        OHQWriter(formulation="legacy").render(ws)
+
+
+def test_temperature_forcing_applies_subbasin_elevation_offsets(monkeypatch):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", "1500")
+    monkeypatch.setenv("OHQ_TEMPERATURE_LAPSE_RATE_C_PER_KM", "-6.5")
+    ws = Watershed(
+        name="SnowElevations",
+        subbasins=[
+            Subbasin(id=1, name="Low", area_km2=1.0,
+                     surface_elevation_m=1000.0, centroid_x=0.0, centroid_y=0.0),
+            Subbasin(id=2, name="High", area_km2=1.0,
+                     surface_elevation_m=2000.0, centroid_x=1.0, centroid_y=0.0),
+        ],
+        outlet=Outlet(x_act=2.0, y_act=0.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Low", "sink", None, "Outlet"),
+            TopologyLink(2, "subbasin", "High", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="standard_hru").render(ws)
+
+    assert "name=LiquidRain_Low,timeseries=/data/precipitation.txt,Temperature=/data/temperature.txt,temperature_offset=3.25" in text
+    assert "name=Snowfall_Low,timeseries=/data/precipitation.txt,Temperature=/data/temperature.txt,temperature_offset=3.25" in text
+    assert "name=LiquidRain_High,timeseries=/data/precipitation.txt,Temperature=/data/temperature.txt,temperature_offset=-3.25" in text
+    assert "name=Snowfall_High,timeseries=/data/precipitation.txt,Temperature=/data/temperature.txt,temperature_offset=-3.25" in text
+    assert "name=Snowpack_Low,area=1000000[m~^2],Snowfall=Snowfall_Low,Temperature=AirTemperature,temperature_offset=3.25" in text
+    assert "name=Snowpack_High,area=1000000[m~^2],Snowfall=Snowfall_High,Temperature=AirTemperature,temperature_offset=-3.25" in text
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", "bad"),
+        ("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", "nan"),
+        ("OHQ_TEMPERATURE_LAPSE_RATE_C_PER_KM", "inf"),
+    ],
+)
+def test_temperature_adjustment_rejects_nonfinite_settings(
+    monkeypatch, variable, value
+):
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", "100")
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ValueError, match="must be a finite number"):
+        OHQWriter(formulation="standard_hru").render(Watershed(name="BadSnow"))
+
+
+def test_temperature_lapse_rate_requires_reference_elevation(monkeypatch):
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    monkeypatch.delenv("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", raising=False)
+    monkeypatch.setenv("OHQ_TEMPERATURE_LAPSE_RATE_C_PER_KM", "-6.5")
+    with pytest.raises(ValueError, match="requires"):
+        OHQWriter(formulation="standard_hru").render(Watershed(name="BadSnow"))
+
+
+def test_temperature_reference_requires_subbasin_elevation(monkeypatch):
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_REFERENCE_ELEVATION_M", "100")
+    ws = Watershed(
+        name="MissingElevation",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=0.0, centroid_y=0.0)],
+        outlet=Outlet(x_act=1.0, y_act=0.0),
+        topology=[TopologyLink(1, "subbasin", "Subbasin_1", "sink", None,
+                               "Outlet")],
+    )
+
+    with pytest.raises(ValueError, match="no finite subbasin elevation"):
+        OHQWriter(formulation="standard_hru").render(ws)
 
 
 def test_temperature_forcing_is_opt_in(monkeypatch):
