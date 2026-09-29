@@ -178,6 +178,78 @@ def test_mixed_hru_impervious_reach_length_falls_back_to_basin_dimension():
     assert "impervious_reach_length=1000[m]" in text
 
 
+def test_temperature_forcing_adds_mass_conserving_snowpacks(monkeypatch):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    ws = Watershed(
+        name="SnowMixed",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            impervious_fraction=0.25,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="mixed_hru").render(ws)
+
+    assert "snowmelt.json" in text
+    assert "type=Liquid_Precipitation,name=LiquidRain" in text
+    assert "type=Snowfall,name=Snowfall" in text
+    assert "type=Air_Temperature,name=AirTemperature" in text
+    assert "Precipitation=LiquidRain" in text
+    assert "name=Snowpack_Subbasin_1_Pervious,area=750000[m~^2]" in text
+    assert "name=Snowpack_Subbasin_1_Impervious,area=250000[m~^2]" in text
+    assert "type=Pervious_Snowmelt_link" in text
+    assert "type=Impervious_Snowmelt_link" in text
+
+
+@pytest.mark.parametrize("formulation", ["legacy", "standard_hru"])
+def test_temperature_forcing_connects_single_surface_snowpack(monkeypatch,
+                                                               formulation):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    ws = Watershed(
+        name="SnowSingleSurface",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation=formulation).render(ws)
+
+    assert "name=Snowpack_Subbasin_1,area=1000000[m~^2]" in text
+    assert "type=Snowmelt_link,name=Snowpack_Subbasin_1 melt" in text
+    assert "type=Pervious_Snowmelt_link" not in text
+    assert "type=Impervious_Snowmelt_link" not in text
+
+
+def test_temperature_forcing_is_opt_in(monkeypatch):
+    monkeypatch.delenv("OHQ_TEMPERATURE_FILE", raising=False)
+    ws = Watershed(
+        name="RainOnly",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[TopologyLink(1, "subbasin", "Subbasin_1", "sink", None,
+                               "Outlet")],
+    )
+
+    text = OHQWriter(formulation="legacy").render(ws)
+
+    assert "create source;type=Precipitation,name=Rain" in text
+    assert "snowmelt.json" not in text
+    assert "Snowpack" not in text
+
+
 def test_et_is_opt_in_and_connects_both_hru_types(monkeypatch):
     ws = Watershed(
         name="ETCheck",

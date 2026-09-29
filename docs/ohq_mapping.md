@@ -34,6 +34,17 @@ Set `OHQ_RAINFALL_FILE` to a real file in OpenHydroQual's precipitation format
 when building a model with assigned rainfall. If it is unset, GIStoOHQ creates
 an unassigned `Rain` source instead of referencing a nonexistent default file.
 
+Set `OHQ_TEMPERATURE_FILE` to an OpenHydroQual two-column air-temperature time
+series (model time, degrees Celsius) to enable snow accumulation and melt. The
+writer then loads `snowmelt.json`, partitions `OHQ_RAINFALL_FILE` into
+complementary liquid-rain and snowfall sources, creates a stateful snowpack for
+each modeled surface, and routes storage-limited degree-day melt into the
+catchment. Mixed HRUs receive separate pervious and impervious snowpacks whose
+areas sum to the GIS subbasin area. The default transition is -1 to 1 °C and
+the default degree-day factor is 0.003 m/day/°C; edit or calibrate those values
+where local snow observations support different parameters. When
+`OHQ_TEMPERATURE_FILE` is unset, the existing direct-rainfall model is emitted.
+
 To apply ET, set `OHQ_ET_FILE` to an existing OpenHydroQual time-series CSV
 containing nonnegative **depth rates in m/day** (time in OpenHydroQual days in
 the first column, rate in the second). The writer loads

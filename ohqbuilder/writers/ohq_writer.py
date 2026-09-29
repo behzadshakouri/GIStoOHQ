@@ -13,6 +13,7 @@ from ..channel_sections import load_channel_segments, position_on_reach, segment
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
 from .et_writer import et_filename, et_lines
+from .snow_writer import snow_forcing_lines, temperature_filename
 from .routing_writer import reach_bottom_elevation, trapezoidal_channel_properties
 
 
@@ -667,6 +668,9 @@ class OHQWriter:
         writer.loadtemplate(_resource_path("main_components.json"))
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
         writer.addtemplate(_resource_path("open_channel.json"))
+        forcing_snow = temperature_filename()
+        if forcing_snow:
+            writer.addtemplate(_resource_path("snowmelt.json"))
         if self.formulation == "mixed_hru":
             writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
         elif self.formulation == "standard_hru":
@@ -680,7 +684,12 @@ class OHQWriter:
 
         if self.include_comments:
             writer.comment("Meteorological source")
-        for line in rainfall_lines(watershed):
+        forcing_lines = (
+            snow_forcing_lines(watershed, forcing_snow)
+            if forcing_snow
+            else rainfall_lines(watershed)
+        )
+        for line in forcing_lines:
             writer.line(line)
         if forcing_et:
             for line in et_lines(forcing_et):
@@ -766,7 +775,7 @@ class OHQWriter:
                     ("catchment_width", f"{width:.12g}[m]"),
                     ("impervious_reach_length", f"{impervious_reach_length:.12g}[m]"),
                     *soil_properties,
-                    ("Precipitation", "Rain"),
+                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
                     *([("Evapotranspiration", "ET")] if forcing_et else []),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
@@ -781,7 +790,7 @@ class OHQWriter:
                     ("catchment_width", f"{width:.12g}[m]"),
                     ("runoff_coefficient", "1"),
                     *soil_properties,
-                    ("Precipitation", "Rain"),
+                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
                     *([("Evapotranspiration", "ET")] if forcing_et else []),
                     ("surface_elevation", f"{elevation:.12g}[m]"),
                     ("x", x),
@@ -801,7 +810,7 @@ class OHQWriter:
                     ("slope", f"{slope:.12g}"),
                     ("recovery_coefficient", "0.1[1/day]"),
                     ("initial_abstraction_depth", "0[m]"),
-                    ("Precipitation", "Rain"),
+                    ("Precipitation", "LiquidRain" if forcing_snow else "Rain"),
                     ("x", x),
                     ("y", y),
                     ("_width", block_width),
@@ -813,6 +822,40 @@ class OHQWriter:
                 name=name,
                 properties=properties,
             )
+
+            if forcing_snow:
+                snowpacks = (
+                    [
+                        ("Pervious", area_m2 * (1.0 - impervious_fraction),
+                         "Pervious_Snowmelt_link"),
+                        ("Impervious", area_m2 * impervious_fraction,
+                         "Impervious_Snowmelt_link"),
+                    ]
+                    if self.formulation == "mixed_hru"
+                    else [("", area_m2, "Snowmelt_link")]
+                )
+                for surface, snow_area, link_type in snowpacks:
+                    suffix = f"_{surface}" if surface else ""
+                    snow_name = f"Snowpack_{name}{suffix}"
+                    writer.create_block(
+                        "Snowpack",
+                        name=snow_name,
+                        properties=[
+                            ("area", f"{snow_area:.12g}[m~^2]"),
+                            ("Snowfall", "Snowfall"),
+                            ("Temperature", "AirTemperature"),
+                            ("x", x - 300 if surface != "Impervious" else x + 300),
+                            ("y", y - 300),
+                            ("_width", 240),
+                            ("_height", 180),
+                        ],
+                    )
+                    writer.create_link(
+                        link_type,
+                        name=f"{snow_name} melt",
+                        source=snow_name,
+                        target=name,
+                    )
 
         writer.line()
 
