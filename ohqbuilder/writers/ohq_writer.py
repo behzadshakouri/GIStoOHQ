@@ -44,6 +44,52 @@ def _positive(value: Any, default: float) -> float:
     return number if number > 0.0 else default
 
 
+def _baseflow_settings() -> tuple[str, float | None, float | None]:
+    """Return the explicitly selected groundwater-to-stream formulation.
+
+    Darcy routing remains the default.  The linear-reservoir parameters are
+    read only when that method is selected, so adding support cannot alter an
+    existing generated model.
+    """
+    method = os.environ.get("OHQ_BASEFLOW_METHOD", "darcy").strip().lower()
+    if method == "darcy":
+        return method, None, None
+    if method != "linear_reservoir":
+        raise ValueError(
+            "OHQ_BASEFLOW_METHOD must be 'darcy' or 'linear_reservoir'"
+        )
+
+    recession_text = os.environ.get(
+        "OHQ_BASEFLOW_RECESSION_RATE_PER_DAY", "0.01"
+    ).strip()
+    threshold_text = os.environ.get(
+        "OHQ_BASEFLOW_MIN_MOISTURE_CONTENT", "0.3"
+    ).strip()
+    try:
+        recession_rate = float(recession_text)
+    except ValueError as exc:
+        raise ValueError(
+            "OHQ_BASEFLOW_RECESSION_RATE_PER_DAY must be a finite positive number"
+        ) from exc
+    try:
+        min_moisture_content = float(threshold_text)
+    except ValueError as exc:
+        raise ValueError(
+            "OHQ_BASEFLOW_MIN_MOISTURE_CONTENT must be between 0 and 1"
+        ) from exc
+    if not math.isfinite(recession_rate) or recession_rate <= 0.0:
+        raise ValueError(
+            "OHQ_BASEFLOW_RECESSION_RATE_PER_DAY must be a finite positive number"
+        )
+    if not math.isfinite(min_moisture_content) or not (
+        0.0 <= min_moisture_content <= 1.0
+    ):
+        raise ValueError(
+            "OHQ_BASEFLOW_MIN_MOISTURE_CONTENT must be between 0 and 1"
+        )
+    return method, recession_rate, min_moisture_content
+
+
 def _optional_finite(value: Any) -> float | None:
     try:
         number = float(value)
@@ -347,8 +393,9 @@ class OHQWriter:
     * GIS reaches become ``Trapezoidal Channel Segment`` blocks.
     * Catchments discharge to their first downstream reach using
       ``CN_outlet`` (legacy), reach ports (mixed_hru), or
-      ``Catchment_link`` (standard_hru). Both HRU types also route groundwater
-      to the reach with ``groundwater_to_stream``.
+      ``Catchment_link`` (standard_hru). Both HRU types route groundwater to
+      the reach with exactly one selected baseflow connector: the default
+      ``groundwater_to_stream`` Darcy link or opt-in ``Linear_baseflow``.
     * Consecutive reaches are connected by ``Trapezoidal_Channel_link``.
     * Terminal reaches discharge to one ``fixed_head`` outlet through
       ``channel2fixed``.
@@ -375,6 +422,16 @@ class OHQWriter:
         writer = BlockWriter()
 
         model_name = _safe_name(getattr(watershed, "name", None), "Watershed")
+        baseflow_method, baseflow_recession_rate, baseflow_min_moisture = (
+            _baseflow_settings()
+            if self.formulation in {"mixed_hru", "standard_hru"}
+            else ("darcy", None, None)
+        )
+        baseflow_link_type = (
+            "Linear_baseflow"
+            if baseflow_method == "linear_reservoir"
+            else "groundwater_to_stream"
+        )
         forcing_snow = temperature_filename()
         if forcing_snow and self.formulation == "legacy":
             raise ValueError(
@@ -681,6 +738,11 @@ class OHQWriter:
             writer.comment(
                 "Set OPENHYDROQUAL_RESOURCES, OHQ_RAINFALL_FILE and OHQ_ET_FILE as needed."
             )
+            if self.formulation in {"mixed_hru", "standard_hru"}:
+                writer.comment(
+                    f"Groundwater baseflow method: {baseflow_method}; "
+                    "one connector is emitted per HRU-to-reach path."
+                )
 
         writer.loadtemplate(_resource_path("main_components.json"))
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
@@ -985,10 +1047,10 @@ class OHQWriter:
                     # composite" for every subbasin.
                     ("Reach_link", "surface"),
                     ("Impervious_Reach_link", "impervious surface"),
-                    ("groundwater_to_stream", "baseflow"),
+                    (baseflow_link_type, "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
-                else (("Catchment_link", "surface"), ("groundwater_to_stream", "baseflow"))
+                else (("Catchment_link", "surface"), (baseflow_link_type, "baseflow"))
                 if self.formulation == "standard_hru"
                 # CN_Catchment exposes its outflow through the CN_outlet
                 # interface (from its internal final cascade reservoir), not
@@ -1073,6 +1135,23 @@ class OHQWriter:
                     link_properties = [
                         ("length", f"{flow_path_length_m:.12g}[m]"),
                         ("area", f"{catchment_width * 10.0:.12g}[m~^2]"),
+                    ]
+                elif link_type == "Linear_baseflow":
+                    # This connector is an alternative storage-discharge law,
+                    # not a second outlet alongside the Darcy connector.  The
+                    # selected link_types tuple above contains exactly one of
+                    # them, preventing duplicate groundwater withdrawal.
+                    assert baseflow_recession_rate is not None
+                    assert baseflow_min_moisture is not None
+                    link_properties = [
+                        (
+                            "recession_rate",
+                            f"{baseflow_recession_rate:.12g}[1/day]",
+                        ),
+                        (
+                            "min_moisture_content",
+                            f"{baseflow_min_moisture:.12g}",
+                        ),
                     ]
                 writer.create_link(
                     link_type,

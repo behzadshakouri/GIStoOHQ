@@ -20,9 +20,31 @@ elevation and estimates `impervious_fraction` as the area-weighted midpoint of
 the NLCD developed-class impervious ranges (classes 21 through 24).
 Its `Reach_link` and `Impervious_Reach_link` interface labels expose the two
 encapsulated routing members, which use registered `Trapezoidal_Channel_link`
-connectors to the separately generated GIS stream reach. The registered
-`groundwater_to_stream` connector carries baseflow. The GIS reach network
-remains present in both formulations.
+connectors to the separately generated GIS stream reach. By default, the
+registered `groundwater_to_stream` Darcy connector carries baseflow. The GIS
+reach network remains present in both formulations.
+
+Set `OHQ_BASEFLOW_METHOD=linear_reservoir` to replace that Darcy connector with
+OpenHydroQual's `Linear_baseflow` connector in the standard and mixed HRU
+outputs. GIStoOHQ emits exactly one baseflow connector from each HRU to its
+receiving reach; the methods are alternatives and are never added in parallel.
+The linear option uses
+`Q = k max(moisture_content - min_moisture_content, 0) volume`, where `k` is a
+first-order recession rate. Configure it with
+`OHQ_BASEFLOW_RECESSION_RATE_PER_DAY` (default `0.01`) and
+`OHQ_BASEFLOW_MIN_MOISTURE_CONTENT` (default `0.3`). The threshold is an
+absolute volumetric moisture content and must not exceed the groundwater
+porosity if the aquifer is expected to produce baseflow. The standard HRU's
+default initial groundwater moisture content is `0.25`, so the default `0.3`
+threshold intentionally starts that formulation with no active baseflow
+storage; set and calibrate both values for the basin rather than interpreting
+the defaults as site measurements.
+
+This option changes only groundwater-to-stream discharge. Recharge enters the
+groundwater store once through the HRU's existing soil-to-groundwater link, and
+the chosen baseflow connector removes it once through the shared mass-balance
+solver. It does not repair or bypass the separate surface-runoff and
+infiltration limitations described below.
 
 OpenHydroQual's composite criteria parser accepts one comparison per `criteria`
 expression. The mixed-HRU resource must therefore express the strict fraction

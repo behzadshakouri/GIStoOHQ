@@ -178,6 +178,74 @@ def test_mixed_hru_impervious_reach_length_falls_back_to_basin_dimension():
     assert "impervious_reach_length=1000[m]" in text
 
 
+@pytest.mark.parametrize("formulation", ["mixed_hru", "standard_hru"])
+def test_linear_reservoir_baseflow_replaces_darcy_without_duplicate_outlet(
+    monkeypatch, formulation
+):
+    monkeypatch.setenv("OHQ_BASEFLOW_METHOD", "linear_reservoir")
+    monkeypatch.setenv("OHQ_BASEFLOW_RECESSION_RATE_PER_DAY", "0.025")
+    monkeypatch.setenv("OHQ_BASEFLOW_MIN_MOISTURE_CONTENT", "0.2")
+    ws = Watershed(
+        name="LinearBaseflow",
+        subbasins=[
+            Subbasin(
+                id=1,
+                name="Subbasin_1",
+                area_km2=1.0,
+                centroid_x=100.0,
+                centroid_y=200.0,
+            )
+        ],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation=formulation).render(ws)
+    baseflow_lines = [
+        line
+        for line in text.splitlines()
+        if "name=Subbasin_1 to Reach_1 baseflow" in line
+    ]
+
+    assert len(baseflow_lines) == 1
+    assert "type=Linear_baseflow" in baseflow_lines[0]
+    assert "recession_rate=0.025[1/day]" in baseflow_lines[0]
+    assert "min_moisture_content=0.2" in baseflow_lines[0]
+    assert "length=" not in baseflow_lines[0]
+    assert "area=" not in baseflow_lines[0]
+    assert "type=groundwater_to_stream" not in text
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "message"),
+    [
+        ("OHQ_BASEFLOW_METHOD", "both", "must be 'darcy' or 'linear_reservoir'"),
+        (
+            "OHQ_BASEFLOW_RECESSION_RATE_PER_DAY",
+            "0",
+            "must be a finite positive number",
+        ),
+        (
+            "OHQ_BASEFLOW_MIN_MOISTURE_CONTENT",
+            "1.1",
+            "must be between 0 and 1",
+        ),
+    ],
+)
+def test_linear_reservoir_baseflow_rejects_unsafe_settings(
+    monkeypatch, variable, value, message
+):
+    monkeypatch.setenv("OHQ_BASEFLOW_METHOD", "linear_reservoir")
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValueError, match=message):
+        OHQWriter(formulation="standard_hru").render(Watershed(name="BadBaseflow"))
+
+
 def test_temperature_forcing_adds_mass_conserving_snowpacks(monkeypatch):
     monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
     monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
