@@ -36,6 +36,7 @@ def build_ohq_project(
     legacy_path = base.with_name(f"{base.name}_legacy").with_suffix(suffix)
     mixed_hru_path = base.with_name(f"{base.name}_mixed_hru").with_suffix(suffix)
     standard_hru_path = base.with_name(f"{base.name}_standard_hru").with_suffix(suffix)
+    riparian_hru_path = base.with_name(f"{base.name}_riparian_hru").with_suffix(suffix)
     detailed_hru_path = base.with_name(f"{base.name}_detailed_mixed_hru").with_suffix(suffix)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -61,6 +62,10 @@ def build_ohq_project(
         include_comments=settings.ohq.include_comments,
         formulation="standard_hru",
     ).write(watershed, standard_hru_path)
+    OHQWriter(
+        include_comments=settings.ohq.include_comments,
+        formulation="riparian_hru",
+    ).write(watershed, riparian_hru_path)
     profiles_file = os.environ.get("OHQ_CHANNEL_PROFILES_FILE", "").strip()
     if profiles_file:
         OHQWriter(
@@ -77,6 +82,7 @@ def build_ohq_project(
         log.info("Wrote legacy OHQ file: %s", legacy_path)
     log.info("Wrote mixed-HRU OHQ file: %s", mixed_hru_path)
     log.info("Wrote standard-HRU OHQ file: %s", standard_hru_path)
+    log.info("Wrote riparian-HRU OHQ file: %s", riparian_hru_path)
     # Preserve the historical legacy-path return when snow is disabled. With
     # snow enabled, return the first model that was actually written.
     return str(mixed_hru_path if snow_enabled else legacy_path)

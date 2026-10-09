@@ -178,6 +178,99 @@ def test_mixed_hru_impervious_reach_length_falls_back_to_basin_dimension():
     assert "impervious_reach_length=1000[m]" in text
 
 
+def test_writer_renders_riparian_hru_with_one_cascaded_baseflow_path():
+    ws = Watershed(
+        name="Riparian",
+        subbasins=[
+            Subbasin(
+                id=1,
+                name="Subbasin_1",
+                area_km2=1.0,
+                impervious_fraction=0.27,
+                flow_len_ft=2000.0,
+                surface_elevation_m=84.2,
+                centroid_x=100.0,
+                centroid_y=200.0,
+                sand_pct=20.0,
+                clay_pct=15.0,
+            )
+        ],
+        reaches=[
+            Reach(
+                id=1,
+                name="Reach_1",
+                length_m=400.0,
+                x_act=200.0,
+                y_act=200.0,
+            )
+        ],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+
+    assert "riparian_urban_hru.json" in text
+    assert "create composite;type=Riparian_Urban_HRU,name=Subbasin_1" in text
+    assert "near_stream_fraction=0.05" in text
+    assert "hillslope_link_width=800[m]" in text
+    assert "hillslope_link_length=1250[m]" in text
+    assert "initial_water_table_elevation=78.2[m]" in text
+    assert "K_sat_1=0.108[m/day]" in text
+    assert "K_sat_2=0.108[m/day]" in text
+    assert "K_sat_3=0.108[m/day]" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Reach_link" in text
+    assert "from=Subbasin_1,to=Reach_1,type=Impervious_Reach_link" in text
+    baseflow_lines = [
+        line for line in text.splitlines()
+        if "name=Subbasin_1 to Reach_1 baseflow" in line
+    ]
+    assert len(baseflow_lines) == 1
+    assert "type=unconfined_groundwater_to_stream" in baseflow_lines[0]
+    assert "length=31.25[m]" in baseflow_lines[0]
+    assert "area=4000[m~^2]" in baseflow_lines[0]
+    assert "type=regional_groundwater_to_stream" not in text
+    assert "type=groundwater_to_stream" not in text
+    assert "type=Linear_baseflow" not in text
+
+
+def test_riparian_hru_shares_reach_bank_contact_without_double_counting():
+    ws = Watershed(
+        name="SharedRiparianReach",
+        subbasins=[
+            Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                     centroid_x=100.0, centroid_y=100.0),
+            Subbasin(id=2, name="Subbasin_2", area_km2=1.0,
+                     centroid_x=100.0, centroid_y=300.0),
+        ],
+        reaches=[
+            Reach(id=1, name="Reach_1", length_m=400.0,
+                  x_act=200.0, y_act=200.0)
+        ],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(2, "subbasin", "Subbasin_2", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+
+    assert text.count("hillslope_link_width=400[m]") == 2
+    assert text.count("hillslope_link_length=2500[m]") == 2
+    baseflow_lines = [
+        line for line in text.splitlines()
+        if "type=unconfined_groundwater_to_stream" in line
+    ]
+    assert len(baseflow_lines) == 2
+    assert all("length=62.5[m]" in line for line in baseflow_lines)
+    assert all("area=2000[m~^2]" in line for line in baseflow_lines)
+
+
 @pytest.mark.parametrize("formulation", ["mixed_hru", "standard_hru"])
 def test_linear_reservoir_baseflow_replaces_darcy_without_duplicate_outlet(
     monkeypatch, formulation
@@ -298,6 +391,30 @@ def test_temperature_forcing_connects_standard_hru_snowpack(monkeypatch):
     assert "type=Snowmelt_link,name=Snowpack_Subbasin_1 melt" in text
     assert "type=Pervious_Snowmelt_link" not in text
     assert "type=Impervious_Snowmelt_link" not in text
+
+
+def test_temperature_forcing_connects_both_riparian_hru_surfaces(monkeypatch):
+    monkeypatch.setenv("OHQ_RAINFALL_FILE", "/data/precipitation.txt")
+    monkeypatch.setenv("OHQ_TEMPERATURE_FILE", "/data/temperature.txt")
+    ws = Watershed(
+        name="SnowRiparian",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            impervious_fraction=0.25,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+
+    assert "name=Snowpack_Subbasin_1_Pervious,area=750000[m~^2]" in text
+    assert "name=Snowpack_Subbasin_1_Impervious,area=250000[m~^2]" in text
+    assert "type=Pervious_Snowmelt_link" in text
+    assert "type=Impervious_Snowmelt_link" in text
 
 
 def test_temperature_forcing_rejects_legacy_cn_catchment(monkeypatch):
@@ -423,12 +540,15 @@ def test_et_is_opt_in_and_connects_both_hru_types(monkeypatch):
     for formulation, composite in (
         ("mixed_hru", "Mixed_Hydrologic_Response_Unit"),
         ("standard_hru", "Hydrologic_Response_Unit"),
+        ("riparian_hru", "Riparian_Urban_HRU"),
     ):
         text = OHQWriter(formulation=formulation).render(ws)
         assert "soil_evapotranspiration_models.json" in text
         assert "create source;type=Evapotranspiration_Time_Series (Soil),name=ET,ET_timeseries=/data/et_m_per_day.csv" in text
         assert f"create composite;type={composite},name=Subbasin_1," in text
         assert "Evapotranspiration=ET" in text
+        if formulation == "riparian_hru":
+            assert "Evapotranspiration_2=ET" in text
         assert "timeseries=/data/et_m_per_day.csv" not in text.replace("ET_timeseries=", "")
     standard = OHQWriter(formulation="standard_hru").render(ws)
     assert "type=Catchment_link,name=Subbasin_1 to Reach_1 surface" in standard
@@ -532,7 +652,7 @@ def test_writer_parameterizes_reach_as_trapezoidal_channel_connected_to_catchmen
 
 def test_written_formulations_have_distinct_simulation_outputs(tmp_path):
     ws = Watershed(name="SameSite", outlet=Outlet(x_act=0.0, y_act=0.0))
-    for formulation in ("legacy", "mixed_hru", "standard_hru"):
+    for formulation in ("legacy", "mixed_hru", "standard_hru", "riparian_hru"):
         path = tmp_path / f"site_{formulation}.ohq"
         OHQWriter(formulation=formulation).write(ws, path)
         text = path.read_text()

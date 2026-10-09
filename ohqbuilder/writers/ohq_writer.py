@@ -384,18 +384,22 @@ class OHQWriter:
 
     Representation
     --------------
-    * GIS subbasins become ``CN_Catchment`` composites (formulation="legacy")
-      or ``Mixed_Hydrologic_Response_Unit`` composites (formulation="mixed_hru")
-      or ``Hydrologic_Response_Unit`` composites (formulation="standard_hru").
+    * GIS subbasins become ``CN_Catchment`` composites (formulation="legacy"),
+      ``Mixed_Hydrologic_Response_Unit`` composites (formulation="mixed_hru"),
+      ``Hydrologic_Response_Unit`` composites (formulation="standard_hru"), or
+      two-aquifer ``Riparian_Urban_HRU`` composites
+      (formulation="riparian_hru").
       Both are composite types and are emitted with ``create composite``, not
       ``create block`` - the latter never instantiates a composite's internal
       members.
     * GIS reaches become ``Trapezoidal Channel Segment`` blocks.
     * Catchments discharge to their first downstream reach using
-      ``CN_outlet`` (legacy), reach ports (mixed_hru), or
-      ``Catchment_link`` (standard_hru). Both HRU types route groundwater to
-      the reach with exactly one selected baseflow connector: the default
-      ``groundwater_to_stream`` Darcy link or opt-in ``Linear_baseflow``.
+      ``CN_outlet`` (legacy), reach ports (mixed/riparian HRUs), or
+      ``Catchment_link`` (standard HRU). Mixed and standard HRUs route their
+      single groundwater store with exactly one selected baseflow connector.
+      Riparian HRUs route regional groundwater internally into a near-stream
+      aquifer and expose only that aquifer to the channel, preventing a second
+      direct withdrawal from the regional store.
     * Consecutive reaches are connected by ``Trapezoidal_Channel_link``.
     * Terminal reaches discharge to one ``fixed_head`` outlet through
       ``channel2fixed``.
@@ -408,7 +412,9 @@ class OHQWriter:
     """
 
     def __init__(self, include_comments: bool = True, formulation: str = "legacy", channel_profiles_path: Path | None = None):
-        if formulation not in {"legacy", "mixed_hru", "standard_hru"}:
+        if formulation not in {
+            "legacy", "mixed_hru", "standard_hru", "riparian_hru"
+        }:
             raise ValueError(f"Unsupported OHQ formulation: {formulation}")
         self.include_comments = include_comments
         self.formulation = formulation
@@ -422,6 +428,12 @@ class OHQWriter:
         writer = BlockWriter()
 
         model_name = _safe_name(getattr(watershed, "name", None), "Watershed")
+        # riparian_hru has its own dedicated groundwater architecture (a
+        # regional Groundwater cell draining internally into a
+        # Near_Stream_Aquifer, which alone talks to the stream over a short
+        # path via unconfined_groundwater_to_stream) - it does not
+        # participate in the darcy/linear_reservoir choice, which assumes a
+        # single groundwater cell with a single external outlet.
         baseflow_method, baseflow_recession_rate, baseflow_min_moisture = (
             _baseflow_settings()
             if self.formulation in {"mixed_hru", "standard_hru"}
@@ -437,7 +449,7 @@ class OHQWriter:
             raise ValueError(
                 "Snow generation is not supported for the legacy CN_Catchment "
                 "formulation: its generic snowmelt inlet bypasses curve-number "
-                "abstraction. Use standard_hru or mixed_hru."
+                "abstraction. Use standard_hru, mixed_hru, or riparian_hru."
             )
         temperature_reference_m, temperature_lapse_rate = (
             temperature_adjustment_settings() if forcing_snow else (None, -6.5)
@@ -578,6 +590,10 @@ class OHQWriter:
             catchment_targets[subbasin_name] = target
             active_reach_names.add(target)
 
+        catchments_by_reach: dict[str, list[str]] = defaultdict(list)
+        for subbasin_name, reach_name in catchment_targets.items():
+            catchments_by_reach[reach_name].append(subbasin_name)
+
         # Resolve each active reach to the next reach or to the outlet.
         reach_targets: dict[str, str] = {}
         for reach_name in reach_by_name:
@@ -625,6 +641,7 @@ class OHQWriter:
         catchment_positions: dict[str, tuple[float, float]] = {}
         missing_coordinates: list[str] = []
 
+        riparian_link_geometry: dict[str, tuple[float, float]] = {}
         for name, subbasin in subbasin_by_name.items():
             x_act, y_act = _actual_xy(subbasin)
             if x_act is None or y_act is None:
@@ -743,6 +760,12 @@ class OHQWriter:
                     f"Groundwater baseflow method: {baseflow_method}; "
                     "one connector is emitted per HRU-to-reach path."
                 )
+            elif self.formulation == "riparian_hru":
+                writer.comment(
+                    "Riparian groundwater routing: regional aquifer to "
+                    "near-stream aquifer internally; one near-stream/channel "
+                    "Darcy exchange per HRU-to-reach path."
+                )
 
         writer.loadtemplate(_resource_path("main_components.json"))
         writer.addtemplate(_resource_path("rainfall_runoff.json"))
@@ -751,6 +774,8 @@ class OHQWriter:
             writer.addtemplate(_resource_path("snowmelt.json"))
         if self.formulation == "mixed_hru":
             writer.addtemplate(_resource_path("mixed_hydrologic_response_unit.json"))
+        elif self.formulation == "riparian_hru":
+            writer.addtemplate(_resource_path("riparian_urban_hru.json"))
         elif self.formulation == "standard_hru":
             writer.addtemplate(_resource_path("hydrologic_response_unit.json"))
         else:
@@ -852,6 +877,7 @@ class OHQWriter:
             sand_pct = _optional_finite(getattr(subbasin, "sand_pct", None))
             clay_pct = _optional_finite(getattr(subbasin, "clay_pct", None))
             soil_properties: list[tuple[str, Any]] = []
+            riparian_soil_properties: list[tuple[str, Any]] = []
             if sand_pct is not None and clay_pct is not None:
                 vg = van_genuchten_params(sand_pct, clay_pct)
                 soil_properties = [
@@ -861,12 +887,88 @@ class OHQWriter:
                     ("theta_sat", f"{vg.theta_sat:.12g}"),
                     ("theta_res", f"{vg.theta_res:.12g}"),
                 ]
+                # Riparian_Urban_HRU exposes K_sat/alpha_vG/n_vG/theta_sat/
+                # theta_res per layer (_1/_2/_3) rather than mixed_hru's
+                # single shared value broadcast to all three internally -
+                # broadcast the same site-derived value into all three
+                # layer-specific properties ourselves, since GIStoOHQ has no
+                # layer-differentiated soil texture data either way.
+                riparian_soil_properties = [
+                    (f"{prop}_{layer}", value)
+                    for prop, value in (
+                        ("K_sat", f"{vg.K_sat:.12g}[m/day]"),
+                        ("alpha_vG", f"{vg.alpha_vG:.12g}[1/m]"),
+                        ("n_vG", f"{vg.n_vG:.12g}"),
+                        ("theta_sat", f"{vg.theta_sat:.12g}"),
+                        ("theta_res", f"{vg.theta_res:.12g}"),
+                    )
+                    for layer in (1, 2, 3)
+                ]
+
+            # Riparian_Urban_HRU geometry follows the definitions documented
+            # by OpenWatershedTwin. The regional/near-stream contact spans
+            # both banks (twice the receiving stream length). When several
+            # subbasins attach to the same mapped reach, that two-bank contact
+            # is divided among them so the reach geometry is not counted more
+            # than once. Mean hillslope length is area/contact width. With a
+            # near-stream fraction fr, the centroid-to-bank path is
+            # fr*area/(2*contact width). These are GIS-scaled starting
+            # geometries, not fitted parameters; hydraulic properties still
+            # require calibration.
+            NEAR_STREAM_FRACTION = 0.05
+            NEAR_STREAM_SPECIFIC_YIELD = 0.15
+            NEAR_STREAM_K = 1.0  # m/day
+            receiving_reach = reach_by_name.get(catchment_targets.get(name, ""))
+            stream_length_m = _positive(
+                getattr(receiving_reach, "length_m", None), width
+            )
+            attached_subbasins = max(
+                len(catchments_by_reach.get(catchment_targets.get(name, ""), [])),
+                1,
+            )
+            hillslope_link_width_m = max(
+                2.0 * stream_length_m / attached_subbasins, 1.0
+            )
+            hillslope_link_length_m = max(
+                area_m2 / hillslope_link_width_m, 1.0
+            )
+            GROUNDWATER_THICKNESS_DEFAULT_M = 5.0
+            # depth_to_groundwater/groundwater_thickness are themselves left
+            # at the template's own defaults below (not overridden by this
+            # writer, same as mixed_hru already does) - mirrored here only
+            # to keep initial_water_table_elevation's own criteria
+            # (which depends on both) self-consistent with what the
+            # template will actually use.
+            DEPTH_TO_GROUNDWATER_DEFAULT_M = 3.5
+            # Start the water table at the mid-point of the groundwater
+            # cell's own thickness: a neutral spin-up state, avoiding both
+            # extremes (a saturated-to-the-soil-column start, or a nearly-
+            # empty one) with no basin-specific information to justify
+            # either over the other.
+            initial_water_table_elevation = (
+                elevation
+                - DEPTH_TO_GROUNDWATER_DEFAULT_M
+                - GROUNDWATER_THICKNESS_DEFAULT_M / 2.0
+            )
+            riparian_link_geometry[name] = (
+                max(
+                    NEAR_STREAM_FRACTION * area_m2
+                    / (2.0 * hillslope_link_width_m),
+                    1.0,
+                ),
+                max(
+                    hillslope_link_width_m * GROUNDWATER_THICKNESS_DEFAULT_M,
+                    1.0,
+                ),
+            )
 
             block_type = (
                 "Mixed_Hydrologic_Response_Unit"
                 if self.formulation == "mixed_hru"
                 else "Hydrologic_Response_Unit"
                 if self.formulation == "standard_hru"
+                else "Riparian_Urban_HRU"
+                if self.formulation == "riparian_hru"
                 else "CN_Catchment"
             )
             properties = (
@@ -902,6 +1004,51 @@ class OHQWriter:
                 ]
                 if self.formulation == "standard_hru"
                 else [
+                    ("area", f"{area_m2:.12g}[m~^2]"),
+                    ("impervious_fraction", f"{impervious_fraction:.12g}"),
+                    ("catchment_slope", f"{slope:.12g}"),
+                    ("catchment_width", f"{width:.12g}[m]"),
+                    ("reach_length", f"{impervious_reach_length:.12g}[m]"),
+                    (
+                        "impervious_reach_length",
+                        f"{impervious_reach_length:.12g}[m]",
+                    ),
+                    ("near_stream_fraction", f"{NEAR_STREAM_FRACTION:.12g}"),
+                    (
+                        "near_stream_specific_yield",
+                        f"{NEAR_STREAM_SPECIFIC_YIELD:.12g}",
+                    ),
+                    ("near_stream_K", f"{NEAR_STREAM_K:.12g}[m/day]"),
+                    (
+                        "hillslope_link_width",
+                        f"{hillslope_link_width_m:.12g}[m]",
+                    ),
+                    (
+                        "hillslope_link_length",
+                        f"{hillslope_link_length_m:.12g}[m]",
+                    ),
+                    (
+                        "initial_water_table_elevation",
+                        f"{initial_water_table_elevation:.12g}[m]",
+                    ),
+                    *riparian_soil_properties,
+                    ("Precipitation", liquid_rain_name),
+                    *(
+                        [
+                            ("Evapotranspiration", "ET"),
+                            ("Evapotranspiration_2", "ET"),
+                        ]
+                        if forcing_et
+                        else []
+                    ),
+                    ("surface_elevation", f"{elevation:.12g}[m]"),
+                    ("x", x),
+                    ("y", y),
+                    ("_width", block_width),
+                    ("_height", block_height),
+                ]
+                if self.formulation == "riparian_hru"
+                else [
                     ("CN", f"{curve_number:.12g}"),
                     ("area", f"{area_m2:.12g}[m~^2]"),
                     *(
@@ -933,7 +1080,7 @@ class OHQWriter:
                         ("Impervious", area_m2 * impervious_fraction,
                          "Impervious_Snowmelt_link"),
                     ]
-                    if self.formulation == "mixed_hru"
+                    if self.formulation in {"mixed_hru", "riparian_hru"}
                     else [("", area_m2, "Snowmelt_link")]
                 )
                 for surface, snow_area, link_type in snowpacks:
@@ -1050,6 +1197,12 @@ class OHQWriter:
                     (baseflow_link_type, "baseflow"),
                 )
                 if self.formulation == "mixed_hru"
+                else (
+                    ("Reach_link", "surface"),
+                    ("Impervious_Reach_link", "impervious surface"),
+                    ("unconfined_groundwater_to_stream", "baseflow"),
+                )
+                if self.formulation == "riparian_hru"
                 else (("Catchment_link", "surface"), (baseflow_link_type, "baseflow"))
                 if self.formulation == "standard_hru"
                 # CN_Catchment exposes its outflow through the CN_outlet
@@ -1135,6 +1288,25 @@ class OHQWriter:
                     link_properties = [
                         ("length", f"{flow_path_length_m:.12g}[m]"),
                         ("area", f"{catchment_width * 10.0:.12g}[m~^2]"),
+                    ]
+                elif link_type == "unconfined_groundwater_to_stream":
+                    # Riparian_Urban_HRU exposes this port from the
+                    # Near_Stream_Aquifer only. Regional groundwater already
+                    # reaches it through the internal hillslope link, so do
+                    # not also emit regional_groundwater_to_stream: that would
+                    # create a second, parallel removal path from the slow
+                    # store. The strip geometry is computed above from this
+                    # subbasin's share of the receiving reach contact.
+                    riparian_path_length_m, riparian_bank_area_m2 = (
+                        riparian_link_geometry[source]
+                    )
+                    link_properties = [
+                        ("length", f"{riparian_path_length_m:.12g}[m]"),
+                        ("area", f"{riparian_bank_area_m2:.12g}[m~^2]"),
+                        (
+                            "hydraulic_conductivity",
+                            "1[m/day]",
+                        ),
                     ]
                 elif link_type == "Linear_baseflow":
                     # This connector is an alternative storage-discharge law,

@@ -2,15 +2,15 @@
 
 | GIS/topology element | Internal object | OHQ block |
 |---|---|---|
-| `Subbasin_i` | `Subbasin` | Legacy CN catchment and mixed area-fraction HRU alternatives |
+| `Subbasin_i` | `Subbasin` | Legacy CN, standard, mixed, and two-aquifer riparian HRU alternatives |
 | `Reach_i` | `Reach` | trapezoidal channel/routing block |
 | `Junction_i` | `Junction` | mixer/junction block |
 | `Outlet` | `Outlet` | outlet/sink block |
 
-Each rain-only OHQ build emits `<name>_legacy.ohq`, `<name>_mixed_hru.ohq`, and
-`<name>_standard_hru.ohq`. A snow-enabled build emits the mixed and standard
-files, skips the unsupported legacy file, and removes a stale legacy output at
-the same target path. The
+Each rain-only OHQ build emits `<name>_legacy.ohq`, `<name>_mixed_hru.ohq`,
+`<name>_standard_hru.ohq`, and `<name>_riparian_hru.ohq`. A snow-enabled build
+emits the mixed, standard, and riparian files, skips the unsupported legacy
+file, and removes a stale legacy output at the same target path. The
 legacy model retains the curve-number-derived runoff coefficient. The mixed
 HRU model reads a GIS impervious fraction (or percent) when available and
 partitions the subbasin between infiltrating and impervious catchments; when
@@ -22,7 +22,26 @@ Its `Reach_link` and `Impervious_Reach_link` interface labels expose the two
 encapsulated routing members, which use registered `Trapezoidal_Channel_link`
 connectors to the separately generated GIS stream reach. By default, the
 registered `groundwater_to_stream` Darcy connector carries baseflow. The GIS
-reach network remains present in both formulations.
+reach network remains present in all formulations.
+
+The riparian formulation uses OpenHydroQual's `Riparian_Urban_HRU`, developed
+for OpenWatershedTwin's Rock Creek model. Soil-layer recharge is partitioned
+by area between a regional aquifer and a near-stream aquifer. Regional
+groundwater drains through the composite's internal hillslope link into the
+near-stream store; GIStoOHQ emits exactly one external groundwater connector,
+from that near-stream store to the receiving channel. It deliberately omits
+the optional direct regional-groundwater-to-stream port, which would add a
+parallel withdrawal and defeat the intended cascade. Contact width and flow
+paths are initialized from subbasin area and receiving-reach length. When
+several subbasins attach to one reach, they share its two-bank contact width so
+the same bank area is not counted repeatedly. Hydraulic properties and the
+near-stream fraction remain calibration parameters.
+
+OpenWatershedTwin represents Lake Needwood and Lake Frank as reservoir storage
+elements with lidar-derived stage-storage curves and principal/emergency
+spillways. GIStoOHQ does not infer dams by flattening reach slope and does not
+create a reservoir without reviewed pool geometry and outlet data. A Sligo
+Creek detention structure should be added only after those inputs are found.
 
 Set `OHQ_BASEFLOW_METHOD=linear_reservoir` to replace that Darcy connector with
 OpenHydroQual's `Linear_baseflow` connector in the standard and mixed HRU
@@ -63,16 +82,18 @@ series (model time, degrees Celsius) to enable snow accumulation and melt. The
 writer then loads `snowmelt.json`, partitions `OHQ_RAINFALL_FILE` into
 complementary liquid-rain and snowfall sources, creates a stateful snowpack for
 each modeled surface, and routes storage-limited degree-day melt into the
-catchment. Mixed HRUs receive separate pervious and impervious snowpacks whose
-areas sum to the GIS subbasin area. The default transition is -1 to 1 °C and
-the default degree-day factor is 0.003 m/day/°C; edit or calibrate those values
-where local snow observations support different parameters. When
+catchment. Mixed and riparian HRUs receive separate pervious and impervious
+snowpacks whose areas sum to the GIS subbasin area. The default transition is
+-1 to 1 °C and the default degree-day factor is 0.003 m/day/°C; edit or
+calibrate those values where local snow observations support different
+parameters. When
 `OHQ_TEMPERATURE_FILE` is unset, the existing direct-rainfall model is emitted.
 Correct snow accumulation does not by itself validate HRU runoff generation;
 see [HRU runoff generation at regional subbasin scale](hru_scale_limitations.md)
 for the verified standard and mixed HRU limitations.
 
-Snow generation is supported for `standard_hru` and `mixed_hru`. GIStoOHQ
+Snow generation is supported for `standard_hru`, `mixed_hru`, and
+`riparian_hru`. GIStoOHQ
 rejects the legacy `CN_Catchment` formulation when temperature forcing is
 enabled. Its generic external inflow enters the first routing reservoir after
 the curve-number abstraction, so attaching snowmelt there would bypass the CN
@@ -123,8 +144,8 @@ reach network.
 ## Optional DEM-derived channel segments
 
 Set `OHQ_CHANNEL_PROFILES_FILE` to a reviewed, long-format station-elevation
-CSV to emit a fourth file, `<name>_detailed_mixed_hru.ohq`, and an accompanying
-`<name>_channel_fit.csv` review table. The three existing outputs remain
+CSV to emit `<name>_detailed_mixed_hru.ohq`, and an accompanying
+`<name>_channel_fit.csv` review table. The four standard outputs remain
 available. The detailed output uses existing OpenHydroQual trapezoidal channel
 blocks and `Trapezoidal_Channel_link` connections; no new OHQ template is
 needed. This first implementation applies to the mixed HRU formulation.
