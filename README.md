@@ -1,7 +1,7 @@
 # GIStoOHQ
 
 GIStoOHQ turns GIS watershed data into connected hydrologic model projects for
-[OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) and HEC-HMS.
+[OpenHydroQual](https://openhydroqual.com/) and HEC-HMS.
 It can start from an approximate outlet, acquire and prepare source data,
 delineate a watershed and stream network, validate the resulting topology, and
 write model files with traceable GIS-derived parameters.
@@ -14,7 +14,7 @@ authoritative source of connectivity. Writers translate that reviewed topology
 and its attributes into model formats; they do not invent or silently repair the
 network.
 
-[OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) is the modeling
+[OpenHydroQual](https://openhydroqual.com/) is the modeling
 engine and graphical environment used to open, inspect, edit, and run the
 generated `.ohq` files. GIStoOHQ prepares model structure and GIS-derived initial
 parameters; OpenHydroQual provides the process library and numerical simulation.
@@ -60,6 +60,18 @@ GIStoOHQ is research software at version `0.1.0`. Generated models require revie
 of the outlet, watershed boundary, topology, parameters, forcing units, and
 calibration before quantitative or design use.
 
+## OpenHydroQual resources
+
+| Resource | Link |
+|---|---|
+| Project website | [openhydroqual.com](https://openhydroqual.com/) |
+| Documentation and tutorials | [OpenHydroQual knowledge base](https://openhydroqual.com/knowledge-base/) |
+| Example models | [examples.openhydroqual.com](https://examples.openhydroqual.com/) |
+| Video tutorials | [OpenHydroQual on YouTube](https://www.youtube.com/@openhydroqual218) |
+| Source code and releases | [ArashMassoudieh/OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) |
+| Theory and equations | [2025 manual](https://openhydroqual.com/wp-content/UsersManual/OpenHydroQual_User_s_Manual.pdf) · [Google Scholar record](https://scholar.google.com/citations?view_op=view_citation&hl=en&user=0lTtuMoAAAAJ&citation_for_view=0lTtuMoAAAAJ:r0BpntZqJG4C) |
+| Foundational software paper | [Massoudieh, Nguyen, and Murthy (2023)](https://doi.org/10.1016/j.envsoft.2023.105707) |
+
 ## Model outputs
 
 A rain-only OpenHydroQual build writes four alternatives beside the requested
@@ -89,7 +101,7 @@ rules.
 - QGIS with Processing and GRASS providers for watershed preparation and a full
   source-to-model run
 - Internet access for online source acquisition
-- [OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) and its
+- [OpenHydroQual](https://openhydroqual.com/) and its
   current resource library to execute generated `.ohq` models
 
 Basic model building from existing GIS products does not require QGIS. Install a
@@ -305,6 +317,11 @@ the normal Python suite. Before a production run, also execute
 If you use GIStoOHQ, cite the software using [`CITATION.cff`](CITATION.cff).
 GIStoOHQ is distributed under the [MIT License](LICENSE).
 
-OpenHydroQual is maintained in its own repository. Cite and license it according
-to the metadata and terms provided by the
-[OpenHydroQual project](https://github.com/ArashMassoudieh/OpenHydroQual).
+For the modeling engine, cite Massoudieh, A., Nguyen, K., and Murthy, S. (2023),
+“An extensible, plugin-based tool for modeling flow and reactive transport in
+water systems,” *Environmental Modelling & Software*, 164, 105707,
+[doi:10.1016/j.envsoft.2023.105707](https://doi.org/10.1016/j.envsoft.2023.105707).
+The current process formulations are documented in Massoudieh, A. and Shakouri,
+B. (2025), *OpenHydroQual: Theory and Equations Manual*. OpenHydroQual is
+maintained and licensed separately in the
+[OpenHydroQual source repository](https://github.com/ArashMassoudieh/OpenHydroQual).
