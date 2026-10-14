@@ -66,7 +66,7 @@ calibration before quantitative or design use.
 |---|---|
 | Project website | [openhydroqual.com](https://openhydroqual.com/) |
 | Documentation and tutorials | [OpenHydroQual knowledge base](https://openhydroqual.com/knowledge-base/) |
-| Example models | [examples.openhydroqual.com](https://examples.openhydroqual.com/) |
+| Example models | [Searchable examples portal](https://examples.openhydroqual.com/) · [source repository](https://github.com/ArashMassoudieh/OpenHydroQual-Examples) |
 | Video tutorials | [OpenHydroQual on YouTube](https://www.youtube.com/@openhydroqual218) |
 | Source code and releases | [ArashMassoudieh/OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) |
 | Theory and equations | [2025 manual](https://openhydroqual.com/wp-content/UsersManual/OpenHydroQual_User_s_Manual.pdf) · [Google Scholar record](https://scholar.google.com/citations?view_op=view_citation&hl=en&user=0lTtuMoAAAAJ&citation_for_view=0lTtuMoAAAAJ:r0BpntZqJG4C) |
