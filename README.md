@@ -1,26 +1,121 @@
 # GIStoOHQ
 
-GIStoOHQ converts GIS-derived watershed products into OpenHydroQual (`.ohq`) model files.
+GIStoOHQ turns GIS watershed data into connected hydrologic model projects for
+[OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) and HEC-HMS.
+It can start from an approximate outlet, acquire and prepare source data,
+delineate a watershed and stream network, validate the resulting topology, and
+write model files with traceable GIS-derived parameters.
 
-For the verified limits of applying the standard and mixed HRU formulations to
-large aggregated subbasins, including how to interpret snow-aware regional
-runs, see [`docs/hru_scale_limitations.md`](docs/hru_scale_limitations.md).
+## About
+
+GIStoOHQ connects geospatial watershed preparation with process-based hydrologic
+model construction. Its central design rule is simple: `topology.gpkg` is the
+authoritative source of connectivity. Writers translate that reviewed topology
+and its attributes into model formats; they do not invent or silently repair the
+network.
+
+[OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) is the modeling
+engine and graphical environment used to open, inspect, edit, and run the
+generated `.ohq` files. GIStoOHQ prepares model structure and GIS-derived initial
+parameters; OpenHydroQual provides the process library and numerical simulation.
+
+The project currently provides:
+
+- outlet-first DEM acquisition, hydrologic conditioning, watershed delineation,
+  subwatershed partitioning, and reach/junction extraction;
+- U.S. source acquisition from USGS 3DEP and NHDPlus HR, NLCD, Census TIGER,
+  NOAA Atlas 14, and USDA soil services;
+- bounded international acquisition helpers for Copernicus GLO-30, OpenStreetMap
+  hydrography and roads, SoilGrids texture, and reviewed land-cover crosswalks;
+- OpenHydroQual models using legacy curve-number, standard HRU, mixed HRU, and
+  two-aquifer riparian HRU formulations;
+- optional rainfall, evapotranspiration, elevation-adjusted snow, alternative
+  linear-reservoir baseflow, and reviewed DEM-derived channel segments;
+- native HEC-HMS project generation and reference validation;
+- watershed boundary, outlet, reach, partition, provenance, and regression
+  reports for scientific review; and
+- optional provider-neutral weather, discharge, PET/ET, forecast, and HydroPINN
+  data packages.
 
 ```text
-GIS preprocessing
-    ↓
-hydrologic/geometric attributes
-    ↓
-topology.gpkg as the single source of truth
-    ↓
+source data or reviewed GIS layers
+              |
+              v
+DEM routing, watershed and stream extraction
+              |
+              v
+validated topology.gpkg + spatial parameters
+              |
+              v
 internal watershed model
-    ↓
-OpenHydroQual writer
-    ↓
-<SITE>.ohq
+              |
+       +------+------+
+       |             |
+       v             v
+OpenHydroQual      HEC-HMS
+ (.ohq)          project files
 ```
 
-## Main inputs
+GIStoOHQ is research software at version `0.1.0`. Generated models require review
+of the outlet, watershed boundary, topology, parameters, forcing units, and
+calibration before quantitative or design use.
+
+## Model outputs
+
+A rain-only OpenHydroQual build writes four alternatives beside the requested
+output path:
+
+| Output | Formulation | Intended use |
+|---|---|---|
+| `*_legacy.ohq` | Curve-number catchment | Compatibility and event-model comparison |
+| `*_standard_hru.ohq` | Homogeneous soil-column HRU | Local HRU process studies |
+| `*_mixed_hru.ohq` | Pervious and impervious HRU | Urban land-cover partitioning |
+| `*_riparian_hru.ohq` | Regional and near-stream aquifers | Cascaded hillslope/riparian groundwater |
+
+When temperature forcing is enabled, GIStoOHQ writes snow-aware standard, mixed,
+and riparian HRU models and omits the unsupported legacy CN/snow combination.
+Setting a reviewed channel-profile file also writes
+`*_detailed_mixed_hru.ohq` and `*_channel_fit.csv` without replacing the four
+standard outputs.
+
+The production pipeline can also create a native HEC-HMS project under
+`outputs/hec_hms` and an HTML watershed report beside the generated models.
+See [OHQ mapping](docs/ohq_mapping.md) for the exact formulation and forcing
+rules.
+
+## Requirements
+
+- Python 3.9 or newer
+- QGIS with Processing and GRASS providers for watershed preparation and a full
+  source-to-model run
+- Internet access for online source acquisition
+- [OpenHydroQual](https://github.com/ArashMassoudieh/OpenHydroQual) and its
+  current resource library to execute generated `.ohq` models
+
+Basic model building from existing GIS products does not require QGIS. Install a
+development checkout with:
+
+```bash
+git clone https://github.com/behzadshakouri/GIStoOHQ.git
+cd GIStoOHQ
+python -m pip install -e .
+ohqbuild doctor
+```
+
+Install the Python GIS readers when using GeoPackage and raster utilities:
+
+```bash
+python -m pip install -e '.[gis]'
+ohqbuild doctor --strict-gis
+```
+
+`doctor --strict-gis` also checks QGIS Processing, the native provider, GRASS
+algorithms, and the retained GIS scripts. QGIS itself must be installed through
+the operating system or QGIS distribution rather than from this Python extra.
+
+## Quick start from existing GIS outputs
+
+The minimum modeled site contains:
 
 ```text
 <SITE>/outputs/topology.gpkg
@@ -29,305 +124,187 @@ OpenHydroQual writer
 <SITE>/outputs/junctions.gpkg
 ```
 
-## Quick start
+Validate the files and build the OpenHydroQual alternatives:
 
 ```bash
-pip install -e .
-ohqbuild doctor
-ohqbuild check-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
-ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
-
-# Or copy config.example.json to config.json and run the whole app pipeline:
-python3 run.py config.json
+ohqbuild check-inputs --root /path/to/project --site path/to/site
+ohqbuild build --root /path/to/project --site path/to/site \
+  --project-name MyWatershed --out /path/to/project/path/to/site/outputs/MyWatershed.ohq
 ```
 
-To try the new outlet-first DEM workflow UI immediately from a source checkout,
-run the bundled launcher script. It uses `ohqbuild ui` when installed and falls
-back to `python -m ohqbuilder.cli ui`, so it works before packaging:
+Open the generated `.ohq` file in OpenHydroQual to review resources, connections,
+initial conditions, forcings, and simulation settings before running it. Use
+`ohqbuild build-hms` and `ohqbuild validate-hms` to generate and check the
+HEC-HMS project from the same GIS topology.
+
+## Complete outlet-to-model workflow
+
+Run the full U.S. workflow from a QGIS-enabled Python environment:
 
 ```bash
-cd /path/to/GIStoOHQ
+ohqbuild full-run \
+  --root /path/to/project \
+  --site sites/MyWatershed \
+  --lat 38.9784 --lon -76.9887 \
+  --target-crs EPSG:26918 \
+  --project-name MyWatershed
+```
+
+`full-run` performs source acquisition, materialization, hydrologic preparation,
+the two GIS phases, input validation, OpenHydroQual writing, HEC-HMS writing, and
+report generation. The same workflow is available as explicit stages:
+
+```bash
+ohqbuild download-inputs --root /path/to/project --site sites/MyWatershed \
+  --lat 38.9784 --lon -76.9887 --buffer 5000
+ohqbuild materialize-inputs --root /path/to/project --site sites/MyWatershed
+ohqbuild prepare-inputs --root /path/to/project --site sites/MyWatershed
+ohqbuild build --root /path/to/project --site sites/MyWatershed
+```
+
+Use `--reuse-downloads` (alias `--offline`) only after the source-download cache,
+soil products, and Atlas 14 file are populated. Offline mode stops and reports
+missing prerequisites instead of contacting remote services.
+
+## Desktop and QGIS interfaces
+
+Launch the desktop workflow from a graphical terminal:
+
+```bash
 scripts/run_dem_ui.sh
 ```
 
-The wrapper first uses `.venv/bin/ohqbuild` when the repository virtual
-environment exists, then an `ohqbuild` found on `PATH`, and finally
-`${PYTHON:-python3} -m ohqbuilder.cli ui`. You can also launch it directly:
+The Tk interface supports outlet selection, rectangular or polygonal acquisition
+areas, OpenStreetMap/Esri/OpenTopoMap backgrounds, staged execution, reviewed
+pour points, run logs, and opening generated layers in QGIS. On Debian or Ubuntu,
+install `python3-tk` if `tkinter` is unavailable.
+
+For the QGIS dock, install the development plugin and restart QGIS:
 
 ```bash
-cd /path/to/GIStoOHQ
-source .venv/bin/activate
-ohqbuild ui
+scripts/install_qgis_plugin.sh
 ```
 
-The launcher is a desktop Tk application, so run it from a graphical terminal.
-On Debian/Ubuntu, install `python3-tk` if Python reports that `tkinter` is missing.
+See the [QGIS plugin guide](qgis_plugin/README.md) for setup and update details.
 
-The Tk launcher includes a multi-basemap tile picker for choosing the outlet
-coordinate interactively. Choose OpenStreetMap roads, Esri World Imagery satellite
-imagery, or OpenTopoMap topography from the **Basemap** menu. Tiles are cached in
-separate provider directories, and the displayed attribution changes with the
-selected source. The launcher intentionally does not scrape undocumented Google
-tile URLs; Google layers can be configured in QGIS with the user's licensed Google
-Maps service. The picker supports zooming and right-click
-recentering, and writes the clicked coordinate back to the outlet
-longitude/latitude fields. The QGIS plugin uses the
-active QGIS map canvas instead, so users can pick points against any basemap or
-GIS layers they have loaded there. If the demo YAML is left with merge-conflict
-markers after a branch update, use **reset Sligo demo** in the Tk launcher to
-rewrite the bundled demo config while preserving the current outlet coordinate.
-The cyan/blue line in the Tk map is the configured hydrography flowline overlay;
-it is used for outlet snapping and visual channel reference, not as a rectangle edge.
-The same map window can draw a rectangular acquisition area with two clicks or a
-custom polygon with three or more clicks and **Finish area**. Drawn areas are saved
-as EPSG:4326 GeoJSON and switch the DEM method to `polygon`. After DEM acquisition,
-the **Create final OHQ file** section exposes the existing `prepare-hydrology`,
-`prepare-inputs`, `check-inputs`, and `build` terminal stages.
-**Continue automatically to OHQ** first creates `flow_dir.tif` and `flow_acc.tif`,
-then runs the combined `ohqbuild run` workflow, which creates the outlet before
-running the GIS phases and final build. The launcher prevents overlapping commands,
-so each stage finishes before another can start; **STOP** terminates the active
-command and its child process group when a long download or GIS run must be cancelled.
-For a new real site, **FULL RUN: download all data to OHQ** invokes the terminal
-`full-run` pipeline with the form's verified outlet, root, site, CRS, and download
-directory. That pipeline downloads DEM, NHDPlus HR/NHD hydrography (including its
-WBDHU reference layers), roads, land cover, Atlas 14,
-hydrologic soil groups, and soil texture; mosaics/clips the GIS sources; runs
-hydrology plus phase 1 and phase 2; validates the HEC-HMS-style watershed/network
-inputs; and writes the final OHQ file. QGIS processing and internet access are
-required for this production path.
+## Optional OpenHydroQual forcing and routing
 
-**This automated pipeline only has downloaders for US federal data sources**
-(USGS 3DEP, NHDPlus HR, NLCD, Census TIGER, NOAA Atlas 14, SSURGO) and has no
-coverage outside the United States. For a site outside the US, see
-[`docs/international_sites.md`](docs/international_sites.md) for the
-per-category fallback recipe (global DEM/hydrography/land-cover/soil
-substitutes, formatted to the exact paths the legacy scripts expect) and the
-gotchas found building a real international site end-to-end.
+The writer reads optional settings from environment variables:
 
-The WBDHU layer extracted from the hydro package is an **authoritative reference**, not automatically the
-model boundary. HUC12 units are standardized drainage units and may contain several
-named urban streams; their internal lines are not the paper-specific subcatchments
-created at tributaries, gauges, or monitoring sites. For a U.S. project, compare the
-DEM-derived outlet basin with WBD, snap the outlet to NHDPlus HR, and use NHDPlus
-catchments or tributary junctions to subdivide it. Do not replace a named-creek basin
-with the containing HUC12 unless their outlets and extents actually agree. See
-[`docs/authoritative_watersheds.md`](docs/authoritative_watersheds.md) for the
-recommended decision process and validation metrics.
-When materialization bounds are available, `materialize-inputs` extracts the
-intersecting HUC12 features to `outputs/WBDHU12_reference.gpkg`, ready to overlay
-with the generated watershed in QGIS.
-When the downloaded NHDPlus package includes catchment polygons,
-`materialize-inputs` also writes `outputs/NHDPlusCatchment_clip.gpkg`. These retain
-their source reach identifiers for subsequent upstream-network tracing; they are
-not treated as HUC subdivisions.
-When a rectangle, polygon, or expanded acquisition GeoJSON is active, full-run uses
-its bounds both to enlarge every source-data query and to clip the materialized DEM
-and hydrography. The outlet remains the routing outlet; the drawn area controls data
-coverage rather than replacing the outlet. If the drawn area excludes the outlet,
-full-run expands the clipping bounds with a 500 m outlet safety margin so the DEM,
-flow-direction, and flow-accumulation rasters remain consistent with the outlet.
-The QGIS dock exposes the same full-run action and individual hydrology, GIS-input,
-validation, and build stages, using the outlet selected on the active QGIS canvas.
-The Tk launcher now exposes the NHDPlus snap limit, a **Use reviewed pour points**
-toggle, and a **Promote reviewed pour points** action. The QGIS dock exposes the
-same snap-limit and reviewed-point controls plus an explicit overwrite checkbox;
-the plugin never overwrites promoted points merely because its promotion button
-was clicked. Project keys `nhdplus_snap_distance_m` and
-`use_reviewed_pour_points` remain supported as command defaults.
-By default, Phase 2 creates one pour point at every confluence in the Phase 1
-generated reach network (`junctions.gpkg`); a single-reach basin falls back to the
-watershed outlet. It writes `outputs/pour_points_generation_report.json` with the
-method, source, CRS, IDs, and coordinates. The reviewed workflow is separate: its
-candidates come from NHDPlus tributary confluences and only `approved` or `required`
-features are promoted.
-The per-point `wshed_*_clean.gpkg` files are cumulative upstream drainage areas,
-so overlap among those intermediate layers is expected. Phase 2 builds an explicit
-containment tree and writes incremental model units to `outputs/subwatersheds.gpkg`.
-It now stops instead of continuing when cumulative basins are duplicate, cross
-without nesting, produce more than one drainage root, leave a material coverage
-gap, extend outside the root basin, or leave residual overlaps in the final layer.
-It also removes raster/grid-snap strips from later units so final polygons are
-disjoint by construction and writes `outputs/subwatershed_partition_report.json`
-with hierarchy, cumulative and incremental areas, every pairwise overlap, and
-root-basin gap/outside measurements.
-The legacy GIS orchestrators also write `outputs/phase1_execution_report.json`
-and `outputs/phase2_execution_report.json`. Each report is updated atomically
-after every child script and records timestamps, duration, success/failure,
-errors, and files created or changed by that step. These phase reports complement
-the detailed domain reports instead of replacing them. The latest report remains
-at the stable path, while every run is also retained under
-`outputs/workflow_reports/` with a timestamp and run ID. The launcher prints the
-same run ID around each command and provides **Clear log**, making repeated runs
-distinguishable without discarding their JSON history.
-Launcher child processes use unbuffered Python output so GDAL/QGIS warnings stay
-closer to the step that emitted them, and startup config loading is silent to avoid
-the misleading duplicate `Loaded config.` messages seen in older transcripts.
-To turn a reviewed run into an explicit regression baseline and compare a later
-run against it, use:
-```bash
-ohqbuild capture-report-baseline \
-  --outputs examples/SligoCreek/SligoCreekDemo/outputs \
-  --out examples/SligoCreek/report-baseline.json
-ohqbuild check-report-baseline \
-  --outputs examples/SligoCreek/SligoCreekDemo/outputs \
-  --baseline examples/SligoCreek/report-baseline.json \
-  --absolute-tolerance 0.001
-```
-The baseline keeps stable scientific and topology fields from the available
-pour-point, partition, reach, and watershed comparison reports while excluding
-machine-specific paths and volatile run timestamps. A mismatch exits with status
-3 and lists each changed JSON field; `--json` produces machine-readable results.
-After moving `outputs/outlet.shp` in QGIS, select **Use edited outlet.shp** (or
-pass `--use-existing-outlet`) so a subsequent full run uses that reviewed point
-for acquisition and tracing instead of recreating it from stale longitude/latitude.
-For a development install, run `scripts/install_qgis_plugin.sh`, restart QGIS,
-enable **GIStoOHQ DEM Workflow**, and open it from the GIStoOHQ plugin menu. See
-[`qgis_plugin/README.md`](qgis_plugin/README.md) for profiles, dependencies, and
-basemap setup.
-Use **Browse…** beside config and path fields to switch projects or folders. The
-launcher groups **Sligo Creek** and **John McCormack (JM)** under the **Examples ▾**
-button. The
-generated inputs, downloads, site outputs, and the final OHQ are written beneath the
-selected Root shown in the form.
-**Open generated layers in QGIS** starts the installed `qgis` executable and loads
-all generated GeoTIFF, GeoPackage, Shapefile, and GeoJSON products from
-latest-modified to oldest-modified beneath the
-selected site's `demlr` and `outputs` directories, including the source DEM,
-routing rasters, watershed, reaches, junctions, subwatersheds, and topology as they
-become available. The QGIS layer panel places the latest-modified layer at the top
-and the oldest-modified layer at the bottom.
-**RUN RECOMMENDED NEXT STEP** inspects the selected project and chooses full-run,
-hydrology, GIS preparation, OHQ build, or HEC-HMS build based on outputs that really
-exist, avoiding manual execution of downstream stages before their prerequisites.
-After phase 1 and phase 2 produce topology, subbasins, reaches, and junctions, the
-**Build HEC-HMS** button writes native `.hms`, `.basin`, `.met`, `.control`, and
-`.run` files under `<Root>/<Site>/outputs/hec_hms`; **Validate HEC-HMS** checks all
-project references. Production full-run now creates both the OHQ and HEC-HMS file set.
-If DEM validation reports `EXPAND` (exit code 3), use **Use expanded area** and
-repeat preparation/download; the status is a refinement request rather than a crash.
+| Setting | Effect |
+|---|---|
+| `OHQ_RAINFALL_FILE` | Assigns an OpenHydroQual precipitation time series |
+| `OHQ_ET_FILE` | Assigns nonnegative ET depth rates in m/day to supported HRUs |
+| `OHQ_TEMPERATURE_FILE` | Enables rain/snow partitioning, snow storage, and degree-day melt |
+| `OHQ_TEMPERATURE_REFERENCE_ELEVATION_M` | Enables subbasin temperature adjustment by elevation |
+| `OHQ_TEMPERATURE_LAPSE_RATE_C_PER_KM` | Overrides the default -6.5 °C/km lapse rate |
+| `OHQ_BASEFLOW_METHOD=linear_reservoir` | Replaces Darcy baseflow in standard and mixed HRUs |
+| `OHQ_CHANNEL_PROFILES_FILE` | Builds reviewed segmented trapezoidal channels for the mixed HRU model |
 
-For a no-network smoke test of the DEM prep path, run the Sligo Creek demo:
+Generate candidate channel profiles from a projected, metre-based reach layer and
+bare-earth DEM:
 
 ```bash
-scripts/run_dem_prep.sh examples/SligoCreek/dem_workflow.example.yaml
+ohqbuild sample-channel-profiles \
+  --reaches outputs/reaches.gpkg \
+  --dem outputs/cliped_utm_wsclip.tif \
+  --output outputs/channel_profiles.csv \
+  --spacing-m 50 --half-width-m 30 --sample-step-m 1
 ```
 
-For a single command that starts from an approximate outlet coordinate, downloads
-source data, materializes the DEM and NHD flowlines, runs both GIS phases, and
-writes the final OHQ file, use a QGIS Python environment:
+Bank offsets are deliberately left blank for review. Standard topographic lidar
+may represent the water surface rather than submerged bed geometry, so the fitted
+sections remain marked `DEM_ONLY_UNVERIFIED` until checked against suitable field
+or bathymetric data.
 
-### Run the complete workflow
+## Optional watershed observations and HydroPINN handoff
 
-From the repository root, install the package and GIS extras into the Python
-environment used by QGIS:
+`ohqbuild data` manages a separate provider-neutral data path for USGS discharge,
+NASA POWER meteorology and PET/ET, archived forecasts, temporal harmonization,
+quality control, immutable source objects, portable packages, and deterministic
+HydroPINN exports. It does not change watershed topology or silently assign a
+downloaded variable to an OpenHydroQual forcing.
 
 ```bash
-cd /path/to/GIStoOHQ
-python -m pip install -e '.[gis]'
-ohqbuild doctor --strict-gis
+ohqbuild data --help
 ```
 
-Then provide a project root, a site directory relative to that root, and an
-approximate WGS84 outlet coordinate:
+See [Optional watershed data](docs/watershed_data.md) and the
+[verified HydroPINN handoff](docs/hydropinn_handoff_verified.md) for commands,
+units, provenance, and quality-control behavior.
+
+## Geographic coverage
+
+The unattended production `full-run` currently targets U.S. federal sources.
+International sites can use the implemented Copernicus DEM, OpenStreetMap vector,
+SoilGrids texture, and land-cover mapping commands, followed by reviewed manual
+materialization. A complete unattended international `full-run`, global HSG
+derivation, and a universal Atlas 14 replacement are not implemented. See
+[Building sites outside the United States](docs/international_sites.md).
+
+## Scientific review boundaries
+
+- WBD HUC12 polygons are authoritative reference units, not automatic model
+  boundaries. Compare them with the outlet-derived basin and NHDPlus catchments.
+- Reviewed pour points control subwatershed partitioning. Final incremental
+  polygons must be disjoint and cover one valid root basin.
+- Standard and mixed HRUs represent local land columns. At large aggregated
+  subbasin scales they may absorb nearly all water before appreciable surface
+  routing develops. Treat regional results as structurally limited until the
+  formulation is validated for that scale.
+- Snow component checks establish mass-conserving partitioning and melt behavior;
+  they do not establish basin-scale runoff calibration.
+- Reservoirs, dams, submerged channel geometry, and private storm-drain systems
+  require reviewed geometry and outlet information; GIStoOHQ does not infer them
+  from flat terrain alone.
+
+Read [Authoritative watershed references](docs/authoritative_watersheds.md) and
+[HRU scale limitations](docs/hru_scale_limitations.md) before interpreting model
+results.
+
+## Examples
+
+- `examples/SligoCreek` demonstrates outlet and documented-watershed handling,
+  acquisition-area preparation, and the U.S. workflow configuration.
+- `examples/JohnMcCormack3600` is a street-scale starter whose drainage candidate
+  must be reconciled with plans, utility records, or field survey.
+- `examples/AZ12-100` contains small GIS fixtures for reproducible checks.
+
+Bundled smoke fixtures are not complete production datasets. See
+[Examples](docs/examples.md) and each example directory's README for scope and
+required external inputs.
+
+## Documentation
+
+| Topic | Guide |
+|---|---|
+| System structure | [Architecture](docs/architecture.md) |
+| Workflow stages | [Workflow](docs/workflow.md) |
+| Creating required GIS inputs | [Input generation](docs/input_generation.md) |
+| Source acquisition | [Data downloaders](docs/data_downloaders.md) |
+| GIS-to-OHQ mapping and model options | [OHQ mapping](docs/ohq_mapping.md) |
+| OHQ syntax notes | [OHQ format](docs/ohq_format.md) |
+| Watershed observations and packages | [Watershed data](docs/watershed_data.md) |
+| U.S. boundary validation | [Authoritative watersheds](docs/authoritative_watersheds.md) |
+| International sites | [International sites](docs/international_sites.md) |
+| Development | [Developer notes](docs/developer.md) |
+
+## Testing
 
 ```bash
-ohqbuild full-run --root /path/to/NHA --site WS3_GIS/AZ12-100 \
-  --lat 34.123 --lon -111.456 \
-  --buffer 5000
+python -m pip install -e '.[dev,gis]'
+python -m pytest -q
 ```
 
-The final file is written to `<ROOT>/<SITE>/outputs/<SITE>.ohq` unless `--out`
-is supplied. A review-ready `watershed_report.html` is written beside the OHQ file
-with watershed counts, subbasin area, CN, slope, longest flow path, Tc, lag, and
-links to the OHQ and HEC-HMS artifacts. The snapped outlet layer also records its
-movement and a GREEN/YELLOW/RED quality rating so large automatic adjustments are
-visible in QGIS. Use `ohqbuild full-run --help` to see source-directory, tile-limit,
-maximum-file-size, target-CRS, and soil-resolution options. The downloader checks
-existing files against TNM size metadata, skips valid cached files, and
-redownloads incomplete/corrupt files.
+Tests that require a live QGIS/GRASS installation are skipped or isolated from
+the normal Python suite. Before a production run, also execute
+`ohqbuild doctor --strict-gis` in the same environment used by QGIS.
 
-`full-run` uses GIStoOHQ's built-in Python TNM downloader; compiling or installing
-the external C++ `demcheck` program is not required. It runs the complete
-four-step workflow: download all supported inputs (DEM, hydrography, HSG, and
-soil texture), merge/clip source products, generate GIS inputs, then validate and
-write the OHQ file. The corresponding staged commands are `download-inputs`,
-`materialize-inputs`, `prepare-inputs`, and `build`.
+## Citation and license
 
-To inspect or rerun individual stages, use:
+If you use GIStoOHQ, cite the software using [`CITATION.cff`](CITATION.cff).
+GIStoOHQ is distributed under the [MIT License](LICENSE).
 
-```bash
-ohqbuild download-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100 \
-  --lat 34.123 --lon -111.456 --buffer 5000
-ohqbuild materialize-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
-ohqbuild prepare-inputs --root /path/to/NHA --site WS3_GIS/AZ12-100
-ohqbuild build --root /path/to/NHA --site WS3_GIS/AZ12-100
-```
-
-The download stages require network access. Materialization requires the GIS
-extras, and `prepare-inputs`/`full-run` require QGIS plus its `processing` plugin.
-
-### Run from the config-driven script
-
-`run.py` now supports both layouts. Copy and edit one of the supplied files:
-
-```bash
-# One pipeline command (`ohqbuild full-run`)
-cp config.one-step.example.json my-run.json
-python3 run.py my-run.json
-
-# Four explicit commands (download, materialize, prepare, build)
-cp config.four-step.example.json my-four-steps.json
-python3 run.py my-four-steps.json
-```
-
-Set `workflow` to `one-step` or `four-step`; both require `lat` and `lon`.
-Use `python3 run.py my-run.json --dry-run` to print the commands without running
-them. To check both supported start-to-finish layouts without network or QGIS,
-run `python3 scripts/check_run_workflows.py`; it dry-runs the one-step and
-four-step example configs and verifies every expected stage is present. The
-original config behavior remains available with `workflow: legacy`.
-
-The existing three-step workflow remains available for controlled or offline runs.
-
-`init-dem-config` refuses to replace an existing project configuration unless
-`--force` is supplied. Bundled `.demo.geojson` sources are only inserted with the
-explicit `--demo-inputs` option; production initialization never selects them by
-filename or project location.
-
-For an end-to-end rerun without contacting external providers, use
-`ohqbuild full-run ... --reuse-downloads` (alias `--offline`). This requires a
-populated `--download-dir` plus the existing site soil products
-`hydrologic_soil_groups.gpkg`, `hsg.tif`, and `soil_texture.gpkg`, as well as the
-existing `atlas14/atlas14_pf.csv`. The mode skips TNM, USDA, NOAA Atlas 14, and
-WBD-service calls; it fails early with the missing local prerequisite instead of
-falling through to a remote request.
-
-Normal online runs also retry transient HTTP 429/500/502/503/504 and timeout
-failures using 5, 10, 20, 40, and 60 second delays. If the service remains
-unavailable, `full-run` validates cached DEM/hydro packages and the local
-soil/Atlas 14 products and continues automatically when that cache is complete.
-Unreadable DEM TIFFs and hydro archives without vector content are rejected.
-
-Need to create those GIS input files first? Run the full workflow with
-`ohqbuild run` from a QGIS Python environment, or run the steps individually with
-`ohqbuild prepare-inputs`, `ohqbuild check-inputs`, and `ohqbuild build`. The
-`build` and `validate` commands also check inputs by default. See
-[`docs/input_generation.md`](docs/input_generation.md).
-
-When running both preparation phases, GIStoOHQ automatically creates
-`outputs/pour_points.shp` from the Phase 1 junction network before Phase 2. The
-same operation is available independently with `ohqbuild create-pour-points`.
-If `outputs/outlet.shp` is missing, Phase 1 now creates it automatically at the
-largest valid cell in `outputs/flow_acc.tif`. Use `ohqbuild create-outlet` to run
-that operation independently.
-
-The output is written to:
-
-```text
-/path/to/NHA/WS3_GIS/AZ12-100/outputs/AZ12_100.ohq
-```
-
-## Design rule
-
-`topology.gpkg` is the authoritative source of connectivity. The OHQ writer does not infer or rewrite topology.
+OpenHydroQual is maintained in its own repository. Cite and license it according
+to the metadata and terms provided by the
+[OpenHydroQual project](https://github.com/ArashMassoudieh/OpenHydroQual).
