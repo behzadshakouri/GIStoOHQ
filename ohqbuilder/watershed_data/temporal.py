@@ -110,11 +110,41 @@ def _usgs_rows(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str
     return rows, units
 
 
-def _power_rows(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+# NASA POWER's hourly endpoint reports PRECTOTCORR's metadata unit as
+# "mm/day" even though the returned values are hourly-rate (confirmed
+# against the live API and documented at
+# https://power.larc.nasa.gov/docs/services/api/temporal/hourly/, which
+# states hourly precipitation is supplied in mm/hour). This is a known
+# quirk of that specific endpoint/parameter combination, not a general
+# property of "mm/day"-labeled data - a genuine daily-resolution source
+# (the daily endpoint, or any other provider) must still be trusted as
+# daily. Scoped narrowly: only overrides PRECTOTCORR's unit, and only when
+# the request that produced this document specifically used the hourly
+# endpoint (passed in via `temporal_resolution`, from the catalog entry
+# recorded at acquisition time - never inferred from timestamp format or
+# value variation, which would be fragile).
+_POWER_HOURLY_UNIT_QUIRKS = {
+    "PRECTOTCORR": {"from": {"mm/day", "mm/d"}, "to": "mm/hour"},
+}
+
+
+def _power_rows(
+    document: dict[str, Any], temporal_resolution: str | None = None
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, dict[str, str]]]:
     rows = []
     parameters = document.get("properties", {}).get("parameter", {})
     metadata = document.get("parameters", {})
     units = {code: str((metadata.get(code) or {}).get("units") or "unknown") for code in parameters}
+    unit_corrections: dict[str, dict[str, str]] = {}
+    if temporal_resolution == "hourly":
+        for code, quirk in _POWER_HOURLY_UNIT_QUIRKS.items():
+            reported = units.get(code)
+            if reported in quirk["from"]:
+                unit_corrections[code] = {"provider_reported_unit": reported, "corrected_unit": quirk["to"],
+                                          "reason": "NASA POWER hourly endpoint reports mm/day in response "
+                                                    "metadata for PRECTOTCORR, but hourly values are mm/hour "
+                                                    "per the provider's own API documentation"}
+                units[code] = quirk["to"]
     for code, values in parameters.items():
         for timestamp, raw in values.items():
             try:
@@ -126,18 +156,21 @@ def _power_rows(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[st
                 "timestamp": parsed, "variable": code,
                 "value": None if raw in (-999, -999.0, None) else float(raw), "qualifiers": "",
             })
-    return rows, units
+    return rows, units, unit_corrections
 
 
-def _native_rows(raw: bytes, provider: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
+def _native_rows(
+    raw: bytes, provider: str, temporal_resolution: str | None = None
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, dict[str, str]]]:
     try:
         document = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise WatershedDataError("native temporal asset is not JSON") from exc
     if provider == "usgs":
-        return _usgs_rows(document)
+        rows, units = _usgs_rows(document)
+        return rows, units, {}
     if provider == "nasa-power":
-        return _power_rows(document)
+        return _power_rows(document, temporal_resolution)
     raise WatershedDataError(f"temporal harmonization does not support provider {provider!r}")
 
 
@@ -430,7 +463,9 @@ def harmonize_asset(
     if source is None:
         raise WatershedDataError(f"asset not found in catalog: {asset_id}")
     with ObjectStore(object_store).open(source["content_digest"]) as stream:
-        rows, units = _native_rows(stream.read(), source["provider"])
+        rows, units, unit_corrections = _native_rows(
+            stream.read(), source["provider"], source.get("temporal_resolution")
+        )
     if not rows:
         raise WatershedDataError("native temporal asset contains no observations")
     qc = temporal_qc(
@@ -469,7 +504,13 @@ def harmonize_asset(
     transformation = {"target_timezone": "UTC", "ordering": "timestamp_then_variable",
                       "missing_values": "preserved", "unit_conversion": "none",
                       "qc_policy_version": TEMPORAL_QC_POLICY_VERSION,
-                      "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST}
+                      "qc_policy_digest": TEMPORAL_QC_POLICY_DIGEST,
+                      # Provenance for any unit label GIStoOHQ corrected away from
+                      # what the provider's own response metadata reported (see
+                      # _POWER_HOURLY_UNIT_QUIRKS) - the provider's original string
+                      # is preserved here, not discarded, even though the per-row
+                      # CSV's native_unit column now carries the corrected value.
+                      "unit_corrections": unit_corrections}
     output = catalog_store.register({
         "provider": source["provider"], "product": "harmonized-temporal-observations",
         "product_version": "1.6", "request_key": hashlib.sha256(

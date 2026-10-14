@@ -15,14 +15,22 @@ from ohqbuilder.watershed_data.temporal import (
 )
 
 
-def _native_asset(tmp_path, provider, fixture, product):
+def _native_asset(tmp_path, provider, fixture, product, temporal_resolution=None):
     store = ObjectStore(tmp_path / "store")
     stored = store.put(io.BytesIO(Path(fixture).read_bytes()))
     catalog = AssetCatalog(tmp_path / "catalog.json")
-    return store, catalog, catalog.register({
+    record = {
         "provider": provider, "product": product, "content_digest": stored.content_digest,
         "size": stored.size, "media_type": "application/json",
-    })
+    }
+    if temporal_resolution is not None:
+        # Matches what a real acquisition records (see
+        # acquire_historical_meteorology/summarize_meteorology_json in
+        # nasa_power.py) - harmonize_asset reads this field to decide
+        # whether the NASA POWER hourly-endpoint PRECTOTCORR unit quirk
+        # applies.
+        record["temporal_resolution"] = temporal_resolution
+    return store, catalog, catalog.register(record)
 
 
 def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
@@ -69,6 +77,64 @@ def test_power_harmonization_creates_new_asset_qc_and_provenance(tmp_path):
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["parent_asset_ids"] == [native["asset_id"]]
     assert provenance["output_asset_ids"] == [output["asset_id"]]
+
+
+def test_power_hourly_endpoint_corrects_mislabeled_prectotcorr_unit_without_dividing_values(tmp_path):
+    # The exact real-world case this guards: NASA POWER's hourly endpoint
+    # returns PRECTOTCORR values that are already hourly-rate, but labels
+    # them "mm/day" in its own response metadata (confirmed against the
+    # live API; see https://power.larc.nasa.gov/docs/services/api/temporal/hourly/,
+    # which documents hourly precipitation as mm/hour). Found via a
+    # downstream consumer (PyTorchCPP) that had been dividing these
+    # already-hourly values by 24, corrupting every storm's magnitude.
+    store, catalog, native = _native_asset(
+        tmp_path, "nasa-power", "tests/fixtures/nasa_power_hourly_mislabeled_mm_per_day.json",
+        "historical-meteorology", temporal_resolution="hourly",
+    )
+    output = harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    with store.open(output["content_digest"]) as stream:
+        rows = list(csv.DictReader(io.TextIOWrapper(stream, encoding="utf-8")))
+    precip_rows = {row["timestamp_utc"]: row for row in rows if row["variable"] == "PRECTOTCORR"}
+    # Unit label corrected to canonical mm/hour...
+    assert all(row["native_unit"] == "mm/hour" for row in precip_rows.values())
+    # ...but the VALUES themselves are retained exactly as provided, not
+    # divided by 24 - the harmonization layer does no unit conversion
+    # (only the label is corrected to match reality); any hour-to-day
+    # disaggregation is PyTorchCPP's concern downstream, driven by this
+    # corrected label.
+    assert precip_rows["2025-01-01T00:00:00Z"]["value"] == "0.0"
+    assert precip_rows["2025-01-01T01:00:00Z"]["value"] == "1.2"
+    assert precip_rows["2025-01-01T02:00:00Z"]["value"] == "0.4"
+    # The provider's original (wrong) label is preserved as provenance,
+    # not silently discarded.
+    corrections = output["transformation_parameters"]["unit_corrections"]
+    assert corrections["PRECTOTCORR"]["provider_reported_unit"] == "mm/day"
+    assert corrections["PRECTOTCORR"]["corrected_unit"] == "mm/hour"
+
+
+def test_power_daily_endpoint_does_not_reinterpret_genuine_daily_mm_per_day(tmp_path):
+    # The narrow-scope guard: a genuinely daily-resolution PRECTOTCORR
+    # source (the daily endpoint) must NOT have its unit rewritten just
+    # because the string happens to be "mm/day" - that label is correct
+    # there. This reuses the existing daily PET fixture's shape but checks
+    # PRECTOTCORR specifically stays untouched when temporal_resolution is
+    # "daily", not "hourly".
+    store, catalog, native = _native_asset(
+        tmp_path, "nasa-power", "tests/fixtures/nasa_power_hourly_mislabeled_mm_per_day.json",
+        "historical-meteorology", temporal_resolution="daily",
+    )
+    output = harmonize_asset(
+        asset_id=native["asset_id"], catalog=catalog.path, object_store=store.root,
+        qc_output=tmp_path / "qc.json", provenance_output=tmp_path / "provenance.json",
+    )
+    with store.open(output["content_digest"]) as stream:
+        rows = list(csv.DictReader(io.TextIOWrapper(stream, encoding="utf-8")))
+    precip_rows = [row for row in rows if row["variable"] == "PRECTOTCORR"]
+    assert all(row["native_unit"] == "mm/day" for row in precip_rows)
+    assert output["transformation_parameters"]["unit_corrections"] == {}
 
 
 def test_usgs_harmonization_preserves_qualifiers_and_native_units(tmp_path):
