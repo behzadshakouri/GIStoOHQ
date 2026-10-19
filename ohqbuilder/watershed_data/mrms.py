@@ -264,6 +264,18 @@ def acquire_basin_precipitation(
             grid = da.values
             values = [float(grid[i, j]) for i, j in positions]
         stats = area_weighted_basin_average(cell_lats, cell_lons, values, weights)
+        if stats["mean"] is None:
+            # Downloaded and decoded fine, but every basin cell was
+            # negative-sentinel/missing/zero-weight for this specific hour -
+            # a genuine no-data hour, not a download failure, but still
+            # "failed" from this function's point of view: there is no
+            # value to report. Counting it here (not as a successfully
+            # acquired row with a null value) is what lets a consumer
+            # safely skip it and fall back to another precipitation source
+            # for that hour, instead of being handed a literal "None" to
+            # parse as if it were real data.
+            n_hours_failed += 1
+            continue
         rows.append({
             "timestamp_utc": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "value": stats["mean"], "n_cells_used": stats["n_cells_used"],
