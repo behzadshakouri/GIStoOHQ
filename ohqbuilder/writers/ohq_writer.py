@@ -12,7 +12,7 @@ from ..soil_pedotransfer import van_genuchten_params
 from ..channel_sections import load_channel_segments, position_on_reach, segment_at_station, station_on_reach
 from .block_writer import BlockWriter
 from .rainfall_writer import rainfall_lines
-from .et_writer import et_filename, et_lines
+from .et_writer import et_filename, et_lines, deep_et_corr_fact, et2_lines
 from .snow_writer import (
     air_temperature_lines,
     snow_partition_lines,
@@ -797,6 +797,18 @@ class OHQWriter:
         if forcing_et:
             for line in et_lines(forcing_et):
                 writer.line(line)
+        # riparian_hru exposes a separate Evapotranspiration_2 port (Soil_2
+        # and Soil_3) that the default behavior below points at the same
+        # `ET` source as Evapotranspiration (Soil_1) - see deep_et_corr_fact's
+        # own docstring for the water-balance consequence this opts out of.
+        deep_corr = (
+            deep_et_corr_fact()
+            if forcing_et and self.formulation == "riparian_hru"
+            else None
+        )
+        if deep_corr is not None:
+            for line in et2_lines(forcing_et, deep_corr):
+                writer.line(line)
         writer.line()
 
         if self.include_comments:
@@ -1036,7 +1048,10 @@ class OHQWriter:
                     *(
                         [
                             ("Evapotranspiration", "ET"),
-                            ("Evapotranspiration_2", "ET"),
+                            (
+                                "Evapotranspiration_2",
+                                "ET2" if deep_corr is not None else "ET",
+                            ),
                         ]
                         if forcing_et
                         else []

@@ -562,6 +562,125 @@ def test_et_file_path_cannot_change_ohq_commands():
         et_lines("et.csv;create block")
 
 
+def test_riparian_deep_et_is_opt_in_and_backward_compatible(monkeypatch):
+    """riparian_hru's Evapotranspiration_2 port (Soil_2 and Soil_3, each
+    independently moisture-limited) defaults to the same ET source as
+    Evapotranspiration (Soil_1) - three full-strength withdrawals from one
+    reference-ET rate, not one demand apportioned across the column. This
+    was confirmed to produce ~3.90 billion m^3 total ET over 6 years on
+    Zarrineh (~1.39x annual precipitation) in OHQ_Model/audit_2026-10-26.
+    OHQ_RIPARIAN_DEEP_ET_CORR_FACT opts into a second, independently
+    controllable source for the deep layers instead."""
+    ws = Watershed(
+        name="DeepETCheck",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+    monkeypatch.setenv("OHQ_ET_FILE", "/data/et_m_per_day.csv")
+
+    # Default (env var unset): unchanged historical behavior, both ports on
+    # the same source. Mixed/standard_hru only expose one ET port at all
+    # (confirmed from their own resource schemas), so the opt-in is a no-op
+    # for them even if accidentally set - only riparian_hru's second port
+    # exists for it to affect.
+    monkeypatch.delenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", raising=False)
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+    assert "Evapotranspiration=ET," in text
+    assert "Evapotranspiration_2=ET," in text
+    assert "name=ET2," not in text
+
+    # Opt-in: a second ET2 source at the requested corr_fact, wired to
+    # Evapotranspiration_2 only - Evapotranspiration (Soil_1) is untouched.
+    monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", "0.3")
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+    assert "Evapotranspiration=ET," in text
+    assert "Evapotranspiration_2=ET2," in text
+    assert (
+        "create source;type=Evapotranspiration_Time_Series (Soil),"
+        "name=ET2,ET_timeseries=/data/et_m_per_day.csv,corr_fact=0.3"
+    ) in text
+    # the original, undecoupled ET source for Soil_1 is still there too
+    assert (
+        "create source;type=Evapotranspiration_Time_Series (Soil),"
+        "name=ET,ET_timeseries=/data/et_m_per_day.csv"
+    ) in text
+
+    # mixed_hru has no Evapotranspiration_2 port at all - the opt-in must
+    # not fabricate one or create an orphaned, unreferenced ET2 source.
+    text = OHQWriter(formulation="mixed_hru").render(ws)
+    assert "Evapotranspiration_2" not in text
+    assert "name=ET2," not in text
+
+    # invalid corr_fact is rejected before it reaches the model file
+    monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", "not-a-number")
+    with pytest.raises(ValueError, match="must be a number"):
+        OHQWriter(formulation="riparian_hru").render(ws)
+
+
+@pytest.mark.parametrize(
+    "bad_value,match",
+    [
+        ("-0.3", "must not be negative"),
+        ("-1", "must not be negative"),
+        ("nan", "must not be NaN"),
+        ("NaN", "must not be NaN"),
+        ("inf", "must be finite"),
+        ("-inf", "must be finite"),
+        ("Infinity", "must be finite"),
+    ],
+)
+def test_riparian_deep_et_corr_fact_rejects_negative_nan_and_infinite(
+    monkeypatch, bad_value, match
+):
+    """float() itself accepts "nan"/"inf"/"-inf" and negative numbers
+    without raising - each must be explicitly rejected rather than silently
+    reaching the model file, since corr_fact scales a physical
+    evapotranspiration rate (a negative value would make ET add water
+    instead of removing it; NaN/Inf would propagate into the solver)."""
+    ws = Watershed(
+        name="DeepETInvalid",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+    monkeypatch.setenv("OHQ_ET_FILE", "/data/et_m_per_day.csv")
+    monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", bad_value)
+    with pytest.raises(ValueError, match=match):
+        OHQWriter(formulation="riparian_hru").render(ws)
+
+
+def test_riparian_deep_et_corr_fact_accepts_zero_and_positive_values(monkeypatch):
+    """Zero is a legitimate corr_fact (no deep-layer ET at all, distinct
+    from the default/unset behavior which shares the top layer's source) -
+    must not be rejected by the negativity check."""
+    ws = Watershed(
+        name="DeepETZero",
+        subbasins=[Subbasin(id=1, name="Subbasin_1", area_km2=1.0,
+                            centroid_x=100.0, centroid_y=200.0)],
+        reaches=[Reach(id=1, name="Reach_1", x_act=200.0, y_act=200.0)],
+        outlet=Outlet(x_act=300.0, y_act=200.0),
+        topology=[
+            TopologyLink(1, "subbasin", "Subbasin_1", "reach", 1, "Reach_1"),
+            TopologyLink(1, "reach", "Reach_1", "sink", None, "Outlet"),
+        ],
+    )
+    monkeypatch.setenv("OHQ_ET_FILE", "/data/et_m_per_day.csv")
+    monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", "0")
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+    assert "name=ET2,ET_timeseries=/data/et_m_per_day.csv,corr_fact=0" in text
+
+
 def test_writer_renders_mixed_hru_soil_texture_as_van_genuchten_parameters():
     ws = Watershed(
         name="MixedSoil",
