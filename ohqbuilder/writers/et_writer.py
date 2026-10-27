@@ -75,7 +75,12 @@ def et2_lines(filename: str, corr_fact: str) -> list[str]:
             f"(got {value!r}) - a negative corr_fact would make "
             "evapotranspiration add water instead of removing it"
         )
+    # Serialize the parsed value rather than the original environment text.
+    # Python accepts numeric spellings such as ``1_0`` that are not valid OHQ
+    # numeric literals; str(float) gives a locale-independent, round-trippable
+    # representation that the OHQ parser can consume safely.
+    corr_fact_literal = str(value)
     return [
         "create source;type=Evapotranspiration_Time_Series (Soil),"
-        f"name=ET2,ET_timeseries={filename},corr_fact={corr_fact}"
+        f"name=ET2,ET_timeseries={filename},corr_fact={corr_fact_literal}"
     ]

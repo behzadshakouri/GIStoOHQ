@@ -678,7 +678,14 @@ def test_riparian_deep_et_corr_fact_accepts_zero_and_positive_values(monkeypatch
     monkeypatch.setenv("OHQ_ET_FILE", "/data/et_m_per_day.csv")
     monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", "0")
     text = OHQWriter(formulation="riparian_hru").render(ws)
-    assert "name=ET2,ET_timeseries=/data/et_m_per_day.csv,corr_fact=0" in text
+    assert "name=ET2,ET_timeseries=/data/et_m_per_day.csv,corr_fact=0.0" in text
+
+    # float() accepts underscores in Python numeric strings, while the OHQ
+    # command language does not. Emit the parsed value, never the raw text.
+    monkeypatch.setenv("OHQ_RIPARIAN_DEEP_ET_CORR_FACT", "1_0")
+    text = OHQWriter(formulation="riparian_hru").render(ws)
+    assert "name=ET2,ET_timeseries=/data/et_m_per_day.csv,corr_fact=10.0" in text
+    assert "corr_fact=1_0" not in text
 
 
 def test_writer_renders_mixed_hru_soil_texture_as_van_genuchten_parameters():

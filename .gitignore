@@ -2,8 +2,9 @@ outputs/*
 !outputs/.gitkeep
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
 
-gistoohq.egg-info/
 runs/
 
 examples/SligoCreek/SligoCreekDemo/
