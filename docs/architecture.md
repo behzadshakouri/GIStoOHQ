@@ -47,3 +47,15 @@ software version, timestamps, and outputs.
 The local object store is operational storage. A portable package is a frozen
 release that declares whether raw objects are included, externally referenced,
 redistributable, and available without the local store.
+
+## Generic municipal GIS downloaders
+
+`ohqbuilder/sources/` is a third, independent acquisition path, separate from
+both the core GIS-to-OHQ workflow and the SiteSpec/catalog-based optional
+watershed-data layer above: generic ArcGIS REST and Socrata downloaders that
+discover/select/page/write municipal GIS layers to a GeoPackage with a
+provenance manifest, with no site concept, content-addressed store, or catalog
+involved. See [Generic municipal GIS downloaders](municipal_gis_downloaders.md).
+Converting the layers it produces into a validated hydraulic network and OHQ
+elements is explicitly out of scope for this layer and is left to a later,
+separate stage.

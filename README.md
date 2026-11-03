@@ -294,6 +294,7 @@ required external inputs.
 | Workflow stages | [Workflow](docs/workflow.md) |
 | Creating required GIS inputs | [Input generation](docs/input_generation.md) |
 | Source acquisition | [Data downloaders](docs/data_downloaders.md) |
+| Generic municipal GIS downloaders (ArcGIS REST, Socrata) | [Municipal GIS downloaders](docs/municipal_gis_downloaders.md) |
 | GIS-to-OHQ mapping and model options | [OHQ mapping](docs/ohq_mapping.md) |
 | OHQ syntax notes | [OHQ format](docs/ohq_format.md) |
 | Watershed observations and packages | [Watershed data](docs/watershed_data.md) |

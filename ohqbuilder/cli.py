@@ -81,6 +81,8 @@ from .watershed_data.forecast import acquire_forecast_archive, materialize_avail
 from .watershed_data.status import write_data_status
 from .watershed_data.doctor import run_data_doctor
 from .watershed_data.workflow import acquire_url, write_site_spec
+from .sources.arcgis_rest import ArcGISRestError, BoundingBox, download_arcgis_layers
+from .sources.socrata import SocrataError, download_socrata_dataset
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -522,6 +524,41 @@ def build_parser() -> argparse.ArgumentParser:
     osm.add_argument("--product", choices=("hydro", "roads"), required=True)
     osm.add_argument("--bounds", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), required=True)
     osm.add_argument("--output", required=True, help="Output GeoJSON path; hydro filename must contain 'flowline' for materialization.")
+
+    arcgis = sub.add_parser(
+        "download-arcgis",
+        help="Download layers from any ArcGIS REST MapServer/FeatureServer to a GeoPackage.",
+    )
+    arcgis.add_argument("--service-url", required=True, help="MapServer or FeatureServer root URL.")
+    arcgis.add_argument("--output", required=True, help="Output GeoPackage path.")
+    arcgis_selector = arcgis.add_mutually_exclusive_group(required=True)
+    arcgis_selector.add_argument("--names", nargs="+", help="Exact layer name(s) to download.")
+    arcgis_selector.add_argument("--pattern", help="Regular expression matched against layer names.")
+    arcgis.add_argument("--where", default="1=1", help="SQL where clause (default: all features).")
+    arcgis.add_argument("--out-fields", default="*", help="Comma-separated output fields (default: all).")
+    arcgis.add_argument("--out-sr", type=int, default=None, help="Output spatial reference EPSG code.")
+    arcgis.add_argument("--bbox", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), default=None)
+    arcgis.add_argument("--bbox-sr", type=int, default=4326, help="EPSG code of --bbox coordinates.")
+    arcgis.add_argument("--page-size", type=int, default=None, help="Requested page size; capped by the service's own maxRecordCount.")
+    arcgis.add_argument("--manifest", default=None, help="Provenance manifest path; defaults to <output>.manifest.json.")
+    arcgis.add_argument("--timeout", type=float, default=60.0)
+
+    socrata = sub.add_parser(
+        "download-socrata",
+        help="Download a geospatial dataset from a Socrata open-data portal to a GeoPackage.",
+    )
+    socrata.add_argument("--domain", required=True, help="Socrata portal domain, for example data.cityofla.org.")
+    socrata.add_argument("--dataset-id", required=True, help="Dataset identifier (the four-by-four, for example ab12-cd34).")
+    socrata.add_argument("--output", required=True, help="Output GeoPackage path.")
+    socrata.add_argument("--output-layer", default=None, help="Output layer name; defaults to a name derived from the dataset.")
+    socrata.add_argument("--select", default="*", help="SoQL $select clause (default: all columns).")
+    socrata.add_argument("--where", default=None, help="SoQL $where clause.")
+    socrata.add_argument("--bbox", nargs=4, type=float, metavar=("WEST", "SOUTH", "EAST", "NORTH"), default=None)
+    socrata.add_argument("--order-by", default=None, help="SoQL $order clause; defaults to the stable :id column.")
+    socrata.add_argument("--page-size", type=int, default=1000)
+    socrata.add_argument("--app-token", default=None, help="Optional Socrata app token (X-App-Token header).")
+    socrata.add_argument("--manifest", default=None, help="Provenance manifest path; defaults to <output>.manifest.json.")
+    socrata.add_argument("--timeout", type=float, default=60.0)
 
     manifest_download = sub.add_parser(
         "download-dem-manifest",
@@ -1701,6 +1738,42 @@ def main(argv: list[str] | None = None) -> int:
             print(f"download-osm-vectors failed: {exc}")
             return 2
         print(f"Wrote OSM {args.product} source: {output}")
+        return 0
+    if args.command == "download-arcgis":
+        manifest_path = args.manifest or str(Path(args.output).with_name(Path(args.output).stem + ".manifest.json"))
+        try:
+            bbox = (
+                BoundingBox(args.bbox[0], args.bbox[1], args.bbox[2], args.bbox[3], sr=args.bbox_sr)
+                if args.bbox else None
+            )
+            manifest = download_arcgis_layers(
+                args.service_url, args.output,
+                names=args.names, pattern=args.pattern, where=args.where,
+                out_fields=args.out_fields, out_sr=args.out_sr, bbox=bbox,
+                page_size=args.page_size, manifest_path=manifest_path, timeout=args.timeout,
+            )
+        except (ArcGISRestError, ValueError, OSError, ImportError) as exc:
+            print(f"download-arcgis failed: {exc}")
+            return 2
+        print(f"Wrote {len(manifest['layers'])} layer(s) to {args.output}; manifest: {manifest_path}")
+        return 0
+    if args.command == "download-socrata":
+        manifest_path = args.manifest or str(Path(args.output).with_name(Path(args.output).stem + ".manifest.json"))
+        try:
+            bbox = (
+                BoundingBox(args.bbox[0], args.bbox[1], args.bbox[2], args.bbox[3])
+                if args.bbox else None
+            )
+            manifest = download_socrata_dataset(
+                args.domain, args.dataset_id, args.output,
+                output_layer=args.output_layer, select=args.select, where=args.where,
+                bbox=bbox, order_by=args.order_by, page_size=args.page_size,
+                manifest_path=manifest_path, timeout=args.timeout, app_token=args.app_token,
+            )
+        except (SocrataError, ValueError, OSError, ImportError) as exc:
+            print(f"download-socrata failed: {exc}")
+            return 2
+        print(f"Wrote {len(manifest['layers'])} layer(s) to {args.output}; manifest: {manifest_path}")
         return 0
     if args.command == "download-data":
         try:

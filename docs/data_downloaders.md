@@ -27,6 +27,14 @@ units, and ArcGIS Online GeoJSON under `scripts/legacy_gis/`. They are retained
 workflow utilities rather than supported `ohqbuild` downloader commands, and
 they are not direct inputs required by the core OHQ builder.
 
+A separate, generic pair of downloaders -- `download-arcgis` for any ArcGIS
+REST MapServer/FeatureServer and `download-socrata` for Socrata open-data
+portals -- supersedes the legacy ArcGIS Online script's hardcoded-layer-ID
+approach with dynamic layer discovery, name/regex selection, pagination, and
+a provenance manifest. These are not required inputs for the core
+hydrology workflow above; see
+[Generic municipal GIS downloaders](municipal_gis_downloaders.md).
+
 ### Generated inputs versus downloaded sources
 
 The final builder inputs (`topology.gpkg`, `subwatershed_params.gpkg`,
