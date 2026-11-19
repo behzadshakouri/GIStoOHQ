@@ -1,5 +1,9 @@
 # Whole generated-model synthetic event ledger
 
+Follow-up: the interval-loader defect recorded below was fixed and reverified in
+OpenHydroQual d7a45cb; see [rainfall fix](ohq_interval_rainfall_fix.md). These original
+failed audit receipts remain preserved as historical evidence.
+
 Audit: `/home/arash/Dropbox/HydroPINN paper/audits/ohq_generated_event_20261119/`.
 This is a development-only synthetic solver check, not research training or
 forecast-skill validation. No observations were loaded. Original models,
