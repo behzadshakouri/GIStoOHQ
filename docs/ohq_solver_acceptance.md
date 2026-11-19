@@ -55,11 +55,14 @@ Receipts, binaries and a verified case-safe frozen-build archive are retained in
 HydroPINN paper Dropbox under `audits/ohq_solver_initialization_20261119/`.
 No installed application was replaced, and nothing was pushed.
 
-Each short unforced run reports `property 'area' does not exist in 'Rain'`.
+Each original short unforced run reported `property 'area' does not exist in 'Rain'`.
 The Precipitation source coefficient is an area expression evaluated in the
 receiving object's context by Source::GetValue; this warning warrants separate
-source-context investigation and a synthetic rainfall/mass-ledger check. It was
-not suppressed or "fixed" by inventing an area on Rain. Finite startup output
+source-context investigation and a synthetic rainfall/mass-ledger check. That
+follow-up is now complete: `docs/ohq_rainfall_ledger.md` documents the genuine
+initialization-context fix, correct receiving-area scaling, closed synthetic
+ledgers and bit-identical before/after outputs. No Rain area was invented.
+Finite startup output
 does not establish correct rainfall scaling, water-budget closure, event
 response or scientific skill. HEC-HMS remains structurally checked only; no HMS
 solver was found on PATH. Interactive desktop and fresh DEM/full-run acceptance

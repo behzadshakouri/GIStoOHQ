@@ -5,13 +5,16 @@ A minimal interface adapter hosts real Qt widgets. No maps, source downloads,
 user profiles, production workflows or desktop plugin installs are changed.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+import shutil
+import time
 
 
-def run(output):
+def run(output,saved_gis=None):
     output=Path(output).resolve()
     if output.exists():raise FileExistsError(output)
     output.mkdir(parents=True)
@@ -42,6 +45,7 @@ def run(output):
     iface=Interface();iface.window.show()
     outcomes=[]
     data_checks=[]
+    project_checks=[]
     for iteration in range(2):
         plugin=classFactory(iface);plugin.initGui();app.processEvents()
         assert isinstance(plugin.dock,QDockWidget) and plugin.dock.isHidden()
@@ -99,12 +103,49 @@ def run(output):
                 assert not errors,errors
                 assert len(captured)==2 and not (output/'never_created_weather').exists()
             finally:content._start_argv=original_start
+            if saved_gis:
+                source=Path(saved_gis).resolve()
+                names=['topology.gpkg','subwatershed_params.gpkg','reaches.gpkg','junctions.gpkg']
+                digest=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+                before={name:digest(source/name) for name in names}
+                project=output/'isolated_project';target=project/'PluginAcceptance/outputs'
+                target.mkdir(parents=True)
+                for name in names:shutil.copy2(source/name,target/name)
+                config=project/'config.json'
+                config.write_text(json.dumps({'root':str(project),'site':'PluginAcceptance'}))
+                content.config.setText(str(config))
+                repo=str(Path(__file__).resolve().parents[1])
+                os.environ['PYTHONPATH']=repo+os.pathsep+os.environ.get('PYTHONPATH','')
+                executable=shutil.which('ohqbuild')
+                if not executable:raise RuntimeError('ohqbuild entry point not found on PATH')
+                for action in ['build','build-hms','validate-hms']:
+                    content.action_buttons[action].click()
+                    process=content.process
+                    if process is None or not process.waitForStarted(10000):
+                        raise RuntimeError(action+' process did not start')
+                    deadline=time.monotonic()+120
+                    while content.process is not None and time.monotonic()<deadline:
+                        app.processEvents();time.sleep(.01)
+                    if content.process is not None:
+                        process.kill();process.waitForFinished(5000)
+                        raise RuntimeError(action+' exceeded bounded UI command check')
+                    if process.exitCode()!=0:raise RuntimeError(action+' failed: '+content.log.toPlainText())
+                    project_checks.append({'action':action,'exit_code':process.exitCode(),'actual_qprocess':True})
+                models=sorted(target.glob('*.ohq'))
+                assert len(models)==4 and all(p.stat().st_size for p in models)
+                assert (target/'hec_hms/PluginAcceptance.hms').is_file()
+                assert before=={name:digest(source/name) for name in names}
+                assert before=={name:digest(target/name) for name in names}
+                (output/'plugin_project_commands.log').write_text(content.log.toPlainText())
+                project_checks.append({'source_sha256':before,'source_unchanged':True,
+                    'entry_point':executable,'entry_point_sha256':digest(executable),
+                    'generated_ohq_sha256':{p.name:digest(p) for p in models},'installed_plugin_changed':False})
         plugin.unload();app.sendPostedEvents(None,QEvent.DeferredDelete);app.processEvents()
         assert plugin.action is None and plugin.dock is None and plugin.dock_content is None
         assert len(iface.menu.actions())==len(iface.toolbar.actions())==0
         outcomes.append({'cycle':iteration+1,'registered_actual_dock':True,'show_action':True,'unload_clean':True})
     iface.window.close();iface.window.deleteLater();app.sendPostedEvents(None,QEvent.DeferredDelete)
-    report={'qgis_version':Qgis.QGIS_VERSION,'cycles':outcomes,'data_dialog_checks':data_checks,'provider_jobs_started':False,'desktop_installed':False,
+    report={'qgis_version':Qgis.QGIS_VERSION,'cycles':outcomes,'data_dialog_checks':data_checks,'project_checks':project_checks,'provider_jobs_started':False,'desktop_installed':False,
             'limitations':'Real offscreen QGIS/Qt widgets with a minimal interface adapter; not an interactive QGIS desktop/map-tool/full-run acceptance test.'}
     (output/'receipt.json').write_text(json.dumps(report,indent=2)+'\n')
     app.exitQgis()
@@ -113,4 +154,5 @@ def run(output):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('new_output',type=Path)
-    run(parser.parse_args().new_output)
+    parser.add_argument('--saved-gis',type=Path,help='Also click real builder/validator buttons on isolated copies of four saved GIS inputs')
+    args=parser.parse_args();run(args.new_output,args.saved_gis)
