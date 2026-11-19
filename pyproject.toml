@@ -27,6 +27,7 @@ gis = [
   # MRMS basin-averaged precipitation acquisition (ohqbuilder/watershed_data/mrms.py):
   # cfgrib additionally needs the system eccodes library.
   "xarray>=2023.1",
+  "netCDF4>=1.6", # AORC/gridMET basin-forcing command also needs system zstd.
   "cfgrib>=0.9.10",
 ]
 dev = [
