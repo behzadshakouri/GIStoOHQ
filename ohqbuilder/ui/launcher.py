@@ -365,10 +365,19 @@ def watershed_data_command(
     catchment_area_source: str = "",
     refresh: bool = False,
     require_qc_pass: bool = False,
+    basin_polygon: str = "", basin_weather_output: str = "", weather_download_limit_mb: float = 512,
 ) -> WorkflowCommand:
     """Build standalone-launcher commands for the optional watershed-data workflow."""
     if not site_spec:
         raise LauncherError("A SiteSpec path is required for watershed data.")
+    if action in {"basin-forcing","basin-forcing-resume"}:
+        from ..watershed_data.basin_forcing import basin_forcing_arguments
+        try:
+            args=basin_forcing_arguments(site_spec,basin_polygon,basin_weather_output,station_id=station_id,
+                max_download_mb=weather_download_limit_mb,resume=action.endswith("-resume"))
+        except ValueError as exc:
+            raise LauncherError(str(exc)) from exc
+        return WorkflowCommand("Gauge-basin rainfall and reference ET",tuple(args))
     if action == "init-site":
         required = {
             "site ID": site_id, "study start": study_start, "study end": study_end,
@@ -1998,6 +2007,9 @@ class LauncherApp:
             "Package": tk.StringVar(value=str(workspace_default / "watershed_package")),
             "HydroPINN output": tk.StringVar(value=str(workspace_default / "hydropinn")),
             "All-data workspace": tk.StringVar(value=str(workspace_default)),
+            "Gauge basin polygon": tk.StringVar(value=""),
+            "Basin weather folder": tk.StringVar(value=str(workspace_default / "basin_weather")),
+            "Weather download limit (MB)": tk.StringVar(value="512"),
             "Forecast URL": tk.StringVar(value=""),
             "Forecast provider": tk.StringVar(value=""),
             "Forecast product": tk.StringVar(value="forecast"),
@@ -2205,7 +2217,7 @@ class LauncherApp:
                 return
             actions_requiring_site = {
                 "validate-site", "reconnaissance", "download-discharge",
-                "download-weather", "download-pet", "freeze", "doctor",
+                "download-weather", "download-pet", "freeze", "doctor", "basin-forcing", "basin-forcing-resume",
             }
             if action in actions_requiring_site and not site_path.is_file():
                 self.messages.put(
@@ -2244,6 +2256,9 @@ class LauncherApp:
                     package=variables["Package"].get(),
                     hydropinn_output=variables["HydroPINN output"].get(),
                     workspace=variables["All-data workspace"].get(),
+                    basin_polygon=variables["Gauge basin polygon"].get(),
+                    basin_weather_output=variables["Basin weather folder"].get(),
+                    weather_download_limit_mb=float(variables["Weather download limit (MB)"].get()),
                     forecast_url=variables["Forecast URL"].get(),
                     forecast_provider=variables["Forecast provider"].get(),
                     forecast_product=variables["Forecast product"].get(),
@@ -2276,7 +2291,9 @@ class LauncherApp:
             ("Use Reconnaissance Selection", "use-recon-selection"),
             ("Download Selected Discharge", "download-discharge"),
             ("Download Weather", "download-weather"),
-            ("Download PET/ET", "download-pet"),
+            ("Download ET energy", "download-pet"),
+            ("Get basin rainfall + reference ET", "basin-forcing"),
+            ("Resume basin weather", "basin-forcing-resume"),
             ("Freeze Package", "freeze"),
             ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),

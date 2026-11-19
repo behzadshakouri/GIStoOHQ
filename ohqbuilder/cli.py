@@ -107,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     basin_forcing = data_sub.add_parser("basin-forcing", help="Acquire polygon-weighted AORC rain and gridMET reference ET; no discharge or training.")
     basin_forcing.add_argument("--site-spec", required=True)
     basin_forcing.add_argument("--basin", required=True)
+    basin_forcing.add_argument("--station-id", default="")
     basin_forcing.add_argument("--output", required=True)
     basin_forcing.add_argument("--resume", action="store_true")
     basin_forcing.add_argument("--max-download-mb", type=float, default=512)
@@ -1297,7 +1298,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.data_command == "basin-forcing":
                 from .watershed_data.basin_forcing import acquire_basin_forcing
                 result = acquire_basin_forcing(args.site_spec, args.basin, args.output,
-                                              resume=args.resume, max_download_mb=args.max_download_mb)
+                                              resume=args.resume, max_download_mb=args.max_download_mb, station_id=args.station_id)
                 print(f"Basin forcing package: {result}")
             elif args.data_command == "init-site":
                 result = write_site_spec(

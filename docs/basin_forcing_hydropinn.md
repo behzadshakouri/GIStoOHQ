@@ -14,7 +14,7 @@ bounded study period (the study end names the last hourly interval start).
 
 ```
 ohqbuild data basin-forcing --site-spec gauge_site_spec.yaml \
-  --basin gauge_basin.geojson --output NEW_FORCING_DIRECTORY \
+  --basin gauge_basin.geojson --station-id 01650800 --output NEW_FORCING_DIRECTORY \
   --max-download-mb 512
 ```
 
@@ -23,7 +23,9 @@ and daily gridMET short-grass reference evapotranspiration. Polygon weights
 are calculated in EPSG:5070; every weighted cell must be valid. Missing cells
 invalidate the interval, never become zero rain or trigger silent spatial
 renormalization. Hour-ending rain is mapped to interval start. Native packed
-units/scales and grid dimensions are checked. Source changes outside the
+units/scales and grid dimensions are checked. The export contains canonical WGS84 GeoJSON
+regardless of whether the input was GeoJSON or projected GeoPackage; original
+basin bytes are preserved separately as `source_basin`. Source changes outside the
 supported encoding stop processing rather than being guessed.
 
 The weather request may read the next year's first AORC chunk to obtain the
@@ -38,7 +40,8 @@ simple Zstd Zarr-v2 AORC chunks and NetCDF4 gridMET subsets, not arbitrary Zarr.
 polygon and SiteSpec, exact spatial weights, interval masks and provider-day
 identities accompany the export. This is a dedicated producer export, separate
 from the existing NASA POWER/generic temporal workflow; its adoption is opt-in.
-It is not yet connected to the QGIS plugin and is not a claim of nationwide
+The standalone launcher and QGIS Data panel expose the same command and explicit
+resume action with a required station selection. This is not a claim of nationwide
 watershed verification.
 
 ## Consumer command

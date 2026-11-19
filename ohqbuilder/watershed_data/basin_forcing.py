@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import math
+import re
 from pathlib import Path
 import subprocess
 import urllib.parse
@@ -21,6 +22,18 @@ from .schemas import SiteSpec, WatershedDataError, canonical_json
 AORC = 'https://noaa-nws-aorc-v1-1-1km.s3.amazonaws.com'
 GRIDMET = 'https://www.reacchpna.org/thredds/ncss/grid/agg_met_pet_1979_CurrentYear_CONUS.nc'
 ET_VARIABLE = 'daily_mean_reference_evapotranspiration_grass'
+
+
+def basin_forcing_arguments(site_spec, basin, output, *, station_id, max_download_mb=512, resume=False):
+    if not all(isinstance(v,str) and v.strip() for v in [site_spec,basin,output]):
+        raise WatershedDataError('Choose a SiteSpec, gauge basin polygon and new weather folder')
+    if not isinstance(station_id,str) or not re.fullmatch(r'[0-9]{8,15}',station_id):
+        raise WatershedDataError('Select an explicit USGS station for the gauge-basin handoff')
+    if isinstance(max_download_mb,bool) or not math.isfinite(float(max_download_mb)) or float(max_download_mb)<=0:
+        raise WatershedDataError('A positive finite weather download limit is required')
+    args=['ohqbuild','data','basin-forcing','--site-spec',site_spec,'--basin',basin,'--output',output,
+          '--station-id',station_id,'--max-download-mb',str(float(max_download_mb))]
+    return args+(['--resume'] if resume else [])
 
 
 def grid_weights(basin, lats, lons):
@@ -131,12 +144,12 @@ def zarr_axis(cache, base, metadata, variable):
     return np.concatenate(chunks)[:spec['shape'][0]]
 
 
-def acquire_basin_forcing(site_spec, basin_path, output, *, resume=False, max_download_mb=512, progress=print):
+def acquire_basin_forcing(site_spec, basin_path, output, *, resume=False, max_download_mb=512, progress=print, station_id=""):
     import geopandas as gpd
     import numpy as np
     from netCDF4 import Dataset, num2date
     from shapely.ops import unary_union
-    from shapely.geometry import Point
+    from shapely.geometry import Point, mapping
     from pyproj import Transformer
     from shapely.ops import transform
 
@@ -146,6 +159,9 @@ def acquire_basin_forcing(site_spec, basin_path, output, *, resume=False, max_do
     if (start.minute or start.second or end.minute or end.second or
             not start.year >= 1979 or (end-start).days > 3660 or max_download_mb <= 0):
         raise WatershedDataError('Bounded whole-hour weather period required (maximum ten years)')
+    source_station=spec.sources.get('discharge',{}).get('station_id','')
+    if station_id and (not re.fullmatch(r'[0-9]{8,15}',station_id) or source_station and source_station!=station_id):
+        raise WatershedDataError('Explicit station conflicts with the SiteSpec or is invalid')
     root = Path(output).resolve()
     geometry_bytes = Path(basin_path).read_bytes()
     frame = gpd.read_file(basin_path).to_crs(4326)
@@ -161,19 +177,24 @@ def acquire_basin_forcing(site_spec, basin_path, output, *, resume=False, max_do
                 'basin_sha256':hashlib.sha256(geometry_bytes).hexdigest(), 'site_id':spec.site_id,
                 'catchment_area_m2':spec.catchment_area_m2,'catchment_area_source':spec.catchment_area_source,
                 'start_utc':start.isoformat(),'end_exclusive_utc':end.isoformat()}
+    if station_id and not source_station:identity['station_id']=station_id
     if root.exists():
         if not resume or json.loads((root/'request.json').read_text()) != identity:
             raise WatershedDataError('Existing output requires explicit resume with identical inputs')
     else:
         root.mkdir(parents=True)
         (root/'request.json').write_bytes(canonical_json(identity))
-        (root/'basin.geojson').write_bytes(geometry_bytes)
+        (root/'source_basin').write_bytes(geometry_bytes)
+        (root/'basin.geojson').write_bytes(canonical_json({'type':'FeatureCollection','features':[{'type':'Feature','properties':{},'geometry':mapping(basin)}]}))
         (root/'site_spec.yaml').write_bytes(Path(site_spec).read_bytes())
     if (root/'manifest.json').exists():
         completed=json.loads((root/'manifest.json').read_text())
         for name, expected in completed['files'].items():
             if hashlib.sha256((root/name).read_bytes()).hexdigest()!=expected:
                 raise WatershedDataError('Completed package changed; refusing regeneration')
+        for key, entry in json.loads((root/'raw_sources.json').read_text()).items():
+            if not re.fullmatch(r'[0-9a-f]{64}',key) or hashlib.sha256((root/'raw'/key).read_bytes()).hexdigest()!=entry['sha256']:
+                raise WatershedDataError('Completed raw provenance changed; refusing reuse')
         return root/'manifest.json'
     cache = RawCache(root,max_download_mb,progress)
     rain = {}
@@ -239,6 +260,7 @@ def acquire_basin_forcing(site_spec, basin_path, output, *, resume=False, max_do
         writer=csv.writer(stream);writer.writerow(['day_start_epoch_seconds','reference_et_mm_day','valid','spatial_coverage']);writer.writerows(daily)
     (root/'spatial_weights.json').write_bytes(canonical_json(weights_records))
     files=['rainfall.csv','reference_et.csv','spatial_weights.json','basin.geojson','site_spec.yaml','request.json','raw_sources.json']
+    if (root/'source_basin').exists():files.append('source_basin')
     manifest=dict(identity,et_day_start_hour_utc=7,et_semantics='ASCE short-grass reference evapotranspiration',
                   rainfall_semantics='AORC hour-ending accumulation mapped to interval start',
                   missing_rainfall_intervals=sum(not rain.get(t,(0,False,0))[1] for t in range(int(start.timestamp()),int(end.timestamp()),3600)),

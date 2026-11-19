@@ -64,7 +64,8 @@ def test_cli_dispatch_uses_real_producer_api(monkeypatch,tmp_path):
     assert seen['basin']=='basin.geojson'
 
 
-def test_real_cli_producer_path_with_fabricated_zarr_and_netcdf(tmp_path,monkeypatch):
+@pytest.mark.parametrize('input_format',['geojson','projected_gpkg'])
+def test_real_cli_producer_path_with_fabricated_zarr_and_netcdf(tmp_path,monkeypatch,input_format):
     """Exercise download/decode/weights/export/resume without real network."""
     import datetime
     import subprocess
@@ -76,7 +77,8 @@ def test_real_cli_producer_path_with_fabricated_zarr_and_netcdf(tmp_path,monkeyp
     from ohqbuilder.watershed_data.basin_forcing import acquire_basin_forcing, AORC, GRIDMET, ET_VARIABLE
     basin=box(-77.005,38.995,-76.995,39.005)
     frame=gpd.GeoDataFrame(geometry=[basin],crs=4326)
-    polygon=tmp_path/'basin.geojson';frame.to_file(polygon,driver='GeoJSON')
+    polygon=tmp_path/('basin.geojson' if input_format=='geojson' else 'basin.gpkg')
+    (frame if input_format=='geojson' else frame.to_crs(26918)).to_file(polygon,driver='GeoJSON' if input_format=='geojson' else 'GPKG')
     area=frame.to_crs(frame.estimate_utm_crs()).geometry.area.iloc[0]
     site=tmp_path/'site.yaml'
     site.write_text(yaml.safe_dump({'site_id':'fabricated','geometry':{'outlet':{'longitude':-77.,'latitude':39.}},
@@ -118,6 +120,9 @@ def test_real_cli_producer_path_with_fabricated_zarr_and_netcdf(tmp_path,monkeyp
     result=acquire_basin_forcing(site,polygon,output,progress=lambda *a,**k:None)
     manifest=json.loads(result.read_text())
     assert manifest['missing_rainfall_intervals']==0 and manifest['et_day_start_hour_utc']==7
+    assert (output/'source_basin').read_bytes()==polygon.read_bytes()
+    canonical=json.loads((output/'basin.geojson').read_text())
+    assert box(-77.01,38.99,-76.99,39.01).covers(__import__('shapely.geometry',fromlist=['shape']).shape(canonical['features'][0]['geometry']))
     import csv
     rows=list(csv.DictReader((output/'rainfall.csv').open()))
     assert len(rows)==300 and rows[0]['rain_mm']=='1.0'
@@ -133,3 +138,19 @@ def test_real_cli_producer_path_with_fabricated_zarr_and_netcdf(tmp_path,monkeyp
     (output/'rainfall.csv').write_text('corrupted')
     with pytest.raises(WatershedDataError,match='Completed package changed'):
         acquire_basin_forcing(site,polygon,output,resume=True)
+
+
+def test_launcher_plugin_share_basin_command_and_require_explicit_gauge():
+    from ohqbuilder.ui.launcher import watershed_data_command,LauncherError
+    from qgis_plugin.gistoohq_dem_workflow.dock import _command_for_watershed_data,QgisDockConfigError
+    options=dict(site_spec='gauge.yaml',station_id='01650800',basin_polygon='gauge.geojson',
+                 basin_weather_output='new weather folder',weather_download_limit_mb=512)
+    for action in ['basin-forcing','basin-forcing-resume']:
+        first=watershed_data_command(action,**options)
+        second=_command_for_watershed_data(action,**options)
+        assert list(first.argv)==second
+        assert ('--resume' in second)==action.endswith('-resume')
+        assert '--station-id' in second and second[second.index('--station-id')+1]=='01650800'
+    options['station_id']=''
+    with pytest.raises(LauncherError):watershed_data_command('basin-forcing',**options)
+    with pytest.raises(QgisDockConfigError):_command_for_watershed_data('basin-forcing',**options)

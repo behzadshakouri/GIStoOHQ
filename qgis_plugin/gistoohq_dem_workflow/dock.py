@@ -197,8 +197,16 @@ def _command_for_watershed_data(
     refresh: bool = False,
     catchment_area_m2: float | None = None,
     catchment_area_source: str = "",
+    basin_polygon: str = "", basin_weather_output: str = "", weather_download_limit_mb: float = 512,
 ) -> list[str]:
     """Build optional data commands without coupling them to full-run."""
+    if action in {"basin-forcing","basin-forcing-resume"}:
+        from ohqbuilder.watershed_data.basin_forcing import basin_forcing_arguments
+        try:
+            return basin_forcing_arguments(site_spec,basin_polygon,basin_weather_output,station_id=station_id,
+                max_download_mb=weather_download_limit_mb,resume=action.endswith("-resume"))
+        except ValueError as exc:
+            raise QgisDockConfigError(str(exc)) from exc
     if action == "init-site":
         required = {
             "site specification": site_spec, "site ID": site_id, "start": start, "end": end,
@@ -953,6 +961,8 @@ class DemWorkflowDock:
             "Provenance output": str(workspace / "watershed_package/provenance/temporal.json"),
             "HydroPINN output": str(workspace / "hydropinn"),
             "All-data workspace": str(workspace),
+            "Gauge basin polygon": "", "Basin weather folder": str(workspace / "basin_weather"),
+            "Weather download limit (MB)": "512",
             "Forecast URL": "", "Forecast provider": "", "Forecast product": "forecast",
             "Prediction time (UTC)": "",
             "Status output": str(workspace / "watershed_package/status"),
@@ -1024,6 +1034,9 @@ class DemWorkflowDock:
                     provenance_output=fields["Provenance output"].text(),
                     hydropinn_output=fields["HydroPINN output"].text(),
                     workspace=fields["All-data workspace"].text(),
+                    basin_polygon=fields["Gauge basin polygon"].text(),
+                    basin_weather_output=fields["Basin weather folder"].text(),
+                    weather_download_limit_mb=float(fields["Weather download limit (MB)"].text()),
                     forecast_url=fields["Forecast URL"].text(),
                     forecast_provider=fields["Forecast provider"].text(),
                     forecast_product=fields["Forecast product"].text(),
@@ -1045,7 +1058,9 @@ class DemWorkflowDock:
             ("Download Selected Discharge", "download-discharge"),
             ("Download Historical Weather", "download-weather"),
             ("Harmonize + QC", "harmonize"),
-            ("Download PET/ET", "download-pet"),
+            ("Download ET energy", "download-pet"),
+            ("Get basin rainfall + reference ET", "basin-forcing"),
+            ("Resume basin weather", "basin-forcing-resume"),
             ("Freeze Package", "freeze"), ("Validate Package", "validate-package"),
             ("Export HydroPINN", "export-hydropinn"),
             ("RUN ALL DATA STEPS", "run"),
