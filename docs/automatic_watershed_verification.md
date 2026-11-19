@@ -77,8 +77,11 @@ This does not establish interactive desktop/map-tool acceptance.
 `scripts/verify_ohq_solver_smoke.py` performs bounded, shortened dry-start checks
 on copies of the four generated OHQ formulations. The installed console rejects
 all four with property-criteria errors (channel depth; additionally HRU initial
-moisture). This is an OPEN solver acceptance issue, not a successful simulation.
-Do not suppress verification or alter physical parameters simply to make it
-pass. The writer/initialization/template/console interaction needs isolation.
+moisture). This rejection was subsequently isolated to the old executable/build:
+a clean source-pinned console accepts the unchanged generated models, solves
+the short startup cases and still rejects invalid controls. See
+`docs/ohq_solver_acceptance.md` for the accepted binary/receipts and remaining
+Rain-source warning. This clears the criteria blocker, not the entire scientific
+solver acceptance. Do not suppress verification or tune parameters to force it.
 No HEC-HMS executable was found on PATH; native project structural validation
 is not HEC-HMS solver acceptance.
