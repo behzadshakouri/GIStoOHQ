@@ -1,5 +1,9 @@
 # Rainfall interval-volume fix
 
+Broader follow-up found and repaired CRLF parsing and adaptive-kernel timestep
+regressions in OHQ dd730f3. See [compatibility audit](ohq_broad_compatibility.md).
+The original narrow evidence below is preserved with its original scope.
+
 OpenHydroQual commit **d7a45cb** replaces the native loader's midpoint-ramp
 conversion with bounded interval-rate representation and solver-step integration.
 Native precipitation is not point-resampled; ordinary time series retain their
