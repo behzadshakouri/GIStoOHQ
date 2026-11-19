@@ -83,6 +83,11 @@ def ensure_qgis_application() -> bool:
 
     if QgsApplication.instance() is not None:
         return True
+    # A standalone CLI/doctor run has no desktop window server. Qt otherwise
+    # aborts the process rather than raising an exception; leave explicit user
+    # platform choices and an already-running QGIS desktop untouched.
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if not QgsApplication.prefixPath():
         QgsApplication.setPrefixPath(str(_qgis_prefix()), True)
     _QGIS_APP = QgsApplication([], False)

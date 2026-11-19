@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .builders.watershed_builder import WatershedBuilder
+from .builders.topology_builder import retain_topology_elements
 from .settings import BuilderSettings
 from .validation.parameter_validator import ParameterValidator
 from .validation.topology_validator import TopologyValidator
@@ -14,6 +15,7 @@ def build_hms_project(
 ) -> HmsProjectResult:
     """Validate generated GIS inputs and write native HEC-HMS project files."""
     watershed = WatershedBuilder(settings).build()
+    retain_topology_elements(watershed)
     TopologyValidator().validate(watershed)
     ParameterValidator().validate(watershed)
     destination = Path(output_dir) if output_dir else settings.paths.outputs_path / "hec_hms"
