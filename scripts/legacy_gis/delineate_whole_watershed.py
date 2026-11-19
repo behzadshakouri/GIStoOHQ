@@ -222,7 +222,7 @@ def grass_id(name):
 def delineate_watershed_with_flowdir(flowdir_path, outlet_x, outlet_y, output_path):
     """Fallback watershed mask from a GRASS D8 flow-direction raster.
 
-    GRASS r.watershed directions are 1-8 counter-clockwise from east. Negative
+    GRASS r.watershed directions are 1=NE through 8=E counter-clockwise. Negative
     values can mark drainage through depressions, so this uses absolute values.
     The output matches r.water.outlet's useful convention for the next step:
     watershed cells are 1 and background is 0.
@@ -249,14 +249,14 @@ def delineate_watershed_with_flowdir(flowdir_path, outlet_x, outlet_y, output_pa
 
     # Direction code -> downstream (drow, dcol). Rows increase southward.
     direction_offsets = {
-        1: (0, 1),
-        2: (-1, 1),
-        3: (-1, 0),
-        4: (-1, -1),
-        5: (0, -1),
-        6: (1, -1),
-        7: (1, 0),
-        8: (1, 1),
+        1: (-1, 1),
+        2: (-1, 0),
+        3: (-1, -1),
+        4: (0, -1),
+        5: (1, -1),
+        6: (1, 0),
+        7: (1, 1),
+        8: (0, 1),
     }
     upstream_checks = [
         (-downstream_row, -downstream_col, code)

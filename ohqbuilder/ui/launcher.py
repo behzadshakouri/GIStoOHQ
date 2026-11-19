@@ -74,8 +74,8 @@ WATERSHED_DATA_EXAMPLES = {
         "longitude": "-76.98873786162696", "latitude": "38.97837618066522",
         "study_start": "2024-01-01T00:00:00Z",
         "study_end": "2024-12-31T23:00:00Z",
-        "catchment_area_m2": "23754600.0",
-        "catchment_area_source": "GIStoOHQ watershed delineation",
+        "catchment_area_m2": "23670000.0",
+        "catchment_area_source": "Reviewed GIStoOHQ watershed delineation (23.67 km2 accepted)",
     },
     "John McCormack demo": {
         "site_id": "johnmccormack3600", "name": "John McCormack 3600",
