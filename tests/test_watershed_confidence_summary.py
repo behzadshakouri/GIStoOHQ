@@ -113,3 +113,41 @@ def test_write_delineation_confidence_summary_writes_expected_file(tmp_path):
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["schema_name"] == "WatershedDelineationConfidenceSummary"
     assert payload["overall_confidence"] == "high"
+
+
+def test_short_snap_alone_cannot_verify_watershed(tmp_path):
+    intermediate = tmp_path / 'intermediate'
+    intermediate.mkdir()
+    (intermediate / 'dem_workflow_summary.json').write_text(json.dumps({'snap_distance_m': 2.0}))
+    summary = build_delineation_confidence_summary(tmp_path)
+    assert summary['outlet_snap']['confidence'] == 'high'
+    assert summary['overall_confidence'] == 'unknown'
+    assert summary['verification_status'] == 'requires_review'
+    assert summary['independently_verified'] is False
+
+
+def test_regional_boundary_is_context_not_failed_equivalent_basin(tmp_path):
+    _write_comparison(tmp_path, 'watershed_wbd_comparison.json', iou=.1,
+                      area_ratio=10, scope='regional_context_not_equivalent')
+    _write_comparison(tmp_path, 'watershed_documented_comparison.json', iou=.95, area_ratio=1)
+    summary = build_delineation_confidence_summary(tmp_path)
+    assert summary['boundary_comparisons']['wbd']['confidence'] == 'informational'
+    assert summary['overall_confidence'] == 'high'
+    assert summary['verification_status'] == 'reference_agreement_only'
+    assert summary['independently_verified'] is False
+
+
+def test_missing_outlet_containment_prevents_basin_confirmation(tmp_path):
+    _write_comparison(tmp_path, 'watershed_documented_comparison.json',
+                      iou=.95, area_ratio=1, contains_outlet=None)
+    summary = build_delineation_confidence_summary(tmp_path)
+    assert summary['overall_confidence'] == 'unknown'
+    assert not summary['comparable_boundary_support']
+
+
+def test_invalid_boundary_metrics_cannot_earn_confidence(tmp_path):
+    for iou, ratio in [(float('inf'), 1), (.95, float('nan')), (True, 1), (2, 1)]:
+        _write_comparison(tmp_path, 'watershed_documented_comparison.json', iou=iou, area_ratio=ratio)
+        summary = build_delineation_confidence_summary(tmp_path)
+        assert not summary['comparable_boundary_support']
+        assert summary['overall_confidence'] != 'high'

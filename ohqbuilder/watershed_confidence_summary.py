@@ -26,6 +26,7 @@ confidence signal rather than imply a false sense of precision.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -70,8 +71,11 @@ def _boundary_confidence(best_match: dict[str, Any]) -> tuple[str, list[str]]:
             "Reference area is not comparable in scale (ratio outside 0.5-2.0x); "
             "treat as regional context, not a boundary check."
         )
-    if iou is None or area_ratio is None:
-        return "unknown", caveats or ["Comparison is missing IOU or area-ratio metrics."]
+    if (isinstance(iou, bool) or isinstance(area_ratio, bool)
+            or not isinstance(iou, (int, float)) or not isinstance(area_ratio, (int, float))
+            or not math.isfinite(iou) or not math.isfinite(area_ratio)
+            or not 0 <= iou <= 1 or area_ratio <= 0):
+        return "unknown", caveats or ["Comparison has missing or invalid IOU or area-ratio metrics."]
     if iou >= 0.8 and 0.85 <= area_ratio <= 1.15 and contains_outlet is not False:
         return "high", caveats
     if iou >= 0.5 and 0.7 <= area_ratio <= 1.3 and contains_outlet is not False:
@@ -100,7 +104,8 @@ def _reach_confidence(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
 
 
 def _snap_confidence(distance_m: float | None) -> str | None:
-    if distance_m is None:
+    if (isinstance(distance_m, bool) or not isinstance(distance_m, (int, float))
+            or not math.isfinite(distance_m) or distance_m < 0):
         return None
     if distance_m < SNAP_GREEN_M:
         return "high"
@@ -153,7 +158,8 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
         reference_role = payload.get("reference_role") or best_match.get(
             "reference_role", "validation"
         )
-        informational = reference_role in INFORMATIONAL_REFERENCE_ROLES
+        regional_context = best_match.get("reference_scope") == "regional_context_not_equivalent"
+        informational = reference_role in INFORMATIONAL_REFERENCE_ROLES or regional_context
         rating, comparison_caveats = _boundary_confidence(best_match)
         displayed_rating = "informational" if informational else rating
         boundary_comparisons[key] = {
@@ -170,8 +176,9 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
             "confidence": displayed_rating,
         }
         if informational:
+            description = "regional context" if regional_context else "an acquisition estimate"
             caveats.append(
-                f"[{key}] The reference is an acquisition estimate; its comparison is "
+                f"[{key}] The reference is {description}; its comparison is "
                 "informational and excluded from delineation confidence."
             )
         else:
@@ -220,6 +227,11 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
                 "[outlet] The outlet does not fall inside the documented reference boundary."
             )
 
+    comparable_boundary = any(
+        item["confidence"] in {"high", "moderate"}
+        and item["contains_outlet"] is True
+        for item in boundary_comparisons.values()
+    )
     dem_resolution_m = _dem_resolution_m(outputs)
 
     if not boundary_comparisons and reach_summary is None and outlet_snap is None:
@@ -236,10 +248,22 @@ def build_delineation_confidence_summary(outputs_dir: str | Path) -> dict[str, A
     else:
         overall = "high"
 
+    if not comparable_boundary:
+        caveats.append(
+            "No comparable watershed boundary with confirmed outlet containment supports "
+            "this delineation. Snap distance and reach proximity alone cannot verify the basin "
+            "or resolve the correct branch at a confluence."
+        )
+        if overall in {"high", "moderate"}:
+            overall = "unknown"
+
     return {
         "schema_name": "WatershedDelineationConfidenceSummary",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "overall_confidence": overall,
+        "independently_verified": False,
+        "verification_status": "reference_agreement_only" if comparable_boundary else "requires_review",
+        "comparable_boundary_support": comparable_boundary,
         "outlet_snap": outlet_snap,
         "boundary_comparisons": boundary_comparisons,
         "reach_comparison": reach_summary,
