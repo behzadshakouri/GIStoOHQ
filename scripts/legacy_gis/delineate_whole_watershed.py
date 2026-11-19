@@ -405,11 +405,19 @@ def snap_to_flow_accumulation(x0, y0, raster_path, radius_m):
     accepted_channel = accepted & (magnitude >= MIN_SNAP_ACC_CELLS)
     diagnostic_channel = valid & (magnitude >= MIN_SNAP_ACC_CELLS)
 
+    # A previously snapped/reviewed channel-cell centre is already a valid
+    # routing identity. Re-snapping it to greater accumulation can cross a
+    # confluence and silently change the requested basin on every repeat run.
+    # This preserves identity only; it does not verify the selected branch.
+    centred_channel = accepted_channel & (distance <= 1e-6)
+
     # Do not repeatedly "walk" a valid outlet downstream by selecting the
     # greatest accumulation anywhere in the wider diagnostic search window.
     # Prefer a routed cell inside the maximum accepted movement.  A qualifying
     # cell outside that limit is selected only to explain why the run stopped.
-    if np.any(accepted_channel):
+    if np.any(centred_channel):
+        selection_mask = centred_channel
+    elif np.any(accepted_channel):
         selection_mask = accepted_channel
     elif np.any(diagnostic_channel):
         selection_mask = diagnostic_channel

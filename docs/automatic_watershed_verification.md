@@ -51,5 +51,34 @@ separate.
 Preserved inputs and evidence belong exclusively under
 `/home/arash/Dropbox/HydroPINN paper/data/GIStoOHQ_full_watershed/`.
 Do not access or modify the separate OHQ Watershed Models folder.
-The reference reproduction is verified; a new end-to-end GIStoOHQ delineation
-and general US acceptance suite remain unfinished.
+The production boundary script has now reproduced the reference using the
+preserved conditioned routing: 291,837 cells, no differing basin cells and
+boundary IoU 1.0. A repeat-snap defect was found first: selecting larger nearby
+accumulation moved the already-centred outlet 41 m downstream and produced
+30.6585 km². Centred qualifying channel cells now retain their routing identity.
+This prevents repeat-run drift; it does not independently establish that the
+chosen branch/outlet is correct. Other non-centred points still require branch
+and confluence review.
+
+Run `scripts/verify_preserved_routing_delineation.py PRESERVED_REFERENCE NEW_OUT`
+with a compatible QGIS/GDAL runtime. This machine's system GDAL requires the
+system NumPy (`PYTHONNOUSERSITE=1`); importing its user NumPy2 build instead fails
+before delineation. No system packages were changed for the acceptance run.
+Fresh DEM acquisition/conditioning, a complete full-run and general US
+acceptance remain unfinished.
+
+## Builder/plugin versus solver acceptance
+
+The saved-GIS OHQ/HMS builders and real offscreen plugin widgets have separate
+receipts. The plugin data dialog rejects a missing station and generates the
+expected acquisition/resume commands; provider dispatch is captured, not run.
+This does not establish interactive desktop/map-tool acceptance.
+
+`scripts/verify_ohq_solver_smoke.py` performs bounded, shortened dry-start checks
+on copies of the four generated OHQ formulations. The installed console rejects
+all four with property-criteria errors (channel depth; additionally HRU initial
+moisture). This is an OPEN solver acceptance issue, not a successful simulation.
+Do not suppress verification or alter physical parameters simply to make it
+pass. The writer/initialization/template/console interaction needs isolation.
+No HEC-HMS executable was found on PATH; native project structural validation
+is not HEC-HMS solver acceptance.
